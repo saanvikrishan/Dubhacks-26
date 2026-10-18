@@ -1,4 +1,4 @@
-import {comparePreferences,preferenceFit} from "./preferences.js";
+import {comparePreferences,memoryProfile,preferenceFit,varied} from "./preferences.js";
 import { knownPresentAllergens, hasAllergenAbsenceCoverage } from "./allergens.js";
 import { prepareUwDiningMeal } from "./uwDining.js";
 import { isGeneratedMeal, validateGeneratedMeal } from "./generatedMeals.js";
@@ -217,13 +217,15 @@ export function recommend(
         proteinOrder(a.meal,b.meal),
     );
   if (sort === "catalog") {
-    const memory={preferred:preferences.map(p=>p.preferred).filter(Boolean).join(', '),cuisines:preferences.flatMap(p=>p.cuisines??[]),tastes:preferences.flatMap(p=>p.tastes??[]),dislikes:preferences.map(p=>p.dislikes).filter(Boolean).join(', ')};
+    const memory=memoryProfile(preferences);
     const goalOrder=result=>result.dailyGoals.some(g=>g.withinRemainingCap===false)?-1:result.dailyGoals.some(g=>g.supportsMinimum)?1:0;
+    // Only feasible meals are reordered: explicit preferences, then goals, then learned history, then variety.
     eligible.sort((a,b)=>comparePreferences(a.meal,b.meal,state.profile)||goalOrder(b)-goalOrder(a)||comparePreferences(a.meal,b.meal,memory));
+    eligible=varied(eligible);
     for(const result of eligible) {
       const direct=preferenceFit(result.meal,state.profile),recalled=preferenceFit(result.meal,memory);
       if(direct.food||direct.cuisine||direct.taste) result.preferenceReason='Matches your food, cuisine or taste preferences.';
-      else if(!direct.disliked&&(recalled.food||recalled.cuisine||recalled.taste)) result.preferenceReason='Matches a preference recalled from Backboard.';
+      else if(!direct.disliked&&!direct.avoided&&(recalled.food||recalled.cuisine||recalled.taste)) result.preferenceReason="Similar to meals you've picked before.";
     }
   }
   // Collapse exact duplicate UW choices only. Different stations, portions, variants,
@@ -262,7 +264,7 @@ export function validateInputs(profile, context, pantry) {
       throw new Error(`${label} must be between ${min} and ${max}.`);
   };
   numeric(profile.budget, "Budget", 0, 1000);
-  for(const key of ["cuisines","tastes"]) if(profile[key]!==undefined && (!Array.isArray(profile[key])||profile[key].length>20||profile[key].some(v=>typeof v!=="string"||v.length>60))) throw new Error("Invalid food preferences.");
+  for(const key of ["cuisines","tastes","avoidCuisines"]) if(profile[key]!==undefined && (!Array.isArray(profile[key])||profile[key].length>20||profile[key].some(v=>typeof v!=="string"||v.length>60))) throw new Error("Invalid food preferences.");
   if(profile.dislikes!==undefined&&(typeof profile.dislikes!=="string"||profile.dislikes.length>160)) throw new Error("Keep disliked foods under 160 characters.");
   if (!["anything", "vegetarian", "vegan"].includes(profile.diet))
     throw new Error("Choose a supported diet.");

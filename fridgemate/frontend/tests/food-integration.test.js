@@ -83,7 +83,7 @@ test('Backboard preferences break ties only after current preferences and cannot
  installFoodReference(fixture());const s=state();s.profile.preferred='';
  const candidates=catalog.filter(m=>m.mode==='cook').map(m=>sourcedCookCandidate(m));
  const result=recommend(candidates,s,{mode:'cook',preferences:[{preferred:'tomatoes',cuisines:[]}]});
- assert.ok(result.cards.length<=3);assert.ok(result.cards[0].preferenceReason.includes('Backboard'));
+ assert.ok(result.cards.length<=3);assert.ok(result.cards[0].preferenceReason.includes('picked before'));
  s.profile.budget=0;assert.equal(recommend(candidates,s,{mode:'cook',preferences:[{preferred:'tofu'}]}).cards.length,0);
  s.profile.budget=20;s.profile.exclusions=['soy'];assert.ok(recommend(candidates,s,{mode:'cook',preferences:[{preferred:'tofu'}]}).cards.every(r=>!r.meal.ingredients.some(i=>i.name==='tofu')));
 });

@@ -51,6 +51,7 @@ export function createDemoState() {
       cuisines: [],
       tastes: [],
       dislikes: "",
+      avoidCuisines: [],
       phone: "",
       reminderFrom: "",
     },
@@ -527,6 +528,7 @@ export function validateState(state) {
     profile: {
       ...state.profile,
       cuisines: Array.isArray(state.profile?.cuisines) ? state.profile.cuisines : [],
+      avoidCuisines: Array.isArray(state.profile?.avoidCuisines) ? state.profile.avoidCuisines : [],
     },
   };
   validateInputs(state.profile, state.context, state.pantry);

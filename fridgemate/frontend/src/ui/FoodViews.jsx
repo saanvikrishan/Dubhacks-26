@@ -87,6 +87,7 @@ import { byId } from "../data/suggestions";
 import { clockTime, evaluate, recommend } from "../domain/engine";
 import { discoverCookMeals } from "../domain/discovery";
 import { requestRecipeDrafts, cookingMinutes } from "../adapters/recipes";
+import { recordSkip } from "../adapters/mealFeedback";
 import { nutritionDisplayRows, usdaConfidenceExplain } from "../domain/nutrition";
 import { mealSubstitutions, pantryCovers, substitutionLine } from "../domain/substitutions";
 import { prettyDate, eventsForDay, blocksMealPlanning } from "../domain/calendar";
@@ -564,7 +565,7 @@ export function FoodDiscovery({
     venue = schoolMeal?uwDining.find(v=>v.id===schoolMeal.dining.venueId):venues[0],
     nutrition = meal ? nutritionDisplayRows(meal,1,['energy_kcal','protein_g']) : [];
   const venueWalk=venue?currentWalking(walking.routes.find(r=>r.venueId===venue.id)):null;
-  const pass = (id) => setPassed((p) => [...p, id]);
+  const pass = (id) => { recordSkip([meal, schoolMeal].find((m) => m?.id === id), state.context); setPassed((p) => [...p, id]); };
   const saved = state.mealPlans.find(
     (p) =>
       !p.openSlot &&

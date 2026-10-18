@@ -29,7 +29,7 @@ import db as store
 import substitutions as swaps
 import usda
 from food_reference import food_reference
-from food_memory import recall_preferences, invalidate_preferences
+from food_memory import invalidate_preferences, MealFeedback, record_feedback, learned_preferences
 
 
 app = FastAPI(title="FridgeMate API")
@@ -1419,7 +1419,8 @@ async def generate_recipes(request: RecipeRequest | IntentRequest):
         if request.text is None:
             raise HTTPException(status_code=422, detail="Invalid recipe request.")
         return await interpret_constraints(request)
-    return await recipe_generator.generate(client, request)
+    learned = await learned_preferences(backboard_client, request.userId) if request.userId else None
+    return await recipe_generator.generate(client, request, learned)
 
 
 @app.post("/vision/ingredients")
@@ -1797,8 +1798,18 @@ async def nutrition_candidates(q: str):
 
 
 @app.get("/food/preferences")
-async def get_food_preferences():
-    return await recall_preferences(backboard_client, _assistant_id)
+async def get_food_preferences(user: str | None = None):
+    # Learned preferences come only from this user's own Backboard assistant.
+    learned = await learned_preferences(backboard_client, user)
+    return {"status": learned["status"], "preferences": [], "learned": learned}
+
+
+@app.post("/food/feedback")
+async def post_food_feedback(event: MealFeedback):
+    try:
+        return await record_feedback(backboard_client, event)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
 
 
 class SyncScheduleEventsRequest(BaseModel):

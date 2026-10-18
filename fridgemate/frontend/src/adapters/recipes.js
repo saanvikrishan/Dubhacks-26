@@ -1,4 +1,5 @@
 import {foodPreferences} from "../domain/preferences.js";
+import {getUserId} from './mealFeedback.js';
 import {minutes} from '../domain/engine.js';
 import {normalizeGeneratedMeal} from '../domain/generatedMeals.js';
 export function cookingMinutes(state) {
@@ -8,7 +9,7 @@ export function cookingMinutes(state) {
 export async function requestRecipeDrafts({state,ingredients,pantry={},fetchImpl=globalThis.fetch,signal}) {
   const time=cookingMinutes(state);
   if (time<1) throw new Error('No cooking time remains after eating, cleanup, travel and buffer. Adjust your meal window first.');
-  const response=await fetchImpl('/api/recipes',{method:'POST',headers:{'Content-Type':'application/json'},signal,body:JSON.stringify({...foodPreferences(state.profile),ingredients,pantry,diet:state.profile.diet,time,budget:state.profile.budget,equipment:state.profile.equipment,exclusions:state.profile.exclusions})});
+  const response=await fetchImpl('/api/recipes',{method:'POST',headers:{'Content-Type':'application/json'},signal,body:JSON.stringify({...foodPreferences(state.profile),userId:getUserId(),ingredients,pantry,diet:state.profile.diet,time,budget:state.profile.budget,equipment:state.profile.equipment,exclusions:state.profile.exclusions})});
   const raw=await response.text();
   if(raw.length>64000) throw new Error('Recipe response was too large. Try again.');
   let data;

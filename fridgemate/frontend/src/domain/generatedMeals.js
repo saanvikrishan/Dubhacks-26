@@ -1,5 +1,6 @@
 import { byId as catalogById } from '../data/catalog.js';
 import { nutrientInfo } from './nutrition.js';
+import { CUISINES, TASTES } from './preferences.js';
 import { deriveCookNutrition, enrichCookFacts } from './foodFacts.js';
 
 export const ALLERGENS = ['soy','egg','milk','wheat','peanut','tree nut','sesame','fish','shellfish'];
@@ -37,6 +38,9 @@ export function normalizeGeneratedMeal(raw) {
     ingredients:raw?.ingredients?.map(i=>({name:typeof i.name==='string'?i.name.trim().toLowerCase():i.name,grams:i.grams})),
     equipment:raw?.equipment?.map(e=>typeof e==='string'?e.toLowerCase():e),timing:raw?.timing,steps:raw?.steps,
     photo:['tofu','pasta','chickpeas'].includes(raw?.photo)?raw.photo:'tofu',
+    // AI-tagged labels for preference matching and variety only; unknown labels are dropped.
+    cuisines:(Array.isArray(raw?.cuisines)?raw.cuisines:[]).filter(c=>CUISINES.includes(c)).slice(0,1),
+    tastes:(Array.isArray(raw?.tastes)?raw.tastes:[]).filter(t=>TASTES.includes(t)).slice(0,3),
     cost:null,portionGrams:null,portionLabel:'1 recipe portion',diets:null,allergens:null,suggestion:true,review:null,
     nutrition:{basis:'per_serving',values:Object.fromEntries(Object.keys(nutrientInfo).map(k=>[k,null])),kind:'unknown'},
   };

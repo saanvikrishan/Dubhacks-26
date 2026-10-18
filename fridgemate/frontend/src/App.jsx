@@ -42,6 +42,7 @@ import {
 import { today, transition } from "./domain/state";
 import { storageAdapter } from "./adapters/storage";
 import { persistSavedMeal, savePantryItems } from "./adapters/database";
+import { recordActionFeedback } from "./adapters/mealFeedback";
 import { directionsUrl } from "./data/uwDining";
 import "./App.css";
 import "./ui/redesign.css";
@@ -128,6 +129,7 @@ export default function App() {
       stateRef.current=next;
       restoreSuggestions(recipeSnapshots(next));
       if (["updatePantry","addGeneratedMeals","reviewGeneratedMeal"].includes(action.type)) void savePantryItems(next.pantry);
+      recordActionFeedback(action, next);
       
       // Always use the next state we just saved
       // Don't reload from backend because that might give us stale or empty data
