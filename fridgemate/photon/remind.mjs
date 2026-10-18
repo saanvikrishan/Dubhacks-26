@@ -231,10 +231,12 @@ async function sendReminder(phone, message) {
       });
     }
     const im = imessage(spectrumApp);
-    console.log("sendReminder →", JSON.stringify(phone));
+    console.log(`[${new Date().toISOString()}] sendReminder →`, JSON.stringify(phone));
     const dm = await im.space.create(phone);
-    console.log("sendReminder chat:", JSON.stringify(dm.id));
+    console.log(`[${new Date().toISOString()}] sendReminder chat:`, JSON.stringify(dm.id));
+    console.log(`[${new Date().toISOString()}] sendReminder dm.send call`);
     await dm.send(text(message));
+    console.log(`[${new Date().toISOString()}] sendReminder dm.send returned`);
   } catch (error) {
     console.error("sendReminder message:", error.message);
     console.error("sendReminder cause:", error.cause);
