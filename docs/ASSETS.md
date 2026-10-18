@@ -4,9 +4,9 @@ Generated with the built-in `image_gen.imagegen` tool in this task. Final PNGs w
 
 | Project asset | Purpose | Original generated file |
 | --- | --- | --- |
-| `fridgemate/public/food/tofu.png` | Cook entry and representative bowl cards | `exec-ccad03d4-3b35-4c1f-8319-5c320687d56d.png` |
-| `fridgemate/public/food/chickpeas.png` | Representative chickpea cards | `exec-6d9dfacf-95e8-406a-ba2b-8a1fd40c0d16.png` |
-| `fridgemate/public/food/pasta.png` | Eat at school entry and representative venue cards | `exec-4c1eb19f-36fd-469d-88c9-cdc17e5ee890.png` |
+| `fridgemate/frontend/public/food/tofu.png` | Cook entry and representative bowl cards | `exec-ccad03d4-3b35-4c1f-8319-5c320687d56d.png` |
+| `fridgemate/frontend/public/food/chickpeas.png` | Representative chickpea cards | `exec-6d9dfacf-95e8-406a-ba2b-8a1fd40c0d16.png` |
+| `fridgemate/frontend/public/food/pasta.png` | Eat at school entry and representative venue cards | `exec-4c1eb19f-36fd-469d-88c9-cdc17e5ee890.png` |
 
 Original outputs were under the task's `.codex/generated_images/01a14c1e-0c6e-7f83-bdf3-5c35dfeb9674/` directory. The source archive contains the final project assets.
 

@@ -29,6 +29,76 @@ const activityIcon = (kind) =>
     event: "calendar",
   })[kind] || "calendar";
 
+const NOTES_KEY = "whatscooking.sidebar-notes.v1";
+
+function loadNotesMap() {
+  try {
+    return JSON.parse(window.localStorage.getItem(NOTES_KEY) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+export function SidebarNotes({ date }) {
+  const key = dayKey(date);
+  const [text, setText] = useState(() => loadNotesMap()[key] || "");
+  const [expanded, setExpanded] = useState(false);
+  const lastY = useRef(
+    typeof window !== "undefined" ? window.scrollY || 0 : 0,
+  );
+
+  useEffect(() => {
+    setText(loadNotesMap()[key] || "");
+  }, [key]);
+
+  useEffect(() => {
+    const map = loadNotesMap();
+    if (text.trim()) map[key] = text;
+    else delete map[key];
+    window.localStorage.setItem(NOTES_KEY, JSON.stringify(map));
+  }, [key, text]);
+
+  useEffect(() => {
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(() => {
+        const y = window.scrollY || 0;
+        const delta = y - lastY.current;
+        if (y <= 24) setExpanded(false);
+        else if (delta > 6) setExpanded(true);
+        else if (delta < -6) setExpanded(false);
+        lastY.current = y;
+        ticking = false;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  return (
+    <section
+      className={`notes-panel${expanded ? " is-expanded" : ""}`}
+      aria-expanded={expanded}
+    >
+      <div className="panel-title">
+        <h2>Notes</h2>
+      </div>
+      <p className="subtle">Ideas, leftovers, or reminders for the day</p>
+      <textarea
+        className="notes-input"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Jot something down…"
+        rows={4}
+        aria-label="Day notes"
+      />
+    </section>
+  );
+}
+
 export function Agenda({
   items,
   date,
@@ -43,7 +113,7 @@ export function Agenda({
   return (
     <section className={`agenda-panel ${compact ? "compact" : ""}`}>
       <div className="panel-title">
-        <h2>Your day</h2>
+        <h2>My Meal Plan</h2>
         <button
           className="icon-button"
           onClick={() => onAdd(date)}
@@ -151,12 +221,12 @@ export function ComingUp({
             </button>
             <span>
               {event.source === "daywell"
-                ? "Planned in Daywell"
+                ? "Planned in WhatsCooking.ai"
                 : event.source === "apple"
                   ? "Apple Calendar"
                   : event.source === "ics"
                     ? "Imported calendar"
-                    : "Added in Daywell"}
+                    : "Added in WhatsCooking.ai"}
             </span>
           </div>
         </>
@@ -273,7 +343,7 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
         range: { from, to },
       });
       setMessage(
-        `${data.events.length} events loaded from Apple Calendar. Your Today and My Plan views are updated.`,
+        `${data.events.length} events loaded from Apple Calendar. Your Today and My Meal Plan views are updated.`,
       );
     } catch (err) {
       setError(err.message);
@@ -313,7 +383,7 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
         </div>
       </div>
       <p className="fine-print">
-        Apple/Google asks for “full access” to read events. Daywell’s local bridge only
+        Apple/Google asks for “full access” to read events. WhatsCooking.ai’s local bridge only
         reads; it has no create, edit or delete endpoint. Your events stay on
         this Mac and in this browser.
       </p>
@@ -330,7 +400,7 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
       </button>
       {status?.supported === false && (
         <p className="error">
-          Start the local Daywell server on your Mac to use Apple Calendar.
+          Start the local WhatsCooking.ai server on your Mac to use Apple Calendar.
         </p>
       )}
       <button
@@ -358,7 +428,7 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
             onClick={async () => {
               await onSave({ type: "disconnectCalendar" });
               setMessage(
-                "Imported events removed from Daywell. Apple Calendar is unchanged.",
+                "Imported events removed from WhatsCooking.ai. Apple Calendar is unchanged.",
               );
             }}
           >
@@ -399,7 +469,7 @@ export function EventDialog({
           {timeLabel(event.end)}
         </p>
         <p className="muted">
-          One portion · {event.plan.duration} minutes, including prep, cooking and eating.
+          One portion · {event.plan.duration} minutes (prep + cook).
         </p>
         <div className="dialog-actions">
           <button className="primary" onClick={() => onRevise(event.plan)}>
@@ -444,7 +514,7 @@ export function EventDialog({
           </p>
         </div>
         <p className="muted">
-          Edit this event in its source calendar, then refresh Daywell.
+          Edit this event in its source calendar, then refresh WhatsCooking.ai.
         </p>
       </Modal>
     );
@@ -821,7 +891,7 @@ export function PlanCalendar({
         </div>
         <p className="fine-print calendar-local-note">
           Imported events are read-only. Meals and activities you add here stay
-          in Daywell. Week shows 7 AM–10 PM; the day list includes all times.
+          in WhatsCooking.ai. Week shows 7 AM–10 PM; the day list includes all times.
         </p>
       </section>
       <div className="calendar-right">
@@ -833,6 +903,7 @@ export function PlanCalendar({
           onOpen={onOpen}
           onAdd={onAdd}
         />
+        <SidebarNotes date={date} />
         <button className="secondary wide-button" onClick={onConnect}>
           <Icon name="calendar" />
           Calendar connection

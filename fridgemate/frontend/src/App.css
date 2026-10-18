@@ -1,8 +1,8 @@
 .site-header {
-  background: rgba(247, 250, 245, 0.82);
-  border-bottom: 1px solid rgba(210, 221, 208, 0.85);
-  backdrop-filter: blur(14px) saturate(1.2);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  background: rgba(247, 252, 249, 0.78);
+  border-bottom: 1px solid rgba(207, 224, 214, 0.9);
+  backdrop-filter: blur(16px) saturate(1.25);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25);
   position: sticky;
   top: 0;
   z-index: 40;
@@ -14,44 +14,63 @@
   min-height: 90px;
   display: flex;
   align-items: center;
-  gap: 56px;
+  gap: 40px;
 }
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 28px;
-  letter-spacing: -1.5px;
+  gap: 11px;
+  font-size: 22px;
+  letter-spacing: -0.8px;
   text-decoration: none;
   color: var(--ink);
   transition: transform 0.25s var(--ease-spring);
+  position: relative;
+  z-index: 1;
 }
 .brand:hover {
   transform: translateY(-1px);
 }
+.brand-word {
+  font-family: var(--font-display);
+  font-weight: 650;
+  font-size: 26px;
+  letter-spacing: -0.9px;
+  line-height: 1;
+}
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 43px;
-  height: 45px;
-  background: linear-gradient(145deg, #2f9a6a, var(--forest) 55%, var(--forest-deep));
+  width: 42px;
+  height: 42px;
+  background: linear-gradient(145deg, #2a9a6c 0%, #1a7a58 55%, #0e4f39 100%);
   color: white;
   border-radius: 13px;
-  box-shadow: 0 6px 16px rgba(30, 107, 79, 0.3);
+  box-shadow: 0 6px 18px rgba(26, 122, 88, 0.3);
   transition:
-    transform 0.35s var(--ease-spring),
+    transform 0.4s var(--ease-spring),
     box-shadow 0.25s ease;
+  animation: brand-steam 3.2s ease-in-out infinite;
 }
 .brand:hover .brand-mark {
-  transform: rotate(-8deg) scale(1.06);
-  box-shadow: 0 10px 22px rgba(30, 107, 79, 0.38);
+  transform: rotate(-10deg) scale(1.08);
+  box-shadow: 0 12px 26px rgba(26, 122, 88, 0.35);
 }
 .brand-dot {
-  color: #6a9a72;
+  color: #2a9a6c;
   transition: color 0.2s ease;
 }
 .brand:hover .brand-dot {
   color: var(--citrus);
+}
+@keyframes brand-steam {
+  0%,
+  100% {
+    box-shadow: 0 6px 18px rgba(26, 122, 88, 0.28);
+  }
+  50% {
+    box-shadow: 0 8px 22px rgba(26, 122, 88, 0.38);
+  }
 }
 .header-inner nav {
   display: flex;
@@ -63,21 +82,23 @@
   gap: 10px;
   align-items: center;
   border-radius: 13px;
-  padding: 12px 17px;
-  font-size: 14px;
-  color: #5f7368;
+  padding: 12px 18px;
+  font-size: 15px;
+  color: #4f6862;
   position: relative;
 }
 .header-inner nav button[aria-current] {
-  background: linear-gradient(180deg, #e4f5dc, var(--sage));
+  background: linear-gradient(180deg, #d4fce8, var(--sage));
   color: var(--ink);
   font-weight: 600;
-  box-shadow: inset 0 0 0 1px #b8d4ae, 0 4px 12px rgba(30, 107, 79, 0.08);
+  box-shadow: inset 0 0 0 1px #7ed9a8, 0 4px 14px rgba(18, 158, 108, 0.12);
+  transform: scale(1.03);
 }
 .header-inner nav button:hover {
-  background: var(--mint);
+  background: linear-gradient(180deg, #fff8f0, var(--mint));
   color: var(--ink);
-  transform: translateY(-1px);
+  transform: translateY(-2px) scale(1.06);
+  box-shadow: 0 8px 18px rgba(15, 70, 55, 0.12);
 }
 .header-inner nav button:active {
   transform: translateY(0) scale(0.97);
@@ -94,33 +115,41 @@
   gap: 9px;
   align-items: center;
   background: none;
-  color: #4d6a58;
-  font-size: 13px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  color: #2f6b55;
+  font-size: 14.5px;
+  padding: 9px 12px;
+  border-radius: 11px;
 }
 .groceries-nav:hover {
-  background: var(--mint);
-  color: var(--forest);
+  background: linear-gradient(180deg, var(--citrus-soft), var(--mint));
+  color: var(--forest-deep);
+  transform: scale(1.06);
+  box-shadow: 0 6px 14px rgba(18, 158, 108, 0.12);
 }
 .avatar {
   border-radius: 50%;
   width: 40px;
   height: 40px;
-  background: linear-gradient(145deg, #efe8fb, #ddd4f0);
+  background: linear-gradient(145deg, #d7ebe0, #b4d4c2);
   font-size: 12px;
-  color: #5f4f7a;
-  box-shadow: inset 0 0 0 1px #d8cfea;
+  color: #0e4f39;
+  box-shadow: inset 0 0 0 1px #9fc4b0;
   transition:
     transform 0.25s var(--ease-spring),
     box-shadow 0.2s ease;
 }
 .avatar:hover {
   transform: scale(1.08);
-  box-shadow: inset 0 0 0 1px #c8b8e0, 0 6px 14px rgba(95, 79, 122, 0.18);
+  box-shadow: inset 0 0 0 1px #7eb89a, 0 6px 14px rgba(26, 122, 88, 0.18);
 }
 .avatar:active {
   transform: scale(0.95);
+}
+.app-shell,
+.redesigned-shell,
+.site-header {
+  position: relative;
+  z-index: 1;
 }
 .app-shell {
   max-width: 1304px;
@@ -228,22 +257,23 @@
 }
 .segmented button {
   background: transparent;
-  color: #5a6d58;
-  padding: 9px 17px;
+  color: #4a6558;
+  padding: 10px 18px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 13.5px;
   white-space: nowrap;
 }
 .segmented button:hover {
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.55);
+  transform: scale(1.05);
 }
 .segmented button[aria-pressed="true"] {
   background: #fff;
   color: var(--forest);
-  box-shadow: 0 2px 8px rgba(38, 62, 39, 0.12);
+  box-shadow: 0 3px 10px rgba(18, 158, 108, 0.16);
   font-weight: 550;
-  transform: scale(1.02);
+  transform: scale(1.05);
 }
 .sort-label {
   min-width: 0;

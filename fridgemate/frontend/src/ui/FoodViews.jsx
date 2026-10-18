@@ -202,7 +202,7 @@ export function CookStart({ state, onSuggested, onEatOut }) {
 
   return (
     <div className="food-layout cook-start-layout">
-      <section className="cook-start" aria-label="Use your own groceries">
+      <section className="cook-start" aria-label="Using your own groceries? Add them here!">
         <div className="food-topbar">
           <div className="food-mode">
             <button aria-pressed={true} type="button">
@@ -225,7 +225,8 @@ export function CookStart({ state, onSuggested, onEatOut }) {
             <Icon name="kitchen" size={16} />
             Your kitchen
           </span>
-          <h2>Use your own groceries?</h2>
+          <h2>Using your own groceries?</h2>
+          <p className="cook-start-subhead">Add them here!</p>
           <p>
             Type what you have, or upload a fridge photo—we’ll spot ingredients,
             then suggest meals you can swipe through.
@@ -530,11 +531,7 @@ export function FoodDiscovery({
           // catalog-specific reasons so they don't show as errors in the UI.
           const result = evaluate(meal, state);
           const duration =
-            result.duration ??
-            meal.timing.prep +
-              meal.timing.cook +
-              state.context.eating +
-              state.context.cleanup;
+            result.duration ?? meal.timing.prep + meal.timing.cook;
           return {
             ...result,
             meal,
@@ -744,7 +741,7 @@ export function FoodDiscovery({
               <div className="flash-facts">
                 <span>
                   <Icon name="clock" size={17} />
-                  {result.duration} min total
+                  {meal.timing.prep} min prep · {meal.timing.cook} min cook
                 </span>
                 <span>{money(meal.cost)} estimate</span>
                 <span>{num(nutrition.energy_kcal)} kcal</span>
@@ -1005,7 +1002,7 @@ export function FoodDiscovery({
           </button>
         </section>
         <details className="small-panel how-decisions" open>
-          <summary>How Daywell chooses</summary>
+          <summary>How WhatsCooking.ai chooses</summary>
           <p>
             Cook cards come from{" "}
             {catalog.filter((m) => m.mode === "cook").length} curated recipes.
@@ -1136,11 +1133,11 @@ export function VenueDetails({ venue, state, onClose, onPlan }) {
       </div>
       <h3>Plan the time</h3>
       <p className="muted">
-        Reserve a visit on your Daywell calendar. Choose and confirm the actual
+        Reserve a visit on your WhatsCooking.ai calendar. Choose and confirm the actual
         dish at the venue. No unknown nutrition will be added to your intake.
       </p>
       <button className="secondary" onClick={() => onPlan(venue)}>
-        + Add visit to My Plan
+        + Add visit to My Meal Plan
       </button>
       <details className="allowances">
         <summary>Sources & what is still unknown</summary>

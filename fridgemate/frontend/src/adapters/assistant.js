@@ -44,7 +44,7 @@ export function interpretFoodRequest(text, state, catalog, c = config) {
     return {
       message: state.plan
         ? `Your selected meal is ${catalog.find((m) => m.id === state.plan.mealId)?.name}, at ${state.plan.start} on ${state.plan.date}. Selection is separate from consumption.`
-        : "You have no selected meal. Open Food and choose one to save it.",
+        : "You have no selected meal. Open Let’s eat and choose one to save it.",
     };
   if (/eat out|school|restaurant|uw\b/.test(q))
     return {
@@ -53,14 +53,14 @@ export function interpretFoodRequest(text, state, catalog, c = config) {
         .map((v) => `${v.name} (~${distanceMeters(v)} m straight-line)`)
         .join(
           "; ",
-        )}. Open Food → Eat at school for official menus, hours and Maps. Exact dish nutrition and allergen suitability are not verified.`,
+        )}. Open Let’s eat → Eat at school for official menus, hours and Maps. Exact dish nutrition and allergen suitability are not verified.`,
     };
   if (/^(?:compare meals|compare|cook|meals|meal|recommend|options)$/.test(q)) {
     const result = recommend(catalog, state, { mode: "cook" }, c);
     return {
       message: result.cards.length
-        ? `These Cook recipes fit your current constraints: ${result.cards.map((r) => `${r.meal.name} (${r.duration} min, $${r.meal.cost.toFixed(2)})`).join("; ")}. Open Food to inspect and choose.`
-        : "Nothing fits the current constraints. Open Food to see the reasons and adjust your inputs.",
+        ? `These Cook recipes fit your current constraints: ${result.cards.map((r) => `${r.meal.name} (${r.duration} min, $${r.meal.cost.toFixed(2)})`).join("; ")}. Open Let’s eat to inspect and choose.`
+        : "Nothing fits the current constraints. Open Let’s eat to see the reasons and adjust your inputs.",
     };
   }
   return {
@@ -145,8 +145,8 @@ export function replyFromPatch(patch, state, catalog, c = config) {
   let message = result.cards.length
     ? `Here's what works: ${result.cards
         .map((r) => `${r.meal.name} (${r.duration} min, $${r.meal.cost.toFixed(2)})`)
-        .join("; ")}. Open Food to pick one.`
-    : `Nothing in the catalog fits those exact constraints right now — open Food to browse everything and choose what looks good anyway.`;
+        .join("; ")}. Open Let’s eat to pick one.`
+    : `Nothing in the catalog fits those exact constraints right now — open Let’s eat to browse everything and choose what looks good anyway.`;
   const unparsed = Array.isArray(patch?.unparsed) ? patch.unparsed : [];
   if (unparsed.length)
     message += ` Not in the catalog: ${unparsed.join(", ")}.`;

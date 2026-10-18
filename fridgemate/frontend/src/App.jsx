@@ -13,6 +13,7 @@ import {
 } from "./ui/Core";
 import {
   Agenda,
+  SidebarNotes,
   ComingUp,
   CalendarConnect,
   EventDialog,
@@ -82,12 +83,19 @@ export default function App() {
   // Show loading screen while state is loading
   if (loading || !state) {
     return (
-      <div className="app-shell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-        <div style={{ textAlign: 'center' }}>
-          <Icon name="leaf" size={40} />
-          <p>Loading Daywell...</p>
+      <>
+        <div className="ambient-scene" aria-hidden="true">
+          <span className="ambient-orb a" />
+          <span className="ambient-orb b" />
+          <span className="ambient-orb c" />
         </div>
-      </div>
+        <div className="loading-splash">
+          <span className="brand-mark">
+            <Icon name="spark" size={28} />
+          </span>
+          <p>WhatsCooking.ai</p>
+        </div>
+      </>
     );
   }
   
@@ -121,10 +129,10 @@ export default function App() {
       updateContext: "Meal window updated.",
       updateProfile: "Preferences saved.",
       updatePantry: "Groceries updated.",
-      importCalendar: "Calendar loaded. Today and My Plan are updated.",
-      saveEvent: "Activity saved in Daywell.",
+      importCalendar: "Calendar loaded. Today and My Meal Plan are updated.",
+      saveEvent: "Activity saved in WhatsCooking.ai.",
       deleteEvent: "Activity removed.",
-      removeMealPlan: "Meal removed from My Plan.",
+      removeMealPlan: "Meal removed from My Meal Plan.",
       undo: "Plan change undone.",
       undoLog: "Last meal-log change undone.",
       removeLog: "Meal log removed. Your intake has been recalculated.",
@@ -162,7 +170,7 @@ export default function App() {
       await safe({ type: "clearGeminiMeals" });
       setCookPhase("groceries");
     }
-    setTab("Food");
+    setTab("Let's eat");
   }
   function setFoodMode(nextMode) {
     setMode(nextMode);
@@ -220,10 +228,10 @@ export default function App() {
       const saved = await persistSavedMeal(meal);
       setNotice(
         saved.status === "ok"
-          ? `${meal.name} added to My Plan and saved to Postgres.`
-          : `${meal.name} added to My Plan.`,
+          ? `${meal.name} added to My Meal Plan and saved to Postgres.`
+          : `${meal.name} added to My Meal Plan.`,
       );
-      setDialog({ type: "details", meal });
+      close();
     }
   }
   async function reviseMeal(plan) {
@@ -258,7 +266,7 @@ export default function App() {
     )
       return;
     setMode(byId[plan.mealId].mode);
-    setTab("Food");
+    setTab("Let's eat");
     close();
   }
   const openLog = (meal, log = null) =>
@@ -330,19 +338,29 @@ export default function App() {
   }
   return (
     <>
+      <div className="ambient-scene" aria-hidden="true">
+        <span className="ambient-orb a" />
+        <span className="ambient-orb b" />
+        <span className="ambient-orb c" />
+        <span className="ambient-steam s1" />
+        <span className="ambient-steam s2" />
+        <span className="ambient-steam s3" />
+      </div>
       <header className="site-header">
         <div className="header-inner">
           <a className="brand" href="#today" onClick={() => setTab("Today")}>
             <span className="brand-mark">
-              <Icon name="leaf" size={25} />
+              <Icon name="spark" size={22} />
             </span>
-            daywell<span className="brand-dot">.</span>
+            <span className="brand-word">
+              WhatsCooking<span className="brand-dot">.ai</span>
+            </span>
           </a>
           <nav aria-label="Main navigation">
             {[
               ["Today", "grid"],
-              ["My Plan", "calendar"],
-              ["Food", "fork"],
+              ["My Meal Plan", "calendar"],
+              ["Let's eat", "fork"],
             ].map(([name, icon]) => (
               <button
                 key={name}
@@ -383,13 +401,13 @@ export default function App() {
             <p>
               {tab === "Today"
                 ? prettyDate(day, { weekday: "long" })
-                : tab === "My Plan"
+                : tab === "My Meal Plan"
                   ? "Your calendar, meals and tasks in one place."
                   : "Find a meal. Swipe to make it yours."}
             </p>
           </div>
           <div className="page-tools">
-            {tab === "My Plan" && (
+            {tab === "My Meal Plan" && (
               <button className="secondary" onClick={() => addEvent(date)}>
                 + Add activity
               </button>
@@ -614,8 +632,9 @@ export default function App() {
                 connected={state.calendar.connected}
                 onOpen={openEvent}
                 onAdd={addEvent}
-                onCalendar={() => setTab("My Plan")}
+                onCalendar={() => setTab("My Meal Plan")}
               />
+              <SidebarNotes date={day} />
               <div className="schedule-sync-note">
                 <span className="connection-dot" />
                 {state.calendar.connected
@@ -631,7 +650,7 @@ export default function App() {
             </aside>
           </div>
         )}
-        {tab === "My Plan" && (
+        {tab === "My Meal Plan" && (
           <>
             {state.calendar.connected &&
               state.calendar.range &&
@@ -709,7 +728,7 @@ export default function App() {
             />
           </>
         )}
-        {tab === "Food" &&
+        {tab === "Let's eat" &&
           mode === "cook" &&
           cookPhase === "groceries" && (
             <CookStart
@@ -738,7 +757,7 @@ export default function App() {
               onEatOut={() => setFoodMode("eatOut")}
             />
           )}
-        {tab === "Food" &&
+        {tab === "Let's eat" &&
           !(mode === "cook" && cookPhase === "groceries") && (
             <FoodDiscovery
               key={`${mode}-${state.context.date}-${state.context.start}-${state.context.available}-${(state.geminiMeals ?? []).map((m) => m.id).join(",") || "catalog"}-${state.events.length}`}
@@ -763,7 +782,7 @@ export default function App() {
             />
           )}
         <footer className="compact-footer">
-          <span>Daywell · Your day, a little easier.</span>
+          <span>WhatsCooking.ai · meals that fit your day</span>
           <button
             className="text-button"
             onClick={() => setDialog({ type: "about" })}
@@ -788,7 +807,7 @@ export default function App() {
       {dialog?.type === "calendar" && (
         <CalendarConnect
           state={state}
-          date={tab === "My Plan" ? date : day}
+          date={tab === "My Meal Plan" ? date : day}
           onSave={dispatch}
           onClose={close}
         />
@@ -900,8 +919,8 @@ export default function App() {
           button="Confirm replacement"
           onConfirm={async () => {
             await dispatch({ type: "choose", mealId: dialog.meal.id });
-            setNotice("Meal replaced in My Plan.");
-            setDialog({ type: "details", meal: dialog.meal });
+            setNotice("Meal replaced in My Meal Plan.");
+            close();
           }}
         >
           <p>
@@ -964,7 +983,7 @@ export default function App() {
           }}
         >
           <p>
-            This removes this browser’s Daywell preferences, pantry, calendar
+            This removes this browser’s WhatsCooking.ai preferences, pantry, calendar
             copies, meal plans and confirmed logs. Apple Calendar is unchanged.
           </p>
         </Confirm>
@@ -973,10 +992,10 @@ export default function App() {
         <Modal title="How this version works" onClose={close} wide>
           <div className="about-sections">
             <section>
-              <h3>Today, My Plan, Food</h3>
+              <h3>Today, My Meal Plan, Let’s eat</h3>
               <p>
-                Today is your next activity and full day’s agenda. My Plan is
-                the calendar. Food has separate Cook and Eat at school swipe
+                Today is your next activity and full day’s agenda. My Meal Plan is
+                the calendar. Let’s eat has separate Cook and Eat at school swipe
                 decks.
               </p>
             </section>

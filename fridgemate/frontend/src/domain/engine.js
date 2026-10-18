@@ -13,10 +13,8 @@ export function clockTime(value) {
 export function timeParts(meal, context) {
   return meal.mode === "cook"
     ? {
-        Preparation: meal.timing.prep,
-        Cooking: meal.timing.cook,
-        Eating: context.eating,
-        Cleanup: context.cleanup,
+        "Prep time": meal.timing.prep,
+        "Cook time": meal.timing.cook,
       }
     : {
         "Travel to venue": meal.timing.outbound,

@@ -918,7 +918,7 @@ EQUIPMENT = {
 }
 PATCH_KEYS = ("mode", "sort", "passed", "profile", "context", "pantry", "unparsed")
 PROFILE_KEYS = ("diet", "exclusions", "preferred", "budget", "cooking", "equipment")
-CATALOG_PATH = ROOT.parent / "src" / "data" / "catalog.js"
+CATALOG_PATH = ROOT.parent / "frontend" / "src" / "data" / "catalog.js"
 
 
 def reject_patch(detail: str):

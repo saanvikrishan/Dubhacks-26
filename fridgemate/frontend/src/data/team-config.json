@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "product": {
-    "name": "Daywell",
-    "tagline": "Choose a meal that fits your day—and your nutrition goals.",
+    "name": "WhatsCooking.ai",
+    "tagline": "Meals that fit your fridge, calendar, and appetite.",
     "initialAudience": "Busy UW students",
     "initialLocation": "University of Washington, Seattle",
     "timezone": "America/Los_Angeles",

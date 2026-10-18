@@ -665,7 +665,7 @@ function Details({ meal, state, onClose, onChoose, onLog }) {
           </details>
         </>
       )}
-      <h3>The full meal window</h3>
+      <h3>Time</h3>
       <div className="time-breakdown">
         {Object.entries(timeParts(meal, state.context)).map(([key, value]) => (
           <div key={key}>
@@ -673,14 +673,19 @@ function Details({ meal, state, onClose, onChoose, onLog }) {
             <strong>{value == null ? "Required" : `${value} min`}</strong>
           </div>
         ))}
-        <div>
-          <strong>Total activity</strong>
-          <strong>{result.duration ?? "Unknown"} min</strong>
-        </div>
+        {meal.mode === "cook" && (
+          <div>
+            <strong>Total</strong>
+            <strong>
+              {result.duration ?? "Unknown"} min
+            </strong>
+          </div>
+        )}
       </div>
       <p className="fine-print">
-        Preparation and cooking are sequential. Overlapping cooking steps are
-        counted once. Travel/service are planning allowances.
+        {meal.mode === "cook"
+          ? "Prep and cook are sequential. Overlapping cooking steps are counted once."
+          : "Travel and service are planning allowances, not live estimates."}
       </p>
       {meal.mode === "cook" ? (
         <>
@@ -798,7 +803,9 @@ function Card({
         <div className="meal-facts">
           <span>
             <Icon name="clock" size={18} />
-            {result.duration} min total
+            {meal.mode === "cook"
+              ? `${meal.timing.prep + meal.timing.cook} min · prep + cook`
+              : `${result.duration} min`}
           </span>
           <span>
             <Icon name="wallet" size={18} />
@@ -1405,7 +1412,7 @@ function Assistant({ state, onAction, onClose }) {
 
   return (
     <Modal
-      title="Daywell AI"
+      title="WhatsCooking.ai"
       subtitle="Food copilot · live"
       className="assistant-dialog"
       onClose={onClose}
@@ -1510,7 +1517,7 @@ function Assistant({ state, onAction, onClose }) {
         }}
       >
         <label className="sr-only" htmlFor="chat-input">
-          Ask Daywell AI
+          Ask WhatsCooking.ai
         </label>
         <input
           id="chat-input"
