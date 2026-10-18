@@ -39,6 +39,26 @@ export const nutrientInfo = {
   manganese_mg:       ["Manganese",           "mg"],
   selenium_mcg:       ["Selenium",            "µg"],
 };
+
+/** Short copy for USDA match-rate confidence on recipe cards and details. */
+export function usdaConfidenceExplain(nutrition) {
+  const level = nutrition?.confidence || "medium";
+  const matched = nutrition?.usda_matched?.length;
+  const total =
+    (nutrition?.usda_matched?.length || 0) +
+    (nutrition?.usda_unmatched?.length || 0);
+  const matchBit =
+    Number.isFinite(matched) && total > 0
+      ? `${matched} of ${total} ingredients matched USDA. `
+      : "";
+  const meaning =
+    level === "high"
+      ? "High means most ingredients were found in USDA FoodData Central."
+      : level === "low"
+        ? "Low means only a few ingredients matched, so macros are incomplete."
+        : "Medium means about half the ingredients matched; unmatched items are left out of the totals.";
+  return `${matchBit}${meaning}`;
+}
 export function portionNutrition(meal, servings = 1) {
   if (!Number.isFinite(servings) || servings <= 0)
     throw new Error("Portion must be greater than zero.");

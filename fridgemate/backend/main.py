@@ -6,6 +6,7 @@ import time
 from datetime import date
 from pathlib import Path
 
+import httpx
 from backboard import BackboardClient
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -15,6 +16,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 import db as store
+import usda
 
 ROOT = Path(__file__).resolve().parent
 # Prefer backend/.env, fall back to fridgemate/.env
@@ -35,6 +37,10 @@ def on_startup():
         )
     except Exception as e:
         print(f"[Startup] Database init failed: {type(e).__name__}: {e}")
+    key = usda.refresh_api_key()
+    print(
+        f"[Startup] USDA FoodData Central: {'ready' if key else 'not configured (set USDA_API_KEY)'}"
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -71,7 +77,6 @@ backboard_key = (os.getenv("BACKBOARD_API_KEY") or "").strip()
 backboard_client = BackboardClient(api_key=backboard_key) if backboard_key else None
 _assistant_id = None
 DEMO_ASSISTANT_NAME = "FridgeMate demo"
-PHOTOS = {"tofu", "pasta", "chickpeas"}
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg",
     "image/jpg",
@@ -125,6 +130,9 @@ INJECTION_PATTERNS = (
 )
 MEAL_ONLY = (
     "I can only help with meal planning — try asking about ingredients, time, or budget."
+)
+CONVO_FALLBACK = (
+    "Tell me what you're looking for — ingredients, time, or budget — and I'll find something."
 )
 RATE_LIMIT = 20
 RATE_WINDOW_SECONDS = 60
@@ -191,6 +199,11 @@ def raise_gemini_failure(last_error, action: str):
     )
 
 
+class ChatTurn(BaseModel):
+    role: str
+    text: str
+
+
 class RecipeRequest(BaseModel):
     ingredients: list[str] = Field(default_factory=list)
     diet: str = "anything"
@@ -198,6 +211,7 @@ class RecipeRequest(BaseModel):
     exclusions: list[str] = Field(default_factory=list)
     text: str | None = None
     memories: list[str] = Field(default_factory=list)
+    history: list[ChatTurn] = Field(default_factory=list)
 
 
 class PhraseRequest(BaseModel):
@@ -232,8 +246,26 @@ def home():
         "gemini": bool(client),
         "backboard": bool(backboard_client),
         "database": store.SessionLocal is not None,
+        "usda": usda.usda_configured(),
         "model": GEMINI_MODEL if client else None,
     }
+
+
+@app.get("/nutrition/lookup")
+async def nutrition_lookup(q: str):
+    """Debug / demo: look up per-100g macros from USDA FDC."""
+    if not usda.usda_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="USDA_API_KEY is missing from backend/.env or fridgemate/.env",
+        )
+    query = (q or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Query q is required.")
+    per_100 = await usda.lookup_per_100g(query)
+    if not per_100:
+        return {"query": query, "status": "not_found", "per_100g": None}
+    return {"query": query, "status": "ok", "per_100g": per_100, "source": "USDA FDC"}
 
 
 @app.get("/pantry")
@@ -410,15 +442,74 @@ def slug(name: str, index: int) -> str:
     return f"gemini-{base or 'meal'}-{index}"
 
 
-def pick_photo(raw: str | None, name: str, blob: str) -> str:
-    if raw in PHOTOS:
-        return raw
-    text = f"{name} {blob}".lower()
-    if "pasta" in text or "noodle" in text:
-        return "pasta"
-    if "chickpea" in text or "hummus" in text or "bean" in text:
-        return "chickpeas"
-    return "tofu"
+# TheMealDB CDN thumbs — existing photos, not AI generation (fast).
+_image_cache: dict[str, str] = {}
+
+
+def _image_search_queries(name: str) -> list[str]:
+    base = re.sub(r"\s+", " ", (name or "").strip())
+    base = re.sub(r"\([^)]*\)", "", base).strip(" ,-")
+    parts = [p for p in re.split(r"[\s/]+", base) if p]
+    candidates = [base, " ".join(parts[:3]), " ".join(parts[:2])]
+    if parts:
+        candidates.append(parts[0])
+    out: list[str] = []
+    seen: set[str] = set()
+    for q in candidates:
+        q = q.strip(" ,-")[:60]
+        key = q.lower()
+        if q and key not in seen:
+            seen.add(key)
+            out.append(q)
+    return out
+
+
+async def resolve_dish_image(name: str, client: httpx.AsyncClient | None = None) -> str | None:
+    """Look up a real food photo by dish name (TheMealDB). Cached + ~ms CDN."""
+    key = (name or "").strip().lower()
+    if not key:
+        return None
+    cached = _image_cache.get(key)
+    if cached:
+        return cached
+
+    async def _search(http: httpx.AsyncClient) -> str | None:
+        for q in _image_search_queries(name):
+            try:
+                response = await http.get(
+                    "https://www.themealdb.com/api/json/v1/1/search.php",
+                    params={"s": q},
+                )
+                if response.status_code != 200:
+                    continue
+                meals = (response.json() or {}).get("meals") or []
+                thumb = meals[0].get("strMealThumb") if meals else None
+                if thumb:
+                    _image_cache[key] = thumb
+                    return thumb
+            except Exception as e:
+                print(f"[Image] TheMealDB miss for {q!r}: {type(e).__name__}")
+        return None
+
+    if client is not None:
+        return await _search(client)
+    async with httpx.AsyncClient(timeout=2.0) as http:
+        return await _search(http)
+
+
+async def attach_dish_images(meals: list[dict]) -> None:
+    """Attach fast CDN image URLs in parallel (does not block on AI image gen)."""
+    if not meals:
+        return
+    async with httpx.AsyncClient(timeout=2.0) as client:
+
+        async def one(meal: dict) -> None:
+            url = await resolve_dish_image(meal.get("name") or "", client)
+            if url:
+                meal["imageUrl"] = url
+                meal["photo"] = url
+
+        await asyncio.gather(*[one(m) for m in meals])
 
 
 def normalize_ingredient(item) -> dict:
@@ -496,7 +587,8 @@ def normalize_meal(raw: dict, index: int, fallback_ingredients: list[str]) -> di
             "Taste and adjust seasoning.",
         ],
         "mode": "cook",
-        "photo": pick_photo(raw.get("photo"), name, " ".join(steps)),
+        "photo": None,
+        "imageUrl": None,
         "suggestion": True,
     }
 
@@ -676,12 +768,85 @@ def validate_patch(raw, names: set[str]) -> dict:
     }
 
 
-def interpreter_prompt(text: str, memories: list[str], names: set[str]) -> str:
+def recent_turns(history) -> list[dict]:
+    turns = []
+    for item in history or []:
+        if isinstance(item, dict):
+            role, text = item.get("role"), item.get("text")
+        else:
+            role, text = getattr(item, "role", None), getattr(item, "text", None)
+        if role not in ("user", "assistant") or not isinstance(text, str):
+            continue
+        cleaned = " ".join(text.split())[:500]
+        if cleaned:
+            turns.append({"role": role, "text": cleaned})
+    return turns[-4:]
+
+
+def history_block(history) -> str:
+    turns = recent_turns(history)
+    if not turns:
+        return "None."
+    return "\n".join(
+        f"{'User' if turn['role'] == 'user' else 'Assistant'}: {turn['text']}"
+        for turn in turns
+    )
+
+
+async def conversational_reply(user_text: str, history) -> str:
+    enforce_rate_limit()
+    if blocked_user_text(user_text):
+        reject_blocked_text()
+    if not client:
+        return CONVO_FALLBACK
+    prompt = f"""You are the food assistant for Daywell. Chat naturally and briefly (1-2 sentences). You help with meal planning — ingredients, time, budget, dietary needs. If the user asks something unrelated to food/cooking, you can still respond conversationally, but steer back to how you can help with meals. Never invent recipe names, nutrition facts, or specific dishes — if they ask for actual meal suggestions, tell them to describe what they're looking for (ingredients, time, budget) so you can check real options.
+
+Recent conversation:
+{history_block(history)}
+
+User: {user_text}
+"""
+    for model in GEMINI_FALLBACKS:
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.models.generate_content,
+                    model=model,
+                    contents=prompt,
+                ),
+                timeout=20,
+            )
+            text = redact_text((response.text or "").strip())
+            if text:
+                return text
+        except HTTPException:
+            raise
+        except TimeoutError:
+            print(f"Gemini conversation timed out ({model})")
+            return CONVO_FALLBACK
+        except Exception as e:
+            msg = str(e)
+            print(f"Gemini conversation error ({model}):", msg)
+            if not gemini_transient(msg):
+                break
+    return CONVO_FALLBACK
+
+
+def interpreter_prompt(text: str, memories: list[str], names: set[str], history=None) -> str:
     memory_block = "\n".join(f"- {item}" for item in memories) or "None."
     ingredients = ", ".join(sorted(names))
-    return f"""You translate one meal request into a constraint patch for an existing catalog.
-Return JSON only. Use null for every field the user did not mention. Do not invent recipes.
+    return f"""You classify one message and, when it is a meal request, translate it into a constraint patch for an existing catalog.
+Return JSON only. The object below shows the shape. Set intent from the message, not always "meal_request".
+
+Set "intent" to "meal_request" or "conversation".
+Use "meal_request" when the user wants meal options, or is refining an earlier meal request: cheaper, faster, more protein, a diet, an ingredient, a budget, a time limit, cook versus eat out, or "something else".
+A follow-up that changes a constraint is still a meal_request even if it names no dish. "what about cheaper options" after a vegetarian request is a meal_request.
+Carry constraints that are still in force from the recent chat into the patch. For "cheaper" or "faster" with no number, set sort to "cost" or "time" and leave budget and available null. Do not invent a dollar amount or a minute count.
+Use "conversation" for greetings, thanks, questions about the app, and other small talk that does not ask for or refine meals.
+
+For a meal_request, use null for every patch field the user did not mention and that the recent chat does not already constrain. Do not invent recipes.
 Do not invent pantry grams. If a food is not in the catalog ingredient list, leave it out of pantry and add the user's words to unparsed.
+For a conversation, leave every patch field null and unparsed empty.
 
 Catalog ingredient names, exact spelling: {ingredients}
 Modes: compare, cook, eatOut
@@ -691,14 +856,18 @@ Exclusions: soy, egg, milk, wheat, peanut, tree nut, sesame, fish, shellfish
 Equipment: stove, pan, pot, microwave, oven, air fryer, rice cooker, toaster, blender, electric kettle, baking sheet, cutting board, knife, mixing bowl, spatula, colander, slow cooker
 Map "peanuts" to the exclusion "peanut". Budget is USD per meal, from 0 to 1000.
 
+Recent chat, oldest first:
+{history_block(history)}
+
 Known memories:
 {memory_block}
 
-User request:
+User message:
 {text}
 
 Return this object and no other keys inside profile or context:
 {{
+  "intent": "meal_request",
   "mode": null,
   "sort": null,
   "passed": null,
@@ -739,7 +908,7 @@ async def interpret_constraints(request: RecipeRequest) -> dict:
                 item for item in request.memories if isinstance(item, str) and item.strip()
             ]
     names = catalog_ingredient_names()
-    prompt = interpreter_prompt(text, memories, names)
+    prompt = interpreter_prompt(text, memories, names, request.history)
     last_error = None
     for model in GEMINI_FALLBACKS:
         try:
@@ -750,6 +919,9 @@ async def interpret_constraints(request: RecipeRequest) -> dict:
                 config={"response_mime_type": "application/json"},
             )
             parsed = json.loads(response.text or "")
+            if isinstance(parsed, dict) and parsed.get("intent") == "conversation":
+                message = await conversational_reply(text, request.history)
+                return {"intent": "conversation", "message": message}
             try:
                 patch = validate_patch(parsed, names)
             except HTTPException:
@@ -759,6 +931,7 @@ async def interpret_constraints(request: RecipeRequest) -> dict:
                 print(
                     f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)"
                 )
+            patch["intent"] = "meal_request"
             return redact_output(patch)
         except HTTPException:
             raise
@@ -908,7 +1081,6 @@ Return valid JSON only:
       "ingredients": ["ingredient 1", "ingredient 2"],
       "steps": ["Step 1", "Step 2"],
       "nutrition_note": "Brief, cautious nutrition note",
-      "photo": "tofu",
       "diets": ["vegetarian"],
       "allergens": [],
       "energy_kcal": 450,
@@ -917,7 +1089,7 @@ Return valid JSON only:
   ]
 }
 
-photo must be one of: tofu, pasta, chickpeas (closest visual match).
+Do not invent a photo field — images are generated from the recipe name separately.
 """
 
     last_error = None
@@ -937,6 +1109,9 @@ photo must be one of: tofu, pasta, chickpeas (closest visual match).
                 normalize_meal(r if isinstance(r, dict) else {}, i, cleaned)
                 for i, r in enumerate(recipes[:8])
             ]
+            if usda.usda_configured():
+                meals = await usda.enrich_meals(meals)
+            await attach_dish_images(meals)
             if model != GEMINI_MODEL:
                 print(f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)")
             return redact_output(
@@ -945,6 +1120,7 @@ photo must be one of: tofu, pasta, chickpeas (closest visual match).
                     "recipes": meals,
                     "ingredients": cleaned,
                     "model": model,
+                    "nutrition": "usda" if usda.usda_configured() else "gemini_estimate",
                 }
             )
         except Exception as e:

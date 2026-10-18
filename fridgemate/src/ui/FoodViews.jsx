@@ -1,11 +1,44 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon, Modal } from "./Core";
-import { money, num, photoFor } from "./format";
+import {
+  MEAL_IMAGE_PLACEHOLDER,
+  mealImage,
+  money,
+  num,
+  resolveMealImage,
+} from "./format";
+
+function MealPhoto({ meal, alt, className }) {
+  const initial = mealImage(meal);
+  const [src, setSrc] = useState(initial);
+  useEffect(() => {
+    const ready = mealImage(meal);
+    setSrc(ready);
+    if (ready !== MEAL_IMAGE_PLACEHOLDER) return undefined;
+    let cancelled = false;
+    resolveMealImage(meal?.name).then((url) => {
+      if (!cancelled && url) setSrc(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [meal?.id, meal?.name, meal?.imageUrl, meal?.photo]);
+  return (
+    <img
+      className={className}
+      draggable={false}
+      src={src}
+      alt={alt || meal?.name || "Meal"}
+      loading="eager"
+      decoding="async"
+    />
+  );
+}
 import { catalog, pantryItems } from "../data/catalog";
 import { byId } from "../data/suggestions";
 import { config } from "../domain/config";
 import { recommend, clockTime, evaluate } from "../domain/engine";
-import { portionNutrition } from "../domain/nutrition";
+import { portionNutrition, usdaConfidenceExplain } from "../domain/nutrition";
 import { prettyDate } from "../domain/calendar";
 import {
   DEAL_SOURCE,
@@ -399,7 +432,7 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
             transform: `scale(${flyingOff ? 1.2 : Math.min(1.2, 0.8 + Math.abs(dx) / 100)})`,
           }}
         >
-          {(dx > 0 || flyingOff === "right") ? "YES" : "PASS"}
+          {(dx > 0 || flyingOff === "right") ? "✓" : "✕"}
         </div>
         {children}
       </div>
@@ -658,16 +691,16 @@ export function FoodDiscovery({
               onClick={() => onDetails(meal)}
               aria-label={`View ${meal.name} details`}
             >
-              <img
-                draggable={false}
-                src={`/food/${photoFor(meal)}.png`}
-                alt={`AI illustration representing ${meal.name}`}
-              />
+              <MealPhoto meal={meal} alt={meal.name} />
               <span className="cover-tag">
                 <Icon name="leaf" size={14} />
-                {usingGemini ? "Gemini suggestion" : "Cook with your groceries"}
+                {usingGemini
+                  ? meal.nutrition?.kind === "usda_estimated"
+                    ? "Gemini + USDA"
+                    : "Gemini suggestion"
+                  : "Cook with your groceries"}
               </span>
-              <span className="photo-label">AI illustration</span>
+              <span className="photo-label">Photo for this dish</span>
             </button>
             <div className="flashcard-body">
               <h2>{meal.name}</h2>
@@ -681,37 +714,35 @@ export function FoodDiscovery({
                 <span>{num(nutrition.energy_kcal)} kcal</span>
                 <span>{num(nutrition.protein_g)} g protein</span>
               </div>
-              <div className="fits-line">
-                <Icon name={(!usingGemini && result.reasons?.length) ? "edit" : "check"} size={16} />
+              <div
+                className="fits-line"
+                title={
+                  meal.nutrition?.kind === "usda_estimated"
+                    ? usdaConfidenceExplain(meal.nutrition)
+                    : undefined
+                }
+              >
+                <Icon name="check" size={16} />
                 {usingGemini
-                  ? "AI idea from your ingredients · estimates only"
-                  : result.reasons?.length
-                    ? (() => {
-                        const r = result.reasons[0] ?? "";
-                        if (/not enough confirmed ingredients/i.test(r)) {
-                          const match = r.match(/:\s*(.+)/);
-                          const items = match
-                            ? match[1].split(",").map((s) => s.replace(/\s*\(.*?\)/g, "").trim()).filter(Boolean)
-                            : [];
-                          return items.length
-                            ? `You may need to grab: ${items.slice(0, 3).join(", ")}${items.length > 3 ? ` +${items.length - 3} more` : ""}`
-                            : "You may need a few extra ingredients";
-                        }
-                        if (/needs equipment/i.test(r)) return r.replace("Needs equipment:", "Helpful to have:");
-                        if (/needs \d+ minutes/i.test(r)) return "Takes a bit longer than your current window — go for it anyway";
-                        if (/costs \$/i.test(r)) return r.replace("Costs", "Est.").replace(", above your", " · your cap is");
-                        if (/does not meet your/i.test(r)) return r.replace("Does not meet your", "Outside your current");
-                        return "A few things to keep in mind — see Recipe & nutrition";
-                      })()
-                    : "All set · ready to cook"}
+                  ? meal.nutrition?.kind === "usda_estimated"
+                    ? `USDA macros · ${meal.nutrition.confidence || "medium"} confidence`
+                    : "AI idea from your ingredients · estimates only"
+                  : constrainedFallback
+                    ? `Showing outside constraints · ${result.reasons?.[0] ?? "adjust window or groceries"}`
+                    : "Ingredients, equipment, budget and calendar checked"}
               </div>
+              {meal.nutrition?.kind === "usda_estimated" ? (
+                <p className="fine-print">
+                  {usdaConfidenceExplain(meal.nutrition)}
+                </p>
+              ) : null}
               <div className="swipe-actions">
                 <button
                   className="decline-button"
                   onClick={() => pass(meal.id)}
                   aria-label="Pass on this meal"
                 >
-                  ×
+                  ✕
                 </button>
                 <button
                   className="detail-button"
@@ -724,7 +755,7 @@ export function FoodDiscovery({
                   onClick={() => onChoose(meal)}
                   aria-label="Choose this meal"
                 >
-                  <Icon name="check" size={23} />
+                  ✓
                 </button>
               </div>
               <p className="swipe-hint">
@@ -795,7 +826,7 @@ export function FoodDiscovery({
                   onClick={() => pass(venue.id)}
                   aria-label="Pass on this restaurant"
                 >
-                  ×
+                  ✕
                 </button>
                 <button
                   className="detail-button"
@@ -808,7 +839,7 @@ export function FoodDiscovery({
                   onClick={() => onVenueDirections(venue)}
                   aria-label="Open walking directions"
                 >
-                  <Icon name="arrow" size={23} />
+                  ✓
                 </button>
               </div>
               <p className="swipe-hint">
@@ -854,7 +885,9 @@ export function FoodDiscovery({
           <span>
             {mode === "cook"
               ? usingGemini
-                ? "Gemini estimates · not verified nutrition"
+                ? geminiMeals.some((m) => m.nutrition?.kind === "usda_estimated")
+                  ? "USDA macros from matched ingredients"
+                  : "Gemini estimates · not verified nutrition"
                 : "Nutrition & costs are demo estimates"
               : "UW sources checked Oct 17 · hours can change"}
           </span>

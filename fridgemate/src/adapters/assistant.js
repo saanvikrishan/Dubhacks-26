@@ -55,7 +55,7 @@ export function interpretFoodRequest(text, state, catalog, c = config) {
           "; ",
         )}. Open Food → Eat at school for official menus, hours and Maps. Exact dish nutrition and allergen suitability are not verified.`,
     };
-  if (/compare|cook|eat out|meal|recommend|options/.test(q)) {
+  if (/^(?:compare meals|compare|cook|meals|meal|recommend|options)$/.test(q)) {
     const result = recommend(catalog, state, { mode: "cook" }, c);
     return {
       message: result.cards.length

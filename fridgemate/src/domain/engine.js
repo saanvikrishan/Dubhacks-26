@@ -54,8 +54,10 @@ export function evaluate(meal, state, c = config) {
     );
   if (meal.mode === "cook") {
     if (!p.cooking) reasons.push("Cooking access is off.");
-    const gemini = meal.nutrition?.kind === "gemini_suggestion";
-    if (!gemini) {
+    const looseNutrition = ["gemini_suggestion", "usda_estimated"].includes(
+      meal.nutrition?.kind,
+    );
+    if (!looseNutrition) {
       const missingEquipment = meal.equipment.filter(
         (item) => !p.equipment.includes(item),
       );
@@ -322,7 +324,7 @@ export function validateInputs(profile, context, pantry) {
 
 export function assertMealAction(meal, state, c = config) {
   requireCapability(meal.mode, c);
-  if (meal.nutrition?.kind === "gemini_suggestion") {
+  if (["gemini_suggestion", "usda_estimated"].includes(meal.nutrition?.kind)) {
     if (!state.profile.cooking)
       throw new Error("Cooking access is off.");
     const parts = timeParts(meal, state.context);
