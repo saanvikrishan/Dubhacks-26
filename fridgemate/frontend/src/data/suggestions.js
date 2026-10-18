@@ -1,8 +1,10 @@
 import { byId as catalogById } from "./catalog.js";
 
 const extras = Object.create(null);
+const pinned = new Set();
 
-/** UI lookup cache only. The state service uses its persisted recipe snapshots. */
+/** UI lookup cache only. The state service uses its persisted recipe snapshots.
+ *  Pinned meals (chosen into My Plan) survive suggestion refreshes. */
 export function rememberSuggestions(meals) {
   for (const meal of meals || []) {
     if (meal?.id) extras[meal.id] = meal;
@@ -10,12 +12,23 @@ export function rememberSuggestions(meals) {
 }
 
 export function restoreSuggestions(meals) {
-  clearSuggestions();
+  clearSuggestions({ keepPinned: true });
   rememberSuggestions(meals);
 }
 
-export function clearSuggestions() {
-  for (const key of Object.keys(extras)) delete extras[key];
+/** Pin a single chosen meal so plan banners keep working after choose. */
+export function rememberMeal(meal) {
+  if (!meal?.id) return;
+  extras[meal.id] = meal;
+  pinned.add(meal.id);
+}
+
+export function clearSuggestions({ keepPinned = false } = {}) {
+  for (const key of Object.keys(extras)) {
+    if (keepPinned && pinned.has(key)) continue;
+    delete extras[key];
+  }
+  if (!keepPinned) pinned.clear();
 }
 
 export function mealById(id) {

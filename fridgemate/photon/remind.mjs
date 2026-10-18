@@ -137,6 +137,14 @@ async function ensureTables() {
       created_at  timestamptz NOT NULL DEFAULT now()
     )
   `);
+  // The table may already exist from an earlier run, so the column and
+  // index are added here rather than only inside CREATE TABLE.
+  await pool.query(`ALTER TABLE photon_plans ADD COLUMN IF NOT EXISTS event_key text`);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS photon_plans_user_event_key
+    ON photon_plans (user_id, event_key)
+    WHERE event_key IS NOT NULL
+  `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS photon_sent (
       id         serial  PRIMARY KEY,

@@ -28,8 +28,8 @@
   --peach: #efe6dc;
   --shadow: 0 10px 28px rgba(15, 70, 55, 0.1);
   --shadow-lift: 0 18px 40px rgba(15, 70, 55, 0.16);
-  --ease-spring: cubic-bezier(0.34, 1.45, 0.64, 1);
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.25, 1.05, 0.4, 1);
+  --ease-out: cubic-bezier(0.25, 0.9, 0.35, 1);
   --font-display: "Fraunces", Georgia, serif;
 }
 * {
@@ -142,6 +142,11 @@ textarea:focus {
   background: #fff;
   box-shadow: 0 0 0 3px rgba(23, 138, 100, 0.16);
   outline: none;
+}
+input::placeholder,
+textarea::placeholder {
+  color: #7a9186;
+  opacity: 1;
 }
 input[type="checkbox"] {
   width: 17px;
@@ -301,7 +306,7 @@ svg {
   border-radius: 50%;
   filter: blur(40px);
   opacity: 0.45;
-  animation: orb-drift 18s ease-in-out infinite alternate;
+  animation: orb-drift 36s ease-in-out infinite alternate;
 }
 .ambient-orb.a {
   width: 360px;
@@ -309,7 +314,7 @@ svg {
   background: #6fb892;
   top: -80px;
   left: -60px;
-  opacity: 0.42;
+  opacity: 0.28;
 }
 .ambient-orb.b {
   width: 280px;
@@ -317,9 +322,9 @@ svg {
   background: #e0b56a;
   top: 18%;
   right: -70px;
-  animation-duration: 22s;
-  animation-delay: -4s;
-  opacity: 0.34;
+  animation-duration: 44s;
+  animation-delay: -8s;
+  opacity: 0.22;
 }
 .ambient-orb.c {
   width: 320px;
@@ -327,9 +332,9 @@ svg {
   background: #5fa888;
   bottom: -90px;
   left: 40%;
-  animation-duration: 26s;
-  animation-delay: -8s;
-  opacity: 0.38;
+  animation-duration: 52s;
+  animation-delay: -16s;
+  opacity: 0.24;
 }
 .ambient-steam {
   position: absolute;
@@ -337,8 +342,8 @@ svg {
   height: 48px;
   border-radius: 99px;
   background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.55), transparent);
-  opacity: 0.35;
-  animation: steam-rise 4.5s ease-in-out infinite;
+  opacity: 0.22;
+  animation: steam-rise 7.5s ease-in-out infinite;
 }
 .ambient-steam.s1 {
   top: 18%;
@@ -360,18 +365,18 @@ svg {
     transform: translate(0, 0) scale(1);
   }
   to {
-    transform: translate(28px, 18px) scale(1.08);
+    transform: translate(14px, 10px) scale(1.03);
   }
 }
 @keyframes steam-rise {
   0%,
   100% {
     transform: translateY(0) scaleY(1);
-    opacity: 0.15;
+    opacity: 0.08;
   }
   50% {
-    transform: translateY(-18px) scaleY(1.15);
-    opacity: 0.4;
+    transform: translateY(-10px) scaleY(1.06);
+    opacity: 0.22;
   }
 }
 
@@ -386,7 +391,7 @@ svg {
   z-index: 1;
 }
 .loading-splash .brand-mark {
-  animation: brand-bob 1.4s var(--ease-spring) infinite alternate;
+  animation: brand-bob 3.2s ease-in-out infinite alternate;
 }
 .loading-splash p {
   font-family: var(--font-display);
@@ -395,10 +400,10 @@ svg {
 }
 @keyframes brand-bob {
   from {
-    transform: translateY(0) rotate(-4deg);
+    transform: translateY(0) rotate(-1deg);
   }
   to {
-    transform: translateY(-8px) rotate(4deg);
+    transform: translateY(-3px) rotate(1deg);
   }
 }
 

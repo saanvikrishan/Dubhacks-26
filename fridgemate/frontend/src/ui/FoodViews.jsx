@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon, Modal } from "./Core";
 import {
   MEAL_IMAGE_PLACEHOLDER,
+  isMealPlaceholder,
   prefetchMealImages,
   mealImage,
   money,
@@ -15,19 +16,40 @@ import {
 } from "./format";
 
 function MealPhoto({ meal, alt, className }) {
+  // Only verified bundled illustrations resolve; everything else shows the placeholder.
   const assigned = mealImage(meal);
   const [failedSrc, setFailedSrc] = useState(null);
+  const [loadedSrc, setLoadedSrc] = useState(null);
   const src = failedSrc === assigned ? MEAL_IMAGE_PLACEHOLDER : assigned;
+  const showReal = !isMealPlaceholder(src) && loadedSrc === src;
   return (
-    <><img
-      className={className}
-      draggable={false}
-      src={src}
-      alt={alt || meal?.name || "Meal"}
-      loading="eager"
-      decoding="async"
-      onError={() => {if(src!==MEAL_IMAGE_PLACEHOLDER)setFailedSrc(src);}}
-    /><span className="photo-label">{src===MEAL_IMAGE_PLACEHOLDER?"Photo unavailable":"Meal illustration"}</span></>
+    <span className={`meal-photo ${className || ""}`.trim()}>
+      <span
+        className={`meal-photo-anim${showReal ? " is-hidden" : ""}`}
+        aria-hidden="true"
+      >
+        <span className="meal-photo-plate" />
+        <span className="meal-photo-food a" />
+        <span className="meal-photo-food b" />
+        <span className="meal-photo-food c" />
+        <span className="meal-photo-steam s1" />
+        <span className="meal-photo-steam s2" />
+        <span className="meal-photo-steam s3" />
+      </span>
+      <img
+        className={showReal ? "is-ready" : "is-waiting"}
+        draggable={false}
+        src={src}
+        alt={alt || meal?.name || "Meal"}
+        loading="eager"
+        decoding="async"
+        onLoad={() => setLoadedSrc(src)}
+        onError={() => {
+          if (!isMealPlaceholder(src)) setFailedSrc(src);
+        }}
+      />
+      <span className="photo-label">{showReal ? "Meal illustration" : "Photo unavailable"}</span>
+    </span>
   );
 }
 import { catalog, pantryItems } from "../data/catalog";
@@ -491,7 +513,7 @@ export function FoodDiscovery({
   });
   const input=usingGemini?geminiMeals:[...catalog,...(state.generatedMeals??[]).filter(m=>m.review?.confirmed && !m.sourceRecipeId)];
   const unique=new Map();
-  for(const original of input.filter(m=>m.mode==='cook')) {
+  for(const original of input.filter(m=>m?.id && m.mode==='cook')) {
     const base=original.sourceRecipeId ? catalog.find(m=>m.id===original.sourceRecipeId)??state.generatedMeals.find(m=>m.id===original.sourceRecipeId)??original : original;
     const candidate=base.suggestion&&!base.review?.confirmed?enrichCookFacts(base,food.reference):sourcedCookCandidate(base,food.reference);
     unique.set(recipeFingerprint(candidate),candidate);
@@ -515,9 +537,15 @@ export function FoodDiscovery({
   const venueWalk=venue?currentWalking(walking.routes.find(r=>r.venueId===venue.id)):null;
   const pass = (id) => setPassed((p) => [...p, id]);
   const saved = state.mealPlans.find(
-    (p) => p.date === state.context.date && p.start === state.context.start,
+    (p) =>
+      !p.openSlot &&
+      p.mealId &&
+      p.date === state.context.date &&
+      p.start === state.context.start,
   );
-  const savedCheck = saved && !saved.openSlot && byId[saved.mealId] ? evaluate(byId[saved.mealId], state) : null;
+  const savedMeal = saved ? byId[saved.mealId] : null;
+  const savedCheck =
+    savedMeal ? evaluate(savedMeal, state) : null;
   return (
     <div className="food-layout">
       <section className="food-discovery">
@@ -603,13 +631,13 @@ export function FoodDiscovery({
             </label>
           </div>
         )}
-        {saved && !saved.openSlot && byId[saved.mealId] && (
+        {saved && savedMeal && (
           <div
             className="food-saved-slot"
           >
             <div>
               <span>PLANNED · {saved.start}</span>
-              <strong>{byId[saved.mealId].name}</strong>
+              <strong>{savedMeal.name}</strong>
               {savedCheck && !savedCheck.feasible && savedCheck.reasons.length > 0 && (
                 <p className="fine-print">
                   Heads up: {savedCheck.reasons[0].replace(/^Not enough confirmed ingredients:/i, "You may need:").replace(/^Needs \d+ minutes;.*$/, "Takes a bit longer than your window.")}
@@ -618,7 +646,7 @@ export function FoodDiscovery({
             </div>
             <button
               className="text-button"
-              onClick={() => onDetails(byId[saved.mealId])}
+              onClick={() => onDetails(savedMeal)}
             >
               Details
             </button>

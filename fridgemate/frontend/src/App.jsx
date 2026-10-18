@@ -8,6 +8,7 @@ import {
   Setup,
   Details,
   Kitchen,
+  GroceryListView,
   Intake,
   Assistant,
   Log,
@@ -24,11 +25,12 @@ import {
 import { CookStart, FoodDiscovery, VenueDetails } from "./ui/FoodViews";
 import { money, num, mealImage, prefetchMealImages } from "./ui/format";
 import { RecipeReview } from "./ui/RecipeReview";
-import { byId, restoreSuggestions } from "./data/suggestions";
+import { byId, rememberMeal, rememberSuggestions, restoreSuggestions } from "./data/suggestions";
 import { capabilities } from "./domain/config";
 import { clockTime, minutes } from "./domain/engine";
 import { dailyNutrition } from "./domain/nutrition";
 import {
+  dayKey,
   localInstant,
   mealWindowStillOpen,
   nextMealWindow,
@@ -69,6 +71,8 @@ export default function App() {
         if(drafts.length) {setGeminiMeals(drafts.map(m=>m.id));setGroceryList(loaded.state.groceryList??[]);}
         setState(loaded.state);
         setStorageError(loaded.error);
+        // Legacy saved state from main kept Gemini meals here; keep them resolvable.
+        if (loaded.state?.geminiMeals?.length) rememberSuggestions(loaded.state.geminiMeals);
       } catch {
         stateRef.current=storageAdapter.reset(window.localStorage);
         restoreSuggestions(recipeSnapshots(stateRef.current));
@@ -155,7 +159,46 @@ export default function App() {
       removeLog: "Meal log removed. Your intake has been recalculated.",
     };
     if (messages[action.type]) setNotice(messages[action.type]);
+    if (
+      (action.type === "updateProfile" || action.type === "configure") &&
+      (action.profile?.phone || "").trim() &&
+      (action.profile.phone || "").trim() !== (state.profile.phone || "").trim() &&
+      (action.profile.reminderFrom || "").trim()
+    ) {
+      setNotice(
+        `Preferences saved. Text ${action.profile.reminderFrom.trim()} once to activate reminders.`,
+      );
+    }
+    if (action.type === "saveEvent") {
+      const saved = next.events.find((e) => e.id === action.event.id);
+      if (saved) await syncScheduleEvents([saved]);
+    }
+    if (action.type === "importCalendar") {
+      await syncScheduleEvents(next.events.filter((e) => e.source === action.source));
+    }
     return next;
+  }
+  async function syncScheduleEvents(events) {
+    const payload = events
+      .filter((event) => event && !event.allDay && event.id && event.title?.trim())
+      .map((event) => ({
+        id: event.id,
+        name: event.title.trim(),
+        date: dayKey(event.start),
+        time: timeKey(event.start),
+        source: event.source || "manual",
+      }))
+      .filter((event) => /^([01]\d|2[0-3]):[0-5]\d$/.test(event.time));
+    if (!payload.length) return;
+    try {
+      await fetch("http://127.0.0.1:8000/sync-schedule-events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: "demo", events: payload }),
+      });
+    } catch {
+      /* backend unreachable — the calendar save itself already succeeded */
+    }
   }
   async function safe(action) {
     try {
@@ -194,6 +237,7 @@ export default function App() {
   }
   async function choose(meal) {
     if(meal.sourceRecipeId && !byId[meal.id] && !(await safe({type:"captureSourcedMeal",meal}))) return;
+    rememberMeal(meal);
     // Check if the current context matches an open slot and fill it
     const openSlot = state.mealPlans.find(
       (p) =>
@@ -227,12 +271,18 @@ export default function App() {
             }),
           });
         } catch { /* backend unreachable — continue */ }
-        setDialog({ type: "details", meal });
+        close();
+        setTab("Today");
+        setError("");
       }
       return;
     }
     const existing = state.mealPlans.find(
-      (p) => p.date === state.context.date && p.start === state.context.start,
+      (p) =>
+        !p.openSlot &&
+        p.mealId &&
+        p.date === state.context.date &&
+        p.start === state.context.start,
     );
     if (existing && existing.mealId !== meal.id) {
       setDialog({ type: "replace", meal, existing });
@@ -246,6 +296,8 @@ export default function App() {
           : `${meal.name} added to My Meal Plan.`,
       );
       close();
+      setTab("Today");
+      setError("");
     }
   }
   async function reviseMeal(plan) {
@@ -279,9 +331,10 @@ export default function App() {
       }))
     )
       return;
-    setMode(byId[plan.mealId].mode);
-    if(byId[plan.mealId].mode==='cook') {
-      setGeminiMeals(byId[plan.mealId].suggestion?state.generatedMeals.filter(m=>m.suggestion===true&&!m.sourceRecipeId).map(m=>m.id):null);
+    const planned = byId[plan.mealId];
+    setMode(planned?.mode ?? "cook");
+    if((planned?.mode ?? "cook")==='cook') {
+      setGeminiMeals(planned?.suggestion?state.generatedMeals.filter(m=>m.suggestion===true&&!m.sourceRecipeId).map(m=>m.id):null);
       setCookPhase('discover');
     }
     setTab("Let's eat");
@@ -315,15 +368,36 @@ export default function App() {
     setDialog({ type: "event", event: state.events.find(e=>e.id===event.id) ?? event });
   };
   const openDetails = (meal) => setDialog({ type: "details", meal });
-  const addEvent = (eventDate) => setDialog({ type: "event", date: eventDate });
+  const addEvent = (eventDate) =>
+    setDialog({
+      type: "event",
+      date: eventDate,
+      event: {
+        id: crypto.randomUUID(),
+        title: "",
+        start: localInstant(eventDate, "12:00"),
+        end: localInstant(eventDate, "12:45"),
+        kind: "meal",
+        location: "",
+        source: "manual",
+        busy: true,
+        readOnly: false,
+        draft: true,
+      },
+    });
   const latest = logs.toSorted((a, b) =>
     (b.confirmedAt || "").localeCompare(a.confirmedAt || ""),
   )[0];
   const lastPlan = state.mealPlans
-    .filter((p) => p.date === day)
+    .filter((p) => p.date === day && p.mealId && !p.openSlot && byId[p.mealId])
     .sort((a, b) => a.start.localeCompare(b.start))
     .at(-1);
-  const showLastPlan = lastPlan && !logs.some(log=>log.mealId===lastPlan.mealId && log.date===lastPlan.date);
+  const lastMeal = lastPlan ? byId[lastPlan.mealId] : null;
+  // Hide the hero card if this meal has been logged as eaten
+  const lastPlanWasEaten = lastPlan && logs.some(
+    (log) => log.mealId === lastPlan.mealId && log.date === lastPlan.date
+  );
+  const showLastPlan = lastPlan && lastMeal && !lastPlanWasEaten;
   function undoLog() {
     safe(
       state.logUndo
@@ -377,6 +451,7 @@ export default function App() {
               ["Today", "grid"],
               ["My Meal Plan", "calendar"],
               ["Let's eat", "fork"],
+              ["Grocery list", "cart"],
             ].map(([name, icon]) => (
               <button
                 key={name}
@@ -419,13 +494,15 @@ export default function App() {
                 ? prettyDate(day, { weekday: "long" })
                 : tab === "My Meal Plan"
                   ? "Your calendar, meals and tasks in one place."
-                  : "Find a meal. Swipe to make it yours."}
+                  : tab === "Grocery list"
+                    ? "Add what you need. Check it off as you shop."
+                    : "Find a meal. Swipe to make it yours."}
             </p>
           </div>
           <div className="page-tools">
             {tab === "My Meal Plan" && (
               <button className="secondary" onClick={() => addEvent(date)}>
-                + Add activity
+                + Schedule meal
               </button>
             )}
             <button
@@ -505,7 +582,6 @@ export default function App() {
                 connected={state.calendar.connected}
                 onOpen={openEvent}
                 onAdd={addEvent}
-                onConnect={() => setDialog({ type: "calendar" })}
               />
               <section className="meal-entry">
                 <div className="panel-title">
@@ -558,31 +634,31 @@ export default function App() {
                   </button>
                 </div>
               </section>
-              {showLastPlan && (
+              {showLastPlan && lastMeal && (
                 <section className="today-saved-meal">
                   <img
-                    src={mealImage(byId[lastPlan.mealId])}
-                    alt={byId[lastPlan.mealId].name}
+                    src={mealImage(lastMeal)}
+                    alt={lastMeal.name}
                   />
                   <div>
                     <span className="eyebrow">YOUR MEAL PLAN</span>
-                    <strong>{byId[lastPlan.mealId].name}</strong>
+                    <strong>{lastMeal.name}</strong>
                     <p>
                       {lastPlan.start} · {lastPlan.duration} min ·{" "}
-                      {money(byId[lastPlan.mealId].cost)} estimate
+                      {money(lastMeal.cost)} estimate
                     </p>
                   </div>
                   <div className="today-saved-actions">
                     <button
                       className="secondary"
-                      onClick={() => openDetails(byId[lastPlan.mealId])}
+                      onClick={() => openDetails(lastMeal)}
                     >
                       Details
                     </button>
                     {flags.mealLogging.available && (
                       <button
                         className="primary"
-                        onClick={() => openLog(byId[lastPlan.mealId])}
+                        onClick={() => openLog(lastMeal)}
                       >
                         Log eaten
                       </button>
@@ -791,6 +867,14 @@ export default function App() {
               groceryList={groceryList}
             />
           )}
+        {tab === "Grocery list" && (
+          <GroceryListView
+            items={state.shoppingList ?? []}
+            onChange={(shoppingList) =>
+              safe({ type: "updateShoppingList", shoppingList })
+            }
+          />
+        )}
         <footer className="compact-footer">
           <span>WhatsCooking.ai · meals that fit your day</span>
           <button
@@ -874,7 +958,10 @@ export default function App() {
           )}
           <Intake
             state={state}
-            onEdit={(log) => openLog(byId[log.mealId], log)}
+            onEdit={(log) => {
+              const meal = byId[log.mealId];
+              if (meal) openLog(meal, log);
+            }}
             onRemove={(log) => setDialog({ type: "removeLog", log })}
           />
         </Modal>
@@ -929,14 +1016,20 @@ export default function App() {
           onClose={close}
           button="Confirm replacement"
           onConfirm={async () => {
+            const mealName = dialog.meal.name;
             await dispatch({ type: "choose", mealId: dialog.meal.id });
-            setNotice("Meal replaced in My Meal Plan.");
+            setNotice(`${mealName} replaced your planned meal.`);
             close();
+            setTab("Today");
+            setError("");
           }}
         >
           <p>
-            Replace <strong>{byId[dialog.existing.mealId].name}</strong> with{" "}
-            <strong>{dialog.meal.name}</strong> at {state.context.start} on{" "}
+            Replace{" "}
+            <strong>
+              {byId[dialog.existing.mealId]?.name ?? "your planned meal"}
+            </strong>{" "}
+            with <strong>{dialog.meal.name}</strong> at {state.context.start} on{" "}
             {state.context.date}?
           </p>
           <p className="muted">Confirmed consumption is unchanged.</p>
@@ -953,8 +1046,9 @@ export default function App() {
           }}
         >
           <p>
-            {byId[dialog.log.mealId].name} · {dialog.log.servings} servings.
-            Your subtotal will be recalculated. You can undo this removal.
+            {byId[dialog.log.mealId]?.name ?? "This meal"} ·{" "}
+            {dialog.log.servings} servings. Your subtotal will be recalculated.
+            You can undo this removal.
           </p>
         </Confirm>
       )}
@@ -1003,11 +1097,11 @@ export default function App() {
         <Modal title="How this version works" onClose={close} wide>
           <div className="about-sections">
             <section>
-              <h3>Today, My Meal Plan, Let’s eat</h3>
+              <h3>Today, My Meal Plan, Let’s eat, Grocery list</h3>
               <p>
                 Today is your next activity and full day’s agenda. My Meal Plan is
                 the calendar. Let’s eat has separate Cook and Eat at school swipe
-                decks.
+                decks. Grocery list is for items to pick up while you shop.
               </p>
             </section>
             <section>

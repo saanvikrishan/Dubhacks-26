@@ -119,7 +119,7 @@ export function Agenda({
         <button
           className="icon-button"
           onClick={() => onAdd(date)}
-          aria-label="Add an event"
+          aria-label="Schedule a meal"
         >
           +
         </button>
@@ -158,8 +158,8 @@ export function Agenda({
             <p>Nothing scheduled for this day.</p>
             <small>
               {connected
-                ? "Your calendar is loaded. Add a meal or activity here."
-                : "Connect Apple Calendar or add an activity."}
+                ? "Your calendar is loaded. Schedule a meal here — other events come from your calendar."
+                : "Schedule a meal here, or import classes and events from your calendar."}
             </small>
           </div>
         )}
@@ -178,7 +178,6 @@ export function ComingUp({
   date,
   onOpen,
   onAdd,
-  onConnect,
   now,
   connected,
 }) {
@@ -239,22 +238,13 @@ export function ComingUp({
           </h2>
           <p>
             {connected
-              ? "No more calendar activities today. Make time for a meal, or add what’s next."
-              : "Bring in classes, meals, workouts and tasks from Apple Calendar."}
+              ? "No more calendar events today. Schedule a meal when you’re ready to eat."
+              : "Schedule a meal here. Classes, workouts, and other events come from your calendar."}
           </p>
           <div className="coming-actions">
-            <button
-              className="primary"
-              onClick={connected ? () => onAdd(date) : onConnect}
-            >
-              {connected ? "Add an activity" : "Connect Apple Calendar"}{" "}
-              <Icon name="arrow" size={16} />
+            <button className="primary" onClick={() => onAdd(date)}>
+              Schedule a meal <Icon name="arrow" size={16} />
             </button>
-            {!connected && (
-              <button className="text-button" onClick={() => onAdd(date)}>
-                + Add an activity
-              </button>
-            )}
           </div>
         </>
       )}
@@ -448,9 +438,8 @@ export function EventDialog({
 }) {
   const [title, setTitle] = useState(event?.title ?? ""),
     [eventDate, setEventDate] = useState(event ? dayKey(event.start) : date),
-    [start, setStart] = useState(event ? timeKey(event.start) : "15:00"),
-    [end, setEnd] = useState(event ? timeKey(event.end) : "16:00"),
-    [kind, setKind] = useState(event?.kind ?? "event"),
+    [start, setStart] = useState(event ? timeKey(event.start) : "12:00"),
+    [end, setEnd] = useState(event ? timeKey(event.end) : "12:45"),
     [location, setLocation] = useState(event?.location ?? ""),
     [busy, setBusy] = useState(event ? blocksMealPlanning(event) : true),
     [error, setError] = useState("");
@@ -471,7 +460,11 @@ export function EventDialog({
           </button>
           <button
             className="secondary"
-            onClick={() => onMeal(byId[event.plan.mealId])}
+            onClick={() => {
+              const meal = byId[event.plan.mealId];
+              if (meal) onMeal(meal);
+            }}
+            disabled={!byId[event.plan.mealId]}
           >
             Recipe & nutrition
           </button>
@@ -517,9 +510,13 @@ export function EventDialog({
     );
   return (
     <Modal
-      title={event && !event.draft ? "Edit activity" : "Add an activity"}
+      title={event && !event.draft ? "Edit meal" : "Schedule a meal"}
       onClose={onClose}
     >
+      <p className="muted" style={{ marginBottom: 12 }}>
+        You can only schedule meals here. Classes, workouts, and other events
+        should come from your connected calendar.
+      </p>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -528,12 +525,12 @@ export function EventDialog({
               type: "saveEvent",
               event: {
                 id: event?.id ?? crypto.randomUUID(),
-                title: title.trim(),
+                title: title.trim() || "Meal",
                 start: localInstant(eventDate, start),
                 end: localInstant(eventDate, end),
-                kind,
+                kind: "meal",
                 location,
-                busy: kind === "task" ? false : busy,
+                busy,
                 source: "manual",
                 readOnly: false,
               },
@@ -545,12 +542,12 @@ export function EventDialog({
         }}
       >
         <label>
-          Activity title
+          Meal title
           <input
             required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Afternoon lecture"
+            placeholder="e.g. Lunch · tofu stir-fry"
           />
         </label>
         <div className="form-grid">
@@ -564,14 +561,8 @@ export function EventDialog({
             />
           </label>
           <label>
-            Activity type
-            <select value={kind} onChange={(e) => setKind(e.target.value)}>
-              {["event", "class", "workout", "task", "meal"].map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
+            Type
+            <input type="text" value="Meal" disabled readOnly />
           </label>
           <label>
             Starts
@@ -597,6 +588,7 @@ export function EventDialog({
           <input
             value={location}
             onChange={(e) => setLocation(e.target.value)}
+            placeholder="optional"
           />
         </label>
         <label className="check-label spaced-label">
@@ -613,18 +605,6 @@ export function EventDialog({
           </p>
         )}
         <div className="dialog-actions">
-          {event?.kind === "task" && !event.draft && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={async () => {
-                await onSave({ type: "toggleTask", id: event.id });
-                onClose();
-              }}
-            >
-              {event.completed ? "Mark incomplete" : "Complete task"}
-            </button>
-          )}
           {event && !event.draft && (
             <button
               type="button"
@@ -634,11 +614,11 @@ export function EventDialog({
                 onClose();
               }}
             >
-              Remove activity
+              Remove meal
             </button>
           )}
           <button className="primary" type="submit">
-            Save activity
+            Save meal
           </button>
         </div>
       </form>

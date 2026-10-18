@@ -55,7 +55,7 @@ export function evaluate(meal, state, c = config) {
   const { profile: p, context: ctx, pantry } = state;
   const reasons = [],
     gaps = [];
-  if (!meal || !["cook", "eatOut"].includes(meal.mode)) return {mealId:meal?.id??null,feasible:false,reasons:["This meal no longer exists or has an invalid mode."],duration:null,parts:{},window:ctx.available,score:null,assumptions:[],gaps:[]};
+  if (!meal?.id || !["cook", "eatOut"].includes(meal.mode)) return {mealId:meal?.id??null,feasible:false,reasons:[meal?.id ? "This meal has an invalid mode." : "This meal is unavailable."],duration:null,parts:{},window:ctx.available,score:null,assumptions:[],gaps:[]};
   if (meal.pricing?.status==='complete' && Date.parse(meal.pricing.expiresAt)<=Date.now()) reasons.push("The grocery quote expired. Refresh meal facts before choosing.");
   if (meal.legacyHistory) reasons.push("This older recipe is retained for history. Generate and review a new version before planning it.");
   if (isGeneratedMeal(meal) && !meal.legacyHistory) {
@@ -274,6 +274,12 @@ export function validateInputs(profile, context, pantry) {
     typeof profile.cooking !== "boolean"
   )
     throw new Error("Invalid profile.");
+  const phone = profile.phone == null ? "" : profile.phone;
+  if (typeof phone !== "string") throw new Error("Invalid profile.");
+  if (phone.trim() && !/^\+[1-9]\d{6,14}$/.test(phone.trim()))
+    throw new Error(
+      "Use international format, starting with + and the country code.",
+    );
   if (
     profile.exclusions.some(
       (v) =>
@@ -384,7 +390,7 @@ export function validateInputs(profile, context, pantry) {
 }
 
 export function assertMealAction(meal, state, c = config) {
-  if (!meal) throw new Error("This meal no longer exists.");
+  if (!meal?.id) throw new Error("This meal no longer exists.");
   requireCapability(meal.mode, c);
   validateInputs(state.profile, state.context, state.pantry);
   const result = evaluate(meal, state, c);
