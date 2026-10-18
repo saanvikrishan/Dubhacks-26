@@ -146,7 +146,7 @@ def attach_substitutions(
     available: list[str],
     agent_swaps: list[dict] | None = None,
 ) -> dict[str, Any]:
-    """Attach only real gaps + agent (or prior) swap suggestions."""
+    """Attach real gaps + agent swaps; stub any remaining missing ingredients."""
     missing = missing_ingredients(meal, available)
     swaps: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -174,10 +174,39 @@ def attach_substitutions(
             )
         swaps.append(normalized)
 
+    # Always surface an Alternatives row for leftovers the agent skipped
+    for name in missing:
+        key = _norm(name)
+        if key in seen:
+            continue
+        stub = suggest_swap(name, available)
+        if stub:
+            seen.add(key)
+            swaps.append(stub)
+
     meal = {**meal}
     meal["missingIngredients"] = missing
     meal["substitutions"] = swaps[:8]
     return meal
+
+
+def _agent_swaps_for(
+    meal: dict[str, Any],
+    agent_by_meal: dict[str, list[dict]],
+) -> list[dict]:
+    """Match agent output by id or name (models often echo the title only)."""
+    mid = str(meal.get("id") or "").strip()
+    name = str(meal.get("name") or "").strip()
+    if mid and mid in agent_by_meal:
+        return agent_by_meal[mid]
+    if name and name in agent_by_meal:
+        return agent_by_meal[name]
+    name_key = _norm(name)
+    if name_key:
+        for key, swaps in agent_by_meal.items():
+            if _norm(key) == name_key:
+                return swaps
+    return []
 
 
 def attach_all(
@@ -188,19 +217,10 @@ def attach_all(
     agent_by_meal = agent_by_meal or {}
     out = []
     for meal in meals:
-        mid = str(meal.get("id") or meal.get("name") or "")
-        out.append(attach_substitutions(meal, available, agent_by_meal.get(mid)))
+        out.append(
+            attach_substitutions(meal, available, _agent_swaps_for(meal, agent_by_meal))
+        )
     return out
-
-
-def _load_skill_text() -> str:
-    from pathlib import Path
-
-    path = Path(__file__).resolve().parent / "skills" / "substitution_skill.md"
-    try:
-        return path.read_text(encoding="utf-8")[:4000]
-    except OSError:
-        return ""
 
 
 def substitution_skill_prompt(
@@ -208,6 +228,8 @@ def substitution_skill_prompt(
     available: list[str],
 ) -> str | None:
     """Build the substitution-skill prompt, or None if nothing is missing."""
+    from skills.loader import load_skill
+
     blocks = []
     for meal in meals:
         missing = missing_ingredients(meal, available)
@@ -227,7 +249,7 @@ def substitution_skill_prompt(
     if not blocks:
         return None
 
-    skill = _load_skill_text()
+    skill = load_skill("substitution_skill")
     return f"""You are FridgeMate's substitution skill.
 {skill}
 
@@ -276,10 +298,16 @@ async def enrich_with_agent(
             for row in (data or {}).get("meals") or []:
                 if not isinstance(row, dict):
                     continue
-                mid = str(row.get("id") or "")
+                mid = str(row.get("id") or row.get("name") or "").strip()
+                if not mid:
+                    continue
                 agent_by_meal[mid] = [
                     s for s in (row.get("substitutions") or []) if isinstance(s, dict)
                 ]
+                # Also index by name when both are present
+                name = str(row.get("name") or "").strip()
+                if name and name != mid:
+                    agent_by_meal[name] = agent_by_meal[mid]
         except Exception as e:
             print(f"[Substitution skill] agent failed: {type(e).__name__}: {e}")
 

@@ -403,7 +403,7 @@ export default function App() {
         )}
         {tab === "Today" && (
           <div className="today-layout">
-            <div className="today-main">
+            <div className="today-main reveal-stagger">
               <ComingUp
                 items={items}
                 date={day}
@@ -546,7 +546,7 @@ export default function App() {
                 </p>
               </section>
             </div>
-            <aside className="today-agenda">
+            <aside className="today-agenda reveal" style={{ animationDelay: "0.18s" }}>
               <Agenda
                 items={items}
                 date={day}

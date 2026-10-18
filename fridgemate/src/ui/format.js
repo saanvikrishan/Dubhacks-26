@@ -75,6 +75,7 @@ const CONFLICT_FOODS = new Set([
   "anchovy",
   "clam",
   "mussel",
+  "tofu",
 ]);
 
 const SYNONYM = {
@@ -109,12 +110,22 @@ function hashPick(seed, size) {
   return size > 0 ? h % size : 0;
 }
 
+function providedUrl(mealOrName) {
+  if (!mealOrName || typeof mealOrName !== "object") return null;
+  for (const key of ["imageUrl", "photo"]) {
+    const v = mealOrName[key];
+    if (typeof v === "string" && /^https?:\/\//.test(v)) return v;
+  }
+  return null;
+}
+
 /** Prefer the full recipe title so "egg veggie fried rice" isn't shortened away. */
 function photoQuery(mealOrName) {
   if (mealOrName && typeof mealOrName === "object") {
     const name = String(mealOrName.name || "").trim();
     const search = String(mealOrName.imageSearch || "").trim();
-    // Use the more specific string (usually the full name)
+    // Prefer Gemini's short imageSearch when it is specific enough
+    if (search && tokens(search).length >= 2) return search.slice(0, 100);
     const primary =
       name.length >= search.length ? name || search : search || name;
     return primary.slice(0, 100) || "homemade meal";
@@ -125,15 +136,13 @@ function photoQuery(mealOrName) {
 function searchQuery(mealOrName) {
   const q = photoQuery(mealOrName);
   const toks = tokens(q);
-  // Expand veggie → vegetable already in tokens; keep egg + fried + rice etc.
   const core = toks.slice(0, 6).join(" ");
-  return `${core || q} food -shrimp -prawn -seafood`.trim();
+  return `${core || q} food`.trim();
 }
 
-/** Immediate preview tagged with the dish's own words (not random stock). */
+/** Soft placeholder tagged with dish words (only when no real photo exists). */
 export function taggedMealImage(name) {
   const tags = tokens(name).slice(0, 5);
-  // Put distinctive ingredients first (egg, vegetable) before generic "fried"
   const ordered = [...tags].sort((a, b) => {
     const rank = (t) =>
       CONFLICT_FOODS.has(t) || t === "egg" || t === "vegetable" || t === "tofu"
@@ -150,7 +159,7 @@ export function taggedMealImage(name) {
 
 /**
  * Score a candidate photo against the dish.
- * Shared ingredients help; conflicting proteins (shrimp on an egg dish) hurt a lot.
+ * Shared ingredients help; conflicting proteins hurt a lot.
  */
 function scoreCandidate(query, title, tagText = "") {
   const want = new Set(tokens(query));
@@ -162,22 +171,22 @@ function scoreCandidate(query, title, tagText = "") {
   let shared = 0;
   for (const t of want) if (got.has(t)) shared += 1;
 
+  if (shared === 0) return -400;
+  // One shared token is only OK for short dish names ("pad thai")
+  if (want.size >= 3 && shared < 2) return -200;
+
   let score = shared * 120;
+  // Coverage bonus: matching most of the dish name
+  score += Math.round((180 * shared) / Math.max(1, want.size));
 
-  // Require at least one shared token or we don't trust it
-  if (shared === 0) score -= 400;
-
-  // Bonus when distinctive non-generic words match (egg, vegetable, …)
   for (const t of want) {
     if (got.has(t) && t !== "fried" && t !== "rice" && t !== "food") score += 80;
   }
 
-  // Heavy penalty: photo mentions a protein the dish does not
   for (const t of got) {
     if (CONFLICT_FOODS.has(t) && !want.has(t)) score -= 500;
   }
 
-  // Mild penalty for lots of extra unmatched food words
   const extras = gotList.filter((t) => !want.has(t) && t !== "food").length;
   score -= Math.min(80, extras * 10);
 
@@ -213,8 +222,8 @@ function pickOpenverseUrl(dishQuery, results) {
 
   if (!ranked.length) return null;
 
-  // Only accept photos that actually look related (and not conflicting protein)
-  const good = ranked.filter((r) => r.score >= 100);
+  // Require a real shared-token match (score >= 100 ≈ one shared token)
+  const good = ranked.filter((r) => r.score >= 140);
   if (!good.length) return null;
 
   const fresh = good.filter((r) => !usedThumbs.has(r.url));
@@ -228,15 +237,18 @@ function pickOpenverseUrl(dishQuery, results) {
 
 /**
  * Resolve a photo that matches the dish name.
- * Rejects conflicting proteins (e.g. shrimp when the dish is egg/veggie).
+ * Prefers Openverse when confident; otherwise keeps a provided CDN URL;
+ * only uses LoremFlickr as a last resort.
  */
 export async function resolveMealImage(nameOrMeal) {
   const dish = photoQuery(nameOrMeal);
   const key = dish.toLowerCase();
-  if (!key) return taggedMealImage("food");
+  if (!key) return MEAL_IMAGE_PLACEHOLDER;
   const hit = thumbCache.get(key);
   if (hit) return hit;
   if (inflight.has(key)) return inflight.get(key);
+
+  const fallback = providedUrl(nameOrMeal);
 
   const job = (async () => {
     const controller = new AbortController();
@@ -245,11 +257,14 @@ export async function resolveMealImage(nameOrMeal) {
       const q = searchQuery(nameOrMeal);
       const results = await searchOpenverse(q, controller.signal);
       const url = pickOpenverseUrl(dish, results);
-      const finalUrl = url || taggedMealImage(dish);
+      // Prefer a confident Openverse hit; otherwise keep backend TheMealDB URL
+      const finalUrl = url || fallback || taggedMealImage(dish);
       thumbCache.set(key, finalUrl);
       return finalUrl;
     } catch {
-      return taggedMealImage(dish);
+      const finalUrl = fallback || taggedMealImage(dish);
+      thumbCache.set(key, finalUrl);
+      return finalUrl;
     } finally {
       clearTimeout(timer);
       inflight.delete(key);
@@ -272,16 +287,13 @@ export function prefetchMealImages(meals) {
 
 export function mealImage(meal) {
   if (!meal) return MEAL_IMAGE_PLACEHOLDER;
-  if (typeof meal.imageUrl === "string" && /^https?:\/\//.test(meal.imageUrl))
-    return meal.imageUrl;
-  if (typeof meal.photo === "string" && /^https?:\/\//.test(meal.photo))
-    return meal.photo;
 
   const isAiSuggestion =
     meal.suggestion ||
     meal.nutrition?.kind === "gemini_suggestion" ||
     meal.nutrition?.kind === "usda_estimated";
 
+  // Local catalog assets for known venues / catalog meals
   if (
     !isAiSuggestion &&
     (meal.photo === "pasta" ||
@@ -294,7 +306,12 @@ export function mealImage(meal) {
   const key = photoQuery(meal).toLowerCase();
   const cached = thumbCache.get(key);
   if (cached) return cached;
-  return taggedMealImage(photoQuery(meal));
+
+  // Backend TheMealDB URL (only when scoring accepted it)
+  const url = providedUrl(meal);
+  if (url) return url;
+
+  return MEAL_IMAGE_PLACEHOLDER;
 }
 
 export const photoFor = (meal) => mealImage(meal);
