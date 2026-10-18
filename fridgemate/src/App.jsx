@@ -172,6 +172,11 @@ export default function App() {
     .filter((p) => p.date === day)
     .sort((a, b) => a.start.localeCompare(b.start))
     .at(-1);
+  // Hide the hero card if this meal has been logged as eaten
+  const lastPlanWasEaten = lastPlan && logs.some(
+    (log) => log.mealId === lastPlan.mealId && log.date === lastPlan.date
+  );
+  const showLastPlan = lastPlan && !lastPlanWasEaten;
   function undoLog() {
     safe(
       state.logUndo
@@ -396,7 +401,7 @@ export default function App() {
                   </button>
                 </div>
               </section>
-              {lastPlan && (
+              {showLastPlan && (
                 <section className="today-saved-meal">
                   <img
                     src={`/food/${photoFor(byId[lastPlan.mealId])}.png`}
