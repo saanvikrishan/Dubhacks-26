@@ -432,7 +432,7 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
             transform: `scale(${flyingOff ? 1.2 : Math.min(1.2, 0.8 + Math.abs(dx) / 100)})`,
           }}
         >
-          {(dx > 0 || flyingOff === "right") ? "YES" : "PASS"}
+          {(dx > 0 || flyingOff === "right") ? "✓" : "✕"}
         </div>
         {children}
       </div>
@@ -737,7 +737,7 @@ export function FoodDiscovery({
                   onClick={() => pass(meal.id)}
                   aria-label="Pass on this meal"
                 >
-                  ×
+                  ✕
                 </button>
                 <button
                   className="detail-button"
@@ -750,7 +750,7 @@ export function FoodDiscovery({
                   onClick={() => onChoose(meal)}
                   aria-label="Choose this meal"
                 >
-                  <Icon name="check" size={23} />
+                  ✓
                 </button>
               </div>
               <p className="swipe-hint">
@@ -821,7 +821,7 @@ export function FoodDiscovery({
                   onClick={() => pass(venue.id)}
                   aria-label="Pass on this restaurant"
                 >
-                  ×
+                  ✕
                 </button>
                 <button
                   className="detail-button"
@@ -834,7 +834,7 @@ export function FoodDiscovery({
                   onClick={() => onVenueDirections(venue)}
                   aria-label="Open walking directions"
                 >
-                  <Icon name="arrow" size={23} />
+                  ✓
                 </button>
               </div>
               <p className="swipe-hint">
