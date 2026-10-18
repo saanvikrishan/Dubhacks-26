@@ -9,16 +9,71 @@ export const niceTime = (t) => {
   return `${Math.floor(m / 60) % 12 || 12}:${String(m % 60).padStart(2, "0")} ${m >= 720 ? "PM" : "AM"}`;
 };
 
+/** Animated plate + steam — used until a real dish photo resolves. */
 export const MEAL_IMAGE_PLACEHOLDER =
   "data:image/svg+xml," +
   encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="768" height="768" viewBox="0 0 768 768">
-      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-        <stop stop-color="#e7efe6"/><stop offset="1" stop-color="#d5e4d3"/>
-      </linearGradient></defs>
-      <rect width="768" height="768" fill="url(#g)"/>
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+          <stop stop-color="#e4f0e8"/>
+          <stop offset="1" stop-color="#d2e4d6"/>
+        </linearGradient>
+        <radialGradient id="plate" cx="50%" cy="48%" r="42%">
+          <stop stop-color="#ffffff"/>
+          <stop offset=".75" stop-color="#f4f7f1"/>
+          <stop offset="1" stop-color="#c9d9cc"/>
+        </radialGradient>
+        <style>
+          .steam { animation: rise 5.2s ease-in-out infinite; transform-origin: center bottom; }
+          .steam2 { animation-delay: .9s; }
+          .steam3 { animation-delay: 1.8s; }
+          .bite { animation: pulse 5.5s ease-in-out infinite; transform-origin: 384px 360px; }
+          .spin { animation: slowspin 28s linear infinite; transform-origin: 384px 390px; opacity:.22; }
+          @keyframes rise {
+            0%,100% { opacity:.08; transform: translateY(6px) scaleY(.92); }
+            50% { opacity:.28; transform: translateY(-12px) scaleY(1.05); }
+          }
+          @keyframes pulse {
+            0%,100% { transform: scale(1); }
+            50% { transform: scale(1.015); }
+          }
+          @keyframes slowspin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        </style>
+      </defs>
+      <rect width="768" height="768" fill="url(#bg)"/>
+      <ellipse cx="384" cy="520" rx="210" ry="36" fill="#9fbaa855"/>
+      <g class="spin" opacity=".35">
+        <circle cx="384" cy="390" r="168" fill="none" stroke="#7eaa8c" stroke-width="10" stroke-dasharray="28 22"/>
+      </g>
+      <g class="bite">
+        <circle cx="384" cy="390" r="150" fill="url(#plate)"/>
+        <circle cx="384" cy="390" r="118" fill="#e8f3ea"/>
+        <ellipse cx="340" cy="370" rx="38" ry="28" fill="#6fb892"/>
+        <ellipse cx="410" cy="360" rx="34" ry="26" fill="#e0b56a"/>
+        <ellipse cx="390" cy="420" rx="42" ry="30" fill="#c45c3888"/>
+        <circle cx="355" cy="410" r="14" fill="#2a9a6c"/>
+        <circle cx="430" cy="405" r="12" fill="#d4a017"/>
+      </g>
+      <g fill="#ffffffcc" stroke="none">
+        <path class="steam" d="M330 300c0-28 18-42 18-70"/>
+        <path class="steam steam2" d="M384 290c0-32 16-48 16-78" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round"/>
+        <path class="steam steam3" d="M438 300c0-28 18-42 18-70" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round"/>
+        <path class="steam" d="M330 300c0-28 18-42 18-70" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round"/>
+      </g>
     </svg>`,
   );
+
+export function isMealPlaceholder(url) {
+  return (
+    !url ||
+    url === MEAL_IMAGE_PLACEHOLDER ||
+    (typeof url === "string" && url.startsWith("data:image/svg"))
+  );
+}
 
 const thumbCache = new Map();
 const inflight = new Map();

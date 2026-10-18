@@ -28,6 +28,19 @@ export function evaluate(meal, state, c = config) {
   const { profile: p, context: ctx, pantry } = state;
   const reasons = [],
     gaps = [];
+  if (!meal?.id) {
+    return {
+      mealId: null,
+      feasible: false,
+      reasons: ["This meal is unavailable."],
+      gaps: [],
+      duration: null,
+      parts: {},
+      window: ctx?.available ?? null,
+      score: null,
+      assumptions: [],
+    };
+  }
   if (!c.featureFlags[meal.mode]) reasons.push("This meal mode is disabled.");
   if (p.diet !== "anything" && !Array.isArray(meal.diets))
     reasons.push("Dietary suitability is unknown for your restriction.");
@@ -321,17 +334,21 @@ export function validateInputs(profile, context, pantry) {
 }
 
 export function assertMealAction(meal, state, c = config) {
-  requireCapability(meal.mode, c);
+  if (!meal?.id) throw new Error("This meal no longer exists.");
+  requireCapability(meal.mode ?? "cook", c);
   if (["gemini_suggestion", "usda_estimated"].includes(meal.nutrition?.kind)) {
     if (!state.profile.cooking)
       throw new Error("Cooking access is off.");
-    const parts = timeParts(meal, state.context);
+    const parts = {
+      "Prep time": meal.timing?.prep ?? 0,
+      "Cook time": meal.timing?.cook ?? 0,
+    };
     const duration = Object.values(parts).reduce((a, b) => a + b, 0);
     return {
       mealId: meal.id,
       feasible: true,
       reasons: [],
-      duration,
+      duration: Number.isFinite(duration) ? duration : state.context.available,
       parts,
       window: state.context.available,
       score: null,

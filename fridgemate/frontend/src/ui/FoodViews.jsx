@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon, Modal } from "./Core";
 import {
   MEAL_IMAGE_PLACEHOLDER,
+  isMealPlaceholder,
   mealImage,
   money,
   num,
@@ -11,33 +12,67 @@ import {
 } from "./format";
 
 function MealPhoto({ meal, alt, className }) {
-  const [src, setSrc] = useState(() => mealImage(meal));
+  const initial = mealImage(meal);
+  const [src, setSrc] = useState(() => initial);
+  const [showReal, setShowReal] = useState(() => !isMealPlaceholder(initial));
   const failed = useRef(new Set());
   useEffect(() => {
     let cancelled = false;
     failed.current = new Set();
-    setSrc(mealImage(meal));
+    const next = mealImage(meal);
+    setSrc(next);
+    setShowReal(!isMealPlaceholder(next));
     resolveMealImage(meal).then((url) => {
-      if (!cancelled && url && !failed.current.has(url)) setSrc(url);
+      if (cancelled || !url || failed.current.has(url)) return;
+      if (isMealPlaceholder(url)) {
+        setSrc(MEAL_IMAGE_PLACEHOLDER);
+        setShowReal(false);
+        return;
+      }
+      setSrc(url);
     });
     return () => {
       cancelled = true;
     };
   }, [meal?.id, meal?.name, meal?.imageSearch, meal?.imageUrl, meal?.photo]);
   return (
-    <img
-      className={className}
-      draggable={false}
-      src={src}
-      alt={alt || meal?.name || "Meal"}
-      loading="eager"
-      decoding="async"
-      onError={() => {
-        failed.current.add(src);
-        const next = taggedMealImage(meal?.imageSearch || meal?.name || "food");
-        setSrc(failed.current.has(next) ? MEAL_IMAGE_PLACEHOLDER : next);
-      }}
-    />
+    <span className={`meal-photo ${className || ""}`.trim()}>
+      <span
+        className={`meal-photo-anim${showReal ? " is-hidden" : ""}`}
+        aria-hidden="true"
+      >
+        <span className="meal-photo-plate" />
+        <span className="meal-photo-food a" />
+        <span className="meal-photo-food b" />
+        <span className="meal-photo-food c" />
+        <span className="meal-photo-steam s1" />
+        <span className="meal-photo-steam s2" />
+        <span className="meal-photo-steam s3" />
+      </span>
+      <img
+        className={showReal ? "is-ready" : "is-waiting"}
+        draggable={false}
+        src={src}
+        alt={alt || meal?.name || "Meal"}
+        loading="eager"
+        decoding="async"
+        onLoad={() => {
+          if (!isMealPlaceholder(src) && !failed.current.has(src)) {
+            setShowReal(true);
+          }
+        }}
+        onError={() => {
+          failed.current.add(src);
+          setShowReal(false);
+          const next = taggedMealImage(meal?.imageSearch || meal?.name || "food");
+          if (!failed.current.has(next)) {
+            setSrc(next);
+            return;
+          }
+          setSrc(MEAL_IMAGE_PLACEHOLDER);
+        }}
+      />
+    </span>
   );
 }
 import { catalog, pantryItems } from "../data/catalog";
@@ -512,16 +547,17 @@ export function FoodDiscovery({
   );
   const geminiCards = usingGemini
     ? geminiMeals
+        .filter((meal) => meal?.id && meal?.timing)
         .filter((meal) => !passed.includes(meal.id))
         .filter((meal) => {
           if (mood === "any") return true;
           if (mood === "comfort") return !fresh.has(meal.id);
           if (mood === "quick")
-            return meal.timing.prep + meal.timing.cook <= 10;
+            return (meal.timing.prep ?? 0) + (meal.timing.cook ?? 0) <= 10;
           if (mood === "hungry")
-            return (meal.nutrition.values.energy_kcal ?? 0) >= 550;
+            return (meal.nutrition?.values?.energy_kcal ?? 0) >= 550;
           if (mood === "fancy")
-            return meal.timing.prep + meal.timing.cook >= 15;
+            return (meal.timing.prep ?? 0) + (meal.timing.cook ?? 0) >= 15;
           return true;
         })
         .map((meal) => {
@@ -531,7 +567,8 @@ export function FoodDiscovery({
           // catalog-specific reasons so they don't show as errors in the UI.
           const result = evaluate(meal, state);
           const duration =
-            result.duration ?? meal.timing.prep + meal.timing.cook;
+            result.duration ??
+            (meal.timing.prep ?? 0) + (meal.timing.cook ?? 0);
           return {
             ...result,
             meal,
@@ -585,9 +622,15 @@ export function FoodDiscovery({
     nutrition = meal ? portionNutrition(meal) : null;
   const pass = (id) => setPassed((p) => [...p, id]);
   const saved = state.mealPlans.find(
-    (p) => p.date === state.context.date && p.start === state.context.start,
+    (p) =>
+      !p.openSlot &&
+      p.mealId &&
+      p.date === state.context.date &&
+      p.start === state.context.start,
   );
-  const savedCheck = saved ? evaluate(byId[saved.mealId], state) : null;
+  const savedMeal = saved ? byId[saved.mealId] : null;
+  const savedCheck =
+    savedMeal ? evaluate(savedMeal, state) : null;
   return (
     <div className="food-layout">
       <section className="food-discovery">
@@ -672,13 +715,13 @@ export function FoodDiscovery({
             </label>
           </div>
         )}
-        {saved && (
+        {saved && savedMeal && (
           <div
             className="food-saved-slot"
           >
             <div>
               <span>PLANNED · {saved.start}</span>
-              <strong>{byId[saved.mealId].name}</strong>
+              <strong>{savedMeal.name}</strong>
               {savedCheck && !savedCheck.feasible && savedCheck.reasons.length > 0 && (
                 <p className="fine-print">
                   Heads up: {savedCheck.reasons[0].replace(/^Not enough confirmed ingredients:/i, "You may need:").replace(/^Needs \d+ minutes;.*$/, "Takes a bit longer than your window.")}
@@ -687,7 +730,7 @@ export function FoodDiscovery({
             </div>
             <button
               className="text-button"
-              onClick={() => onDetails(byId[saved.mealId])}
+              onClick={() => onDetails(savedMeal)}
             >
               Details
             </button>

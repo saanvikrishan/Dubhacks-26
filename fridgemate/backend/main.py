@@ -277,6 +277,102 @@ async def nutrition_lookup(q: str):
     return {"query": query, "status": "ok", "per_100g": per_100, "source": "USDA FDC"}
 
 
+class GroceryAnalyzeItem(BaseModel):
+    name: str
+    qty: str = ""
+    grams: float | None = None
+
+
+class GroceryAnalyzeRequest(BaseModel):
+    items: list[GroceryAnalyzeItem]
+
+
+def _estimate_grams(qty: str, fallback: float = 150.0) -> float:
+    import re
+
+    text = (qty or "").strip().lower()
+    if not text:
+        return fallback
+    grams = re.search(r"(\d+(?:\.\d+)?)\s*(?:g|gram|grams)\b", text)
+    if grams:
+        return min(5000.0, max(10.0, float(grams.group(1))))
+    kg = re.search(r"(\d+(?:\.\d+)?)\s*(?:kg|kilo)", text)
+    if kg:
+        return min(5000.0, max(10.0, float(kg.group(1)) * 1000.0))
+    count = re.match(r"^(\d+(?:\.\d+)?)\s*(?:x|pcs?|pieces?|bags?|cans?)?$", text)
+    if count:
+        return min(5000.0, max(10.0, float(count.group(1)) * fallback))
+    leading = re.match(r"^(\d+(?:\.\d+)?)", text)
+    if leading:
+        return min(5000.0, max(10.0, float(leading.group(1)) * fallback))
+    return fallback
+
+
+@app.post("/nutrition/analyze-list")
+async def nutrition_analyze_list(request: GroceryAnalyzeRequest):
+    """Look up USDA macros for a grocery list and return basket totals."""
+    if not usda.usda_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="USDA_API_KEY is missing from backend/.env or fridgemate/.env",
+        )
+    if not request.items:
+        raise HTTPException(status_code=400, detail="Add at least one grocery item.")
+
+    totals = {
+        "energy_kcal": 0.0,
+        "protein_g": 0.0,
+        "carbohydrate_g": 0.0,
+        "fat_g": 0.0,
+        "fiber_g": 0.0,
+        "sodium_mg": 0.0,
+    }
+    matched = []
+    unmatched = []
+
+    for item in request.items:
+        name = (item.name or "").strip()
+        if not name:
+            continue
+        grams = (
+            float(item.grams)
+            if item.grams is not None and item.grams > 0
+            else _estimate_grams(item.qty)
+        )
+        per_100 = await usda.lookup_per_100g(name)
+        if not per_100:
+            # Retry with a simpler query (last meaningful word).
+            parts = [p for p in name.replace(",", " ").split() if len(p) > 2]
+            for candidate in ([name] + parts[::-1])[1:]:
+                per_100 = await usda.lookup_per_100g(candidate)
+                if per_100:
+                    break
+        if not per_100:
+            unmatched.append({"name": name, "grams": grams})
+            continue
+        factor = grams / 100.0
+        contribution = {k: float(per_100.get(k) or 0) * factor for k in totals}
+        for k, v in contribution.items():
+            totals[k] += v
+        matched.append(
+            {
+                "name": name,
+                "grams": grams,
+                "per_100g": per_100,
+                "contribution": contribution,
+                "source": "USDA FDC",
+            }
+        )
+
+    return {
+        "status": "ok",
+        "totals": totals,
+        "matched": matched,
+        "unmatched": unmatched,
+        "names": [i.name for i in request.items if (i.name or "").strip()],
+    }
+
+
 @app.get("/pantry")
 def get_pantry(user_id: str = DEMO_USER_ID):
     if not store.SessionLocal:

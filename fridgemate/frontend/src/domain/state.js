@@ -1,6 +1,15 @@
 import { config, requireCapability } from "./config.js";
 import { assertMealAction, validateInputs, clockTime } from "./engine.js";
-import { byId } from "../data/suggestions.js";
+import { byId, rememberMeal, rememberSuggestions } from "../data/suggestions.js";
+
+/** Keep a chosen Gemini meal in session state so plans still resolve after refresh. */
+function withKnownMeal(state, meal) {
+  if (!meal?.id) return state;
+  rememberMeal(meal);
+  const list = Array.isArray(state.geminiMeals) ? state.geminiMeals : [];
+  if (list.some((m) => m?.id === meal.id)) return state;
+  return { ...state, geminiMeals: [...list, meal] };
+}
 import { normalizeCalendarState, validateEvent, timeKey, dayKey, scheduleMealsForDay, localInstant } from "./calendar.js";
 
 export const today = () =>
@@ -65,6 +74,7 @@ export function createDemoState() {
     logUndo: null,
     geminiMeals: null,
     groceryList: [],
+    shoppingList: [],
   };
 }
 function portion(value) {
@@ -75,17 +85,24 @@ function portion(value) {
 function applyAction(state, action, c = config) {
   if (action.type === "saveEvent") {
     requireCapability("calendarView", c);
-    validateEvent(action.event);
-    const existing = state.events.find((e) => e.id === action.event.id);
-    if (existing?.readOnly || action.event.source !== "manual")
+    // Manual entries are meal slots only — classes/workouts/tasks come from calendar import.
+    const event = {
+      ...action.event,
+      kind: "meal",
+      source: "manual",
+      readOnly: false,
+    };
+    validateEvent(event);
+    const existing = state.events.find((e) => e.id === event.id);
+    if (existing?.readOnly || (existing && existing.source !== "manual"))
       throw new Error(
         "Imported events are read-only. Edit them in Apple Calendar, then refresh.",
       );
     return {
       ...state,
       events: [
-        ...state.events.filter((e) => e.id !== action.event.id),
-        { ...action.event, readOnly: false },
+        ...state.events.filter((e) => e.id !== event.id),
+        event,
       ],
     };
   }
@@ -212,11 +229,12 @@ function applyAction(state, action, c = config) {
       duration: check.duration ?? state.context.available,
     };
     const before = state.mealPlans.find((p) => p.id === plan.id) ?? null;
+    const next = withKnownMeal(state, meal);
     return {
-      ...state,
+      ...next,
       previousPlan: before,
       plan,
-      mealPlans: [...state.mealPlans.filter((p) => p.id !== plan.id), plan],
+      mealPlans: [...next.mealPlans.filter((p) => p.id !== plan.id), plan],
       planUndo: { slotId: plan.id, before, after: plan },
     };
   }
@@ -343,6 +361,25 @@ function applyAction(state, action, c = config) {
   if (action.type === "clearGeminiMeals") {
     return { ...state, geminiMeals: null, groceryList: [] };
   }
+  if (action.type === "updateShoppingList") {
+    const list = Array.isArray(action.shoppingList)
+      ? action.shoppingList
+          .filter((item) => item && typeof item.name === "string" && item.name.trim())
+          .map((item) => ({
+            id:
+              typeof item.id === "string" && item.id
+                ? item.id
+                : crypto.randomUUID(),
+            name: item.name.trim().replace(/\s+/g, " ").slice(0, 80),
+            qty:
+              typeof item.qty === "string"
+                ? item.qty.trim().slice(0, 40)
+                : "",
+            checked: Boolean(item.checked),
+          }))
+      : [];
+    return { ...state, shoppingList: list };
+  }
   if (action.type === "scheduleDayMeals") {
     // Auto-schedule breakfast / lunch / dinner slots for the given date,
     // respecting calendar busy events. Each slot gets a placeholder plan entry
@@ -411,9 +448,10 @@ function applyAction(state, action, c = config) {
       mealId,
       openSlot: false,
     };
+    const next = withKnownMeal(state, meal);
     return {
-      ...state,
-      mealPlans: state.mealPlans.map((p) => (p.id === slotId ? filledPlan : p)),
+      ...next,
+      mealPlans: next.mealPlans.map((p) => (p.id === slotId ? filledPlan : p)),
     };
   }
   // No external operation is implemented. A flag cannot authorize one.
@@ -508,17 +546,53 @@ export function validateState(state) {
   if (!Array.isArray(state.groceryList)) state = { ...state, groceryList: [] };
   // geminiMeals can stay as-is (array or null); no deep validation needed
 
+  if (!Array.isArray(state.shoppingList)) {
+    state = { ...state, shoppingList: [] };
+  } else {
+    state = {
+      ...state,
+      shoppingList: state.shoppingList
+        .filter((item) => item && typeof item.name === "string" && item.name.trim())
+        .map((item) => ({
+          id:
+            typeof item.id === "string" && item.id
+              ? item.id
+              : crypto.randomUUID(),
+          name: item.name.trim().replace(/\s+/g, " ").slice(0, 80),
+          qty: typeof item.qty === "string" ? item.qty.trim().slice(0, 40) : "",
+          checked: Boolean(item.checked),
+        })),
+    };
+  }
+
   if (!Array.isArray(state.events) || !Array.isArray(state.mealPlans))
     throw new Error("Invalid saved calendar.");
+
+  // Re-hydrate Gemini suggestion meals so plan.mealId resolves after reload.
+  // Pin any meals already on the plan so a grocery refresh cannot wipe them.
+  if (Array.isArray(state.geminiMeals) && state.geminiMeals.length) {
+    rememberSuggestions(state.geminiMeals);
+    const plannedIds = new Set(
+      state.mealPlans.map((p) => p?.mealId).filter(Boolean),
+    );
+    for (const meal of state.geminiMeals) {
+      if (meal?.id && plannedIds.has(meal.id)) rememberMeal(meal);
+    }
+  }
 
   // ── Filter bad meal plans instead of throwing ─────────────────────────────
   state = {
     ...state,
     mealPlans: state.mealPlans.filter((plan) => {
-      if (!plan?.id || !byId[plan.mealId]) return false;
-      if (!Number.isFinite(plan.duration) || plan.duration <= 0) return false;
+      if (!plan?.id) return false;
       if (typeof plan.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(plan.date)) return false;
       if (typeof plan.start !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(plan.start)) return false;
+      // Open slots are placeholders (no meal yet) — keep them.
+      if (plan.openSlot && !plan.mealId) {
+        return Number.isFinite(plan.duration) && plan.duration > 0;
+      }
+      if (!byId[plan.mealId]) return false;
+      if (!Number.isFinite(plan.duration) || plan.duration <= 0) return false;
       try { portion(plan.servings); return true; } catch { return false; }
     }),
   };

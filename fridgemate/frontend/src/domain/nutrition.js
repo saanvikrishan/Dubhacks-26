@@ -118,3 +118,150 @@ export function goalStatus(summary, goal) {
       ? "Above your range"
       : "Within your range";
 }
+
+/** Rough adult reference values for grocery-basket coverage checks. */
+export const GENERAL_DAILY_TARGETS = {
+  energy_kcal: { label: "Energy", unit: "kcal", target: 2000, mode: "around" },
+  protein_g: { label: "Protein", unit: "g", target: 50, mode: "minimum" },
+  fiber_g: { label: "Fiber", unit: "g", target: 28, mode: "minimum" },
+  carbohydrate_g: {
+    label: "Carbohydrate",
+    unit: "g",
+    target: 275,
+    mode: "around",
+  },
+  fat_g: { label: "Fat", unit: "g", target: 70, mode: "around" },
+  sodium_mg: { label: "Sodium", unit: "mg", target: 2300, mode: "maximum" },
+};
+
+const FOOD_GROUP_PATTERNS = [
+  {
+    id: "produce",
+    label: "Fruits & vegetables",
+    tip: "Add leafy greens, fruit, or other produce.",
+    pattern:
+      /spinach|lettuce|kale|broccoli|carrot|tomato|pepper|onion|garlic|cucumber|apple|banana|berry|berries|orange|fruit|vegetable|avocado|celery|zucchini|mushroom|potato|sweet potato|cabbage|bean sprouts|herbs|cilantro|parsley|lemon|lime|mango|grape/i,
+  },
+  {
+    id: "protein",
+    label: "Protein foods",
+    tip: "Add eggs, beans, tofu, fish, chicken, or other protein.",
+    pattern:
+      /chicken|beef|pork|turkey|fish|salmon|tuna|shrimp|tofu|tempeh|egg|eggs|bean|beans|lentil|chickpea|meat|yogurt|cottage cheese|protein/i,
+  },
+  {
+    id: "grains",
+    label: "Grains & starches",
+    tip: "Add rice, pasta, bread, oats, or tortillas.",
+    pattern:
+      /rice|pasta|bread|oat|oats|quinoa|tortilla|cereal|flour|noodle|wheat|bagel|couscous|barley|corn|potato/i,
+  },
+  {
+    id: "dairy",
+    label: "Dairy or alternatives",
+    tip: "Add milk, yogurt, cheese, or a fortified alt-milk.",
+    pattern:
+      /milk|yogurt|cheese|butter|dairy|oat milk|almond milk|soy milk|kefir/i,
+  },
+  {
+    id: "fats",
+    label: "Healthy fats",
+    tip: "Add olive oil, nuts, seeds, or nut butter.",
+    pattern:
+      /olive oil|oil|nuts|almond|walnut|peanut|cashew|seed|seeds|avocado|tahini|butter/i,
+  },
+];
+
+/** Parse a free-text qty into estimated grams (default 150 g per item). */
+export function estimateGrams(qty, fallback = 150) {
+  const text = String(qty || "").trim().toLowerCase();
+  if (!text) return fallback;
+  const grams = text.match(/(\d+(?:\.\d+)?)\s*(?:g|gram|grams)\b/);
+  if (grams) return Math.min(5000, Math.max(10, Number(grams[1])));
+  const kg = text.match(/(\d+(?:\.\d+)?)\s*(?:kg|kilo)/);
+  if (kg) return Math.min(5000, Math.max(10, Number(kg[1]) * 1000));
+  const oz = text.match(/(\d+(?:\.\d+)?)\s*(?:oz|ounce)/);
+  if (oz) return Math.min(5000, Math.max(10, Number(oz[1]) * 28.35));
+  const lb = text.match(/(\d+(?:\.\d+)?)\s*(?:lb|pound)/);
+  if (lb) return Math.min(5000, Math.max(10, Number(lb[1]) * 453.6));
+  const count = text.match(/^(\d+(?:\.\d+)?)\s*(?:x|pcs?|pieces?|bags?|cans?|bunches?)?$/);
+  if (count) return Math.min(5000, Math.max(10, Number(count[1]) * fallback));
+  const leading = text.match(/^(\d+(?:\.\d+)?)/);
+  if (leading) return Math.min(5000, Math.max(10, Number(leading[1]) * fallback));
+  return fallback;
+}
+
+export function foodGroupCoverage(itemNames) {
+  const names = (itemNames || []).map((n) => String(n || ""));
+  return FOOD_GROUP_PATTERNS.map((group) => {
+    const hits = names.filter((n) => group.pattern.test(n));
+    return {
+      id: group.id,
+      label: group.label,
+      tip: group.tip,
+      met: hits.length > 0,
+      examples: hits.slice(0, 3),
+    };
+  });
+}
+
+/**
+ * Compare estimated grocery-basket nutrition to general daily targets.
+ * `totals` keys match GENERAL_DAILY_TARGETS (absolute amounts for the basket).
+ */
+export function assessGroceryNutrition(totals, itemNames = []) {
+  const nutrients = Object.entries(GENERAL_DAILY_TARGETS).map(([key, meta]) => {
+    const value = Number(totals?.[key]) || 0;
+    const ratio = meta.target > 0 ? value / meta.target : 0;
+    let status = "gap";
+    let detail = "";
+    if (meta.mode === "minimum") {
+      status = value >= meta.target ? "met" : "gap";
+      detail =
+        status === "met"
+          ? "Daily minimum covered"
+          : `${Math.ceil(meta.target - value)} ${meta.unit} short of a typical day`;
+    } else if (meta.mode === "maximum") {
+      status = value <= meta.target ? "ok" : "high";
+      detail =
+        status === "ok"
+          ? "Under the daily limit"
+          : `${Math.ceil(value - meta.target)} ${meta.unit} over a typical daily limit`;
+    } else {
+      status = ratio >= 0.7 && ratio <= 1.35 ? "met" : ratio < 0.7 ? "gap" : "high";
+      detail =
+        status === "met"
+          ? "In a reasonable daily range"
+          : status === "gap"
+            ? `Low vs ~${meta.target} ${meta.unit}/day`
+            : `High vs ~${meta.target} ${meta.unit}/day`;
+    }
+    return {
+      key,
+      ...meta,
+      value,
+      pct: Math.round(ratio * 100),
+      status,
+      detail,
+    };
+  });
+  const groups = foodGroupCoverage(itemNames);
+  const gaps = [
+    ...nutrients.filter((n) => n.status === "gap").map((n) => n.label),
+    ...groups.filter((g) => !g.met).map((g) => g.label),
+  ];
+  const metCount =
+    nutrients.filter((n) => n.status === "met" || n.status === "ok").length +
+    groups.filter((g) => g.met).length;
+  const totalChecks = nutrients.length + groups.length;
+  return {
+    nutrients,
+    groups,
+    gaps,
+    score: totalChecks ? Math.round((metCount / totalChecks) * 100) : 0,
+    summary:
+      gaps.length === 0
+        ? "This list looks balanced against general daily nutrient needs."
+        : `Gaps to watch: ${gaps.slice(0, 4).join(", ")}${gaps.length > 4 ? "…" : ""}.`,
+  };
+}

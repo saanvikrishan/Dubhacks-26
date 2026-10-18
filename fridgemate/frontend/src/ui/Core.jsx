@@ -4,7 +4,9 @@ import { byId } from "../data/suggestions";
 import { capabilities, config } from "../domain/config";
 import { clockTime, evaluate, minutes, timeParts } from "../domain/engine";
 import {
+  assessGroceryNutrition,
   dailyNutrition,
+  estimateGrams,
   goalStatus,
   nutrientInfo,
   portionNutrition,
@@ -38,6 +40,9 @@ function Icon({ name, size = 20 }) {
     ),
     fork: <path d="M5 3v6c0 4 6 4 6 0V3M8 3v19M20 22V3c-6 4-6 12 0 12" />,
     kitchen: <path d="M5 3h14v18H5zM5 11h14M8 6v2m0 6v3M3 21h18" />,
+    cart: (
+      <path d="M3 4h2l2.4 11h10.2l2-7H7M9 20a1.2 1.2 0 1 0 0-2.4A1.2 1.2 0 0 0 9 20m8 0a1.2 1.2 0 1 0 0-2.4A1.2 1.2 0 0 0 17 20" />
+    ),
     clock: (
       <>
         <circle cx="12" cy="12" r="9" />
@@ -1051,8 +1056,8 @@ function Kitchen({ state, onSave }) {
 function Intake({ state, onEdit, onRemove }) {
   const date = today(),
     summary = dailyNutrition(state.logs, byId, date),
-    logs = state.logs.filter((log) => log.date === date);
-  const costs = logs.filter((log) => byId[log.mealId].cost != null);
+    logs = state.logs.filter((log) => log.date === date && byId[log.mealId]);
+  const costs = logs.filter((log) => byId[log.mealId]?.cost != null);
   return (
     <section className="panel intake">
       <div className="section-heading">
@@ -1121,7 +1126,9 @@ function Intake({ state, onEdit, onRemove }) {
             <p>{goalStatus(summary[goal.nutrient], goal)}</p>
           </div>
         ))}
-      {state.plan && flags.nutritionDetails.available && (
+      {state.plan &&
+        byId[state.plan.mealId] &&
+        flags.nutritionDetails.available && (
         <div className="planned-preview">
           <span className="eyebrow">
             PLANNED · {state.plan.date === date ? "TODAY" : state.plan.date}
@@ -1143,7 +1150,7 @@ function Intake({ state, onEdit, onRemove }) {
           {logs.map((log) => (
             <div className="log-item" key={log.id}>
               <span>
-                {byId[log.mealId].name}
+                {byId[log.mealId]?.name ?? "Meal"}
                 <small>
                   {num(log.servings)} serving{log.servings === 1 ? "" : "s"}
                 </small>
@@ -1163,7 +1170,8 @@ function Intake({ state, onEdit, onRemove }) {
             {costs.length
               ? money(
                   costs.reduce(
-                    (sum, log) => sum + byId[log.mealId].cost * log.servings,
+                    (sum, log) =>
+                      sum + (byId[log.mealId]?.cost ?? 0) * log.servings,
                     0,
                   ),
                 )
@@ -1668,6 +1676,348 @@ function UsedUpDialog({ meal, ingredients, onDone, onClose }) {
   );
 }
 
+async function analyzeGroceryOnBackend(items) {
+  const payload = {
+    items: items.map((item) => ({
+      name: item.name,
+      qty: item.qty || "",
+      grams: estimateGrams(item.qty),
+    })),
+  };
+  const urls = [
+    "/api/nutrition/analyze-list",
+    "http://127.0.0.1:8000/nutrition/analyze-list",
+  ];
+  let lastError = "Could not reach nutrition API.";
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const text = await res.text();
+      let data = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        lastError =
+          "Nutrition API did not return JSON — restart the Vite app so /api proxies to port 8000.";
+        continue;
+      }
+      if (!res.ok) {
+        lastError =
+          data?.detail ||
+          (res.status === 503
+            ? "USDA_API_KEY is missing from fridgemate/.env"
+            : `Lookup failed (${res.status})`);
+        continue;
+      }
+      return data;
+    } catch (err) {
+      lastError = err.message || "Could not reach nutrition API on port 8000.";
+    }
+  }
+  throw new Error(lastError);
+}
+
+function GroceryListView({ items = [], onChange }) {
+  const [draft, setDraft] = useState("");
+  const [qty, setQty] = useState("");
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
+  const [analysis, setAnalysis] = useState(null);
+  const list = Array.isArray(items) ? items : [];
+  const remaining = list.filter((item) => !item.checked).length;
+  const checkedCount = list.length - remaining;
+
+  function persist(next) {
+    onChange(next);
+    setAnalysis(null);
+    setAnalysisError("");
+  }
+
+  function addItem(e) {
+    e?.preventDefault?.();
+    const name = draft.trim().replace(/\s+/g, " ").slice(0, 80);
+    if (!name) return;
+    const key = name.toLowerCase();
+    const existing = list.find((item) => item.name.toLowerCase() === key);
+    if (existing) {
+      persist(
+        list.map((item) =>
+          item.id === existing.id
+            ? {
+                ...item,
+                qty: qty.trim() || item.qty,
+                checked: false,
+              }
+            : item,
+        ),
+      );
+    } else {
+      persist([
+        ...list,
+        {
+          id: crypto.randomUUID(),
+          name,
+          qty: qty.trim().slice(0, 40),
+          checked: false,
+        },
+      ]);
+    }
+    setDraft("");
+    setQty("");
+  }
+
+  async function analyzeList() {
+    if (!list.length || analyzing) return;
+    setAnalyzing(true);
+    setAnalysisError("");
+    setAnalysis(null);
+    try {
+      const data = await analyzeGroceryOnBackend(list);
+      const totals = {
+        energy_kcal: 0,
+        protein_g: 0,
+        fiber_g: 0,
+        carbohydrate_g: 0,
+        fat_g: 0,
+        sodium_mg: 0,
+        ...(data.totals || {}),
+      };
+      const matched = Array.isArray(data.matched) ? data.matched : [];
+      const unmatched = (Array.isArray(data.unmatched) ? data.unmatched : []).map(
+        (row) => (typeof row === "string" ? row : row.name),
+      );
+      if (!matched.length) {
+        setAnalysisError(
+          unmatched.length
+            ? `USDA couldn’t match: ${unmatched.slice(0, 5).join(", ")}${unmatched.length > 5 ? "…" : ""}. Try simpler names like “spinach” or “eggs”.`
+            : "No items to analyze.",
+        );
+      }
+      const report = assessGroceryNutrition(
+        totals,
+        list.map((item) => item.name),
+      );
+      setAnalysis({
+        ...report,
+        matched,
+        unmatched,
+        totals,
+        usedUsda: matched.length > 0,
+      });
+    } catch (err) {
+      setAnalysisError(err.message || "Could not analyze this list.");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  return (
+    <section className="grocery-list-page reveal" aria-label="Grocery list">
+      <div className="grocery-list-hero">
+        <div>
+          <p className="eyebrow">SHOPPING</p>
+          <h2>Build your grocery list</h2>
+          <p className="subtle">
+            Add what you need to pick up. When you’re done, check whether the
+            list covers general daily nutrient needs.
+          </p>
+        </div>
+        <div className="grocery-list-stats" aria-live="polite">
+          <strong>{remaining}</strong>
+          <span>{remaining === 1 ? "item left" : "items left"}</span>
+        </div>
+      </div>
+
+      <form className="grocery-list-add" onSubmit={addItem}>
+        <label>
+          Item
+          <input
+            type="text"
+            value={draft}
+            placeholder="e.g. spinach, oat milk, tortillas"
+            aria-label="Grocery item name"
+            onChange={(e) => setDraft(e.target.value)}
+          />
+        </label>
+        <label>
+          Amount
+          <input
+            type="text"
+            value={qty}
+            placeholder="optional · 200g, 2…"
+            aria-label="Amount or note"
+            onChange={(e) => setQty(e.target.value)}
+          />
+        </label>
+        <button type="submit" className="primary" disabled={!draft.trim()}>
+          Add to list
+        </button>
+      </form>
+
+      <div className="grocery-list-toolbar">
+        <span>
+          {list.length
+            ? `${list.length} on list${checkedCount ? ` · ${checkedCount} checked` : ""}`
+            : "Empty list"}
+        </span>
+        <div>
+          {checkedCount > 0 && (
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => persist(list.filter((item) => !item.checked))}
+            >
+              Clear checked
+            </button>
+          )}
+          {list.length > 0 && (
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => persist([])}
+            >
+              Clear all
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grocery-list-board" role="list" aria-label="Your grocery list">
+        {list.length ? (
+          list.map((item) => (
+            <div
+              className={`grocery-list-row${item.checked ? " is-checked" : ""}`}
+              role="listitem"
+              key={item.id}
+            >
+              <button
+                type="button"
+                className="grocery-check"
+                aria-pressed={item.checked}
+                aria-label={
+                  item.checked
+                    ? `Mark ${item.name} as still needed`
+                    : `Check off ${item.name}`
+                }
+                onClick={() =>
+                  persist(
+                    list.map((row) =>
+                      row.id === item.id
+                        ? { ...row, checked: !row.checked }
+                        : row,
+                    ),
+                  )
+                }
+              >
+                {item.checked ? <Icon name="check" size={16} /> : null}
+              </button>
+              <div className="grocery-list-copy">
+                <strong>{item.name}</strong>
+                {item.qty ? <small>{item.qty}</small> : null}
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={`Remove ${item.name}`}
+                onClick={() =>
+                  persist(list.filter((row) => row.id !== item.id))
+                }
+              >
+                <Icon name="close" size={15} />
+              </button>
+            </div>
+          ))
+        ) : (
+          <div className="grocery-list-empty">
+            <Icon name="cart" size={28} />
+            <p>Nothing on the list yet.</p>
+            <small>Type an item above to start your run.</small>
+          </div>
+        )}
+      </div>
+
+      {list.length > 0 && (
+        <div className="grocery-analyze-bar">
+          <button
+            type="button"
+            className="primary"
+            disabled={analyzing}
+            onClick={analyzeList}
+          >
+            {analyzing ? "Analyzing…" : "Done — check nutrients"}
+          </button>
+          <p className="fine-print">
+            Uses USDA FoodData Central when available, plus food-group coverage.
+            Amounts default to ~150 g per item unless you enter grams.
+          </p>
+        </div>
+      )}
+
+      {analysisError && (
+        <div className="notice warning" role="alert">
+          {analysisError}
+        </div>
+      )}
+
+      {analysis && (
+        <section className="grocery-analysis" aria-live="polite">
+          <div className="grocery-analysis-head">
+            <div>
+              <p className="eyebrow">NUTRIENT CHECK</p>
+              <h3>{analysis.score}% coverage vs general daily needs</h3>
+              <p>{analysis.summary}</p>
+            </div>
+          </div>
+          <div className="grocery-nutrient-grid">
+            {analysis.nutrients.map((n) => (
+              <div
+                key={n.key}
+                className={`grocery-nutrient-card status-${n.status}`}
+              >
+                <span>{n.label}</span>
+                <strong>
+                  {Math.round(n.value)}
+                  {n.unit}
+                </strong>
+                <small>
+                  {n.pct}% of ~{n.target}
+                  {n.unit}/day · {n.detail}
+                </small>
+              </div>
+            ))}
+          </div>
+          <div className="grocery-group-grid">
+            {analysis.groups.map((g) => (
+              <div
+                key={g.id}
+                className={`grocery-group-chip${g.met ? " is-met" : ""}`}
+              >
+                <strong>{g.met ? "Covered" : "Missing"}</strong>
+                <span>{g.label}</span>
+                <small>{g.met ? g.examples.join(", ") : g.tip}</small>
+              </div>
+            ))}
+          </div>
+          {(analysis.unmatched?.length > 0 || analysis.matched?.length > 0) && (
+            <p className="fine-print">
+              {analysis.usedUsda
+                ? `USDA matched ${analysis.matched.length} item${analysis.matched.length === 1 ? "" : "s"}.`
+                : "USDA macros unavailable — food-group check still applied."}
+              {analysis.unmatched?.length
+                ? ` Couldn’t match: ${analysis.unmatched.slice(0, 6).join(", ")}${analysis.unmatched.length > 6 ? "…" : ""}.`
+                : ""}
+            </p>
+          )}
+        </section>
+      )}
+    </section>
+  );
+}
+
 export {
   Icon,
   Modal,
@@ -1675,6 +2025,7 @@ export {
   Setup,
   Details,
   Kitchen,
+  GroceryListView,
   Intake,
   Assistant,
   Log,
