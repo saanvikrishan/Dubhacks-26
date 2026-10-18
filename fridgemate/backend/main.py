@@ -6,6 +6,7 @@ import time
 from datetime import date
 from pathlib import Path
 
+import httpx
 from backboard import BackboardClient
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -15,6 +16,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 import db as store
+import usda
 
 ROOT = Path(__file__).resolve().parent
 # Prefer backend/.env, fall back to fridgemate/.env
@@ -35,6 +37,10 @@ def on_startup():
         )
     except Exception as e:
         print(f"[Startup] Database init failed: {type(e).__name__}: {e}")
+    key = usda.refresh_api_key()
+    print(
+        f"[Startup] USDA FoodData Central: {'ready' if key else 'not configured (set USDA_API_KEY)'}"
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -71,7 +77,6 @@ backboard_key = (os.getenv("BACKBOARD_API_KEY") or "").strip()
 backboard_client = BackboardClient(api_key=backboard_key) if backboard_key else None
 _assistant_id = None
 DEMO_ASSISTANT_NAME = "FridgeMate demo"
-PHOTOS = {"tofu", "pasta", "chickpeas"}
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg",
     "image/jpg",
@@ -232,8 +237,26 @@ def home():
         "gemini": bool(client),
         "backboard": bool(backboard_client),
         "database": store.SessionLocal is not None,
+        "usda": usda.usda_configured(),
         "model": GEMINI_MODEL if client else None,
     }
+
+
+@app.get("/nutrition/lookup")
+async def nutrition_lookup(q: str):
+    """Debug / demo: look up per-100g macros from USDA FDC."""
+    if not usda.usda_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="USDA_API_KEY is missing from backend/.env or fridgemate/.env",
+        )
+    query = (q or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Query q is required.")
+    per_100 = await usda.lookup_per_100g(query)
+    if not per_100:
+        return {"query": query, "status": "not_found", "per_100g": None}
+    return {"query": query, "status": "ok", "per_100g": per_100, "source": "USDA FDC"}
 
 
 @app.get("/pantry")
@@ -410,15 +433,74 @@ def slug(name: str, index: int) -> str:
     return f"gemini-{base or 'meal'}-{index}"
 
 
-def pick_photo(raw: str | None, name: str, blob: str) -> str:
-    if raw in PHOTOS:
-        return raw
-    text = f"{name} {blob}".lower()
-    if "pasta" in text or "noodle" in text:
-        return "pasta"
-    if "chickpea" in text or "hummus" in text or "bean" in text:
-        return "chickpeas"
-    return "tofu"
+# TheMealDB CDN thumbs — existing photos, not AI generation (fast).
+_image_cache: dict[str, str] = {}
+
+
+def _image_search_queries(name: str) -> list[str]:
+    base = re.sub(r"\s+", " ", (name or "").strip())
+    base = re.sub(r"\([^)]*\)", "", base).strip(" ,-")
+    parts = [p for p in re.split(r"[\s/]+", base) if p]
+    candidates = [base, " ".join(parts[:3]), " ".join(parts[:2])]
+    if parts:
+        candidates.append(parts[0])
+    out: list[str] = []
+    seen: set[str] = set()
+    for q in candidates:
+        q = q.strip(" ,-")[:60]
+        key = q.lower()
+        if q and key not in seen:
+            seen.add(key)
+            out.append(q)
+    return out
+
+
+async def resolve_dish_image(name: str, client: httpx.AsyncClient | None = None) -> str | None:
+    """Look up a real food photo by dish name (TheMealDB). Cached + ~ms CDN."""
+    key = (name or "").strip().lower()
+    if not key:
+        return None
+    cached = _image_cache.get(key)
+    if cached:
+        return cached
+
+    async def _search(http: httpx.AsyncClient) -> str | None:
+        for q in _image_search_queries(name):
+            try:
+                response = await http.get(
+                    "https://www.themealdb.com/api/json/v1/1/search.php",
+                    params={"s": q},
+                )
+                if response.status_code != 200:
+                    continue
+                meals = (response.json() or {}).get("meals") or []
+                thumb = meals[0].get("strMealThumb") if meals else None
+                if thumb:
+                    _image_cache[key] = thumb
+                    return thumb
+            except Exception as e:
+                print(f"[Image] TheMealDB miss for {q!r}: {type(e).__name__}")
+        return None
+
+    if client is not None:
+        return await _search(client)
+    async with httpx.AsyncClient(timeout=2.0) as http:
+        return await _search(http)
+
+
+async def attach_dish_images(meals: list[dict]) -> None:
+    """Attach fast CDN image URLs in parallel (does not block on AI image gen)."""
+    if not meals:
+        return
+    async with httpx.AsyncClient(timeout=2.0) as client:
+
+        async def one(meal: dict) -> None:
+            url = await resolve_dish_image(meal.get("name") or "", client)
+            if url:
+                meal["imageUrl"] = url
+                meal["photo"] = url
+
+        await asyncio.gather(*[one(m) for m in meals])
 
 
 def normalize_ingredient(item) -> dict:
@@ -496,7 +578,8 @@ def normalize_meal(raw: dict, index: int, fallback_ingredients: list[str]) -> di
             "Taste and adjust seasoning.",
         ],
         "mode": "cook",
-        "photo": pick_photo(raw.get("photo"), name, " ".join(steps)),
+        "photo": None,
+        "imageUrl": None,
         "suggestion": True,
     }
 
@@ -901,7 +984,6 @@ Return valid JSON only:
       "ingredients": ["ingredient 1", "ingredient 2"],
       "steps": ["Step 1", "Step 2"],
       "nutrition_note": "Brief, cautious nutrition note",
-      "photo": "tofu",
       "diets": ["vegetarian"],
       "allergens": [],
       "energy_kcal": 450,
@@ -910,7 +992,7 @@ Return valid JSON only:
   ]
 }
 
-photo must be one of: tofu, pasta, chickpeas (closest visual match).
+Do not invent a photo field — images are generated from the recipe name separately.
 """
 
     last_error = None
@@ -930,6 +1012,9 @@ photo must be one of: tofu, pasta, chickpeas (closest visual match).
                 normalize_meal(r if isinstance(r, dict) else {}, i, cleaned)
                 for i, r in enumerate(recipes[:8])
             ]
+            if usda.usda_configured():
+                meals = await usda.enrich_meals(meals)
+            await attach_dish_images(meals)
             if model != GEMINI_MODEL:
                 print(f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)")
             return redact_output(
@@ -938,6 +1023,7 @@ photo must be one of: tofu, pasta, chickpeas (closest visual match).
                     "recipes": meals,
                     "ingredients": cleaned,
                     "model": model,
+                    "nutrition": "usda" if usda.usda_configured() else "gemini_estimate",
                 }
             )
         except Exception as e:

@@ -1,11 +1,44 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon, Modal } from "./Core";
-import { money, num, photoFor } from "./format";
+import {
+  MEAL_IMAGE_PLACEHOLDER,
+  mealImage,
+  money,
+  num,
+  resolveMealImage,
+} from "./format";
+
+function MealPhoto({ meal, alt, className }) {
+  const initial = mealImage(meal);
+  const [src, setSrc] = useState(initial);
+  useEffect(() => {
+    const ready = mealImage(meal);
+    setSrc(ready);
+    if (ready !== MEAL_IMAGE_PLACEHOLDER) return undefined;
+    let cancelled = false;
+    resolveMealImage(meal?.name).then((url) => {
+      if (!cancelled && url) setSrc(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [meal?.id, meal?.name, meal?.imageUrl, meal?.photo]);
+  return (
+    <img
+      className={className}
+      draggable={false}
+      src={src}
+      alt={alt || meal?.name || "Meal"}
+      loading="eager"
+      decoding="async"
+    />
+  );
+}
 import { catalog, pantryItems } from "../data/catalog";
 import { byId } from "../data/suggestions";
 import { config } from "../domain/config";
 import { recommend, clockTime, evaluate } from "../domain/engine";
-import { portionNutrition } from "../domain/nutrition";
+import { portionNutrition, usdaConfidenceExplain } from "../domain/nutrition";
 import { prettyDate } from "../domain/calendar";
 import {
   DEAL_SOURCE,
@@ -653,16 +686,16 @@ export function FoodDiscovery({
               onClick={() => onDetails(meal)}
               aria-label={`View ${meal.name} details`}
             >
-              <img
-                draggable={false}
-                src={`/food/${photoFor(meal)}.png`}
-                alt={`AI illustration representing ${meal.name}`}
-              />
+              <MealPhoto meal={meal} alt={meal.name} />
               <span className="cover-tag">
                 <Icon name="leaf" size={14} />
-                {usingGemini ? "Gemini suggestion" : "Cook with your groceries"}
+                {usingGemini
+                  ? meal.nutrition?.kind === "usda_estimated"
+                    ? "Gemini + USDA"
+                    : "Gemini suggestion"
+                  : "Cook with your groceries"}
               </span>
-              <span className="photo-label">AI illustration</span>
+              <span className="photo-label">Photo for this dish</span>
             </button>
             <div className="flashcard-body">
               <h2>{meal.name}</h2>
@@ -676,14 +709,28 @@ export function FoodDiscovery({
                 <span>{num(nutrition.energy_kcal)} kcal</span>
                 <span>{num(nutrition.protein_g)} g protein</span>
               </div>
-              <div className="fits-line">
+              <div
+                className="fits-line"
+                title={
+                  meal.nutrition?.kind === "usda_estimated"
+                    ? usdaConfidenceExplain(meal.nutrition)
+                    : undefined
+                }
+              >
                 <Icon name="check" size={16} />
                 {usingGemini
-                  ? "AI idea from your ingredients · estimates only"
+                  ? meal.nutrition?.kind === "usda_estimated"
+                    ? `USDA macros · ${meal.nutrition.confidence || "medium"} confidence`
+                    : "AI idea from your ingredients · estimates only"
                   : constrainedFallback
                     ? `Showing outside constraints · ${result.reasons?.[0] ?? "adjust window or groceries"}`
                     : "Ingredients, equipment, budget and calendar checked"}
               </div>
+              {meal.nutrition?.kind === "usda_estimated" ? (
+                <p className="fine-print">
+                  {usdaConfidenceExplain(meal.nutrition)}
+                </p>
+              ) : null}
               <div className="swipe-actions">
                 <button
                   className="decline-button"
@@ -833,7 +880,9 @@ export function FoodDiscovery({
           <span>
             {mode === "cook"
               ? usingGemini
-                ? "Gemini estimates · not verified nutrition"
+                ? geminiMeals.some((m) => m.nutrition?.kind === "usda_estimated")
+                  ? "USDA macros from matched ingredients"
+                  : "Gemini estimates · not verified nutrition"
                 : "Nutrition & costs are demo estimates"
               : "UW sources checked Oct 17 · hours can change"}
           </span>

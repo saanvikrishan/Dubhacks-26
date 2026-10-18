@@ -28,6 +28,8 @@ Open the Local URL Vite prints. Cook → add ingredients (or upload a fridge pho
 
 Optional Postgres / Tiger Data: set `DATABASE_URL` in `.env`, restart the backend. Pantry syncs on Suggest meals; choosing a meal also POSTs to `/api/saved-meals`. Without `DATABASE_URL`, those routes return `local_only` and the app still works.
 
+Optional USDA FoodData Central: set `USDA_API_KEY` (free signup at https://fdc.nal.usda.gov/api-key-signup.html). When set, `/api/recipes` replaces Gemini placeholder macros with per-serving estimates from matched ingredients. Without it, Cook still returns Gemini estimates.
+
 Restart Vite after `vite.config.js` proxy changes.
 
 Apple Calendar still uses the local Mac Vite bridge; ICS import works without it.
