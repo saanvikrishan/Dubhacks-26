@@ -8,9 +8,13 @@ Dinner fails when the fridge and the calendar never meet. WhatsCooking.ai turns 
 
 ## Key features
 
-- Meal planning from what's in your fridge, including substitutions when an ingredient is missing
-- Calendar-aware scheduling across an internal schedule, Google Calendar, and Apple Calendar
-- Automatic iMessage reminders through Spectrum and Photon, up to five minutes before the slot
+- Smart Schedule Sync: Integrates youe Apple or Google Calendar to automatically schedule time for prep and cooking
+- Fridge Photo Scanning: Instantly logs your available ingredients by letting you snap a quick picture of your fridge
+- Context-Aware Filtering: Cross-references your schedule, ingredients, dietary restrictions, likes/dislikes, and budget to suggest meals you can realistically make right and enjoy right now
+- Tinder-Style Meal Matching: Discover and select personalized recipes by swiping through options tailored to your current mood and preferences
+- Automated Nutrition Tracking: Seamlessly logs and tracks your daily macros and calories through an automated workflow
+- Campus Dining Fallback: Automatically routes you to the nearest open campus dining venue when you are out of groceries or too tired to cook.
+- Interactive AI Assistant (FridgeMate): Our in house AI Assistant
 
 ## How we built it
 
