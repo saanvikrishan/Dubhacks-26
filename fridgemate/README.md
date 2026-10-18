@@ -26,7 +26,9 @@ npm run dev -- --host 127.0.0.1
 
 Open the Local URL Vite prints. Cook → add ingredients (or upload a fridge photo) → suggests via FastAPI (`/api/recipes`, `/api/vision/ingredients` proxied to `:8000`).
 
-Restart Vite after `vite.config.js` proxy changes so photo upload reaches the backend.
+Optional Postgres / Tiger Data: set `DATABASE_URL` in `.env`, restart the backend. Pantry syncs on Suggest meals; choosing a meal also POSTs to `/api/saved-meals`. Without `DATABASE_URL`, those routes return `local_only` and the app still works.
+
+Restart Vite after `vite.config.js` proxy changes.
 
 Apple Calendar still uses the local Mac Vite bridge; ICS import works without it.
 
