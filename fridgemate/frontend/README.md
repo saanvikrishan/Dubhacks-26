@@ -1,6 +1,6 @@
-# Daywell frontend
+# WhatsCooking.ai frontend
 
-Vite + React UI for Daywell / FridgeMate.
+Vite + React UI for WhatsCooking.ai.
 
 ```sh
 cd fridgemate/frontend

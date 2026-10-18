@@ -1,6 +1,6 @@
 # UW dining integration
 
-This extends the existing Daywell application. Cook discovery, Gemini recipes, meal plans, logging, persistence and the timeline are unchanged.
+This extends the existing WhatsCooking.ai application. Cook discovery, Gemini recipes, meal plans, logging, persistence and the timeline are unchanged.
 
 ## Run
 
