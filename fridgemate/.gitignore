@@ -25,3 +25,9 @@ dist-ssr
 # Private API keys
 backend/.env
 backend/.venv/
+
+# Daywell local files
+.calendar-bridge
+.env
+.env.*
+!.env.example
