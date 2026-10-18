@@ -1,7 +1,7 @@
 import { config, requireCapability } from "./config.js";
-import { assertMealAction, validateInputs } from "./engine.js";
+import { assertMealAction, validateInputs, clockTime } from "./engine.js";
 import { byId } from "../data/suggestions.js";
-import { normalizeCalendarState, validateEvent } from "./calendar.js";
+import { normalizeCalendarState, validateEvent, timeKey, dayKey } from "./calendar.js";
 
 export const today = () =>
   new Intl.DateTimeFormat("en-CA", {
@@ -150,13 +150,17 @@ function applyAction(state, action, c = config) {
   if (action.type === "undoLog") {
     requireCapability("mealLogging", c);
     if (!state.logUndo) throw new Error("There is no meal-log change to undo.");
-    const { id, before } = state.logUndo;
+    const { id, before, removedPlanId } = state.logUndo;
     return {
       ...state,
       logs: [
         ...state.logs.filter((l) => l.id !== id),
         ...(before ? [before] : []),
       ],
+      // Remove the auto-created plan that was added when this log was created.
+      mealPlans: removedPlanId
+        ? state.mealPlans.filter((p) => p.id !== removedPlanId)
+        : state.mealPlans,
       logUndo: null,
     };
   }
@@ -264,12 +268,51 @@ function applyAction(state, action, c = config) {
       date: action.date,
       confirmedAt: action.confirmedAt || new Date().toISOString(),
     };
+    // Derive a start time from confirmedAt so the meal appears on the timeline.
+    const confirmedTs = new Date(log.confirmedAt);
+    const logStart = timeKey(confirmedTs);
+    const logPlanId = `log:${log.id}`;
+    const meal = byId[action.mealId];
+    const ctx = state.context;
+    const duration =
+      meal
+        ? (meal.timing.prep ?? 0) +
+          (meal.timing.cook ?? 0) +
+          (ctx.eating ?? 20) +
+          (meal.mode === "cook" ? (ctx.cleanup ?? 5) : (ctx.service ?? 10)) +
+          (ctx.onward ?? 5) +
+          (ctx.buffer ?? 5)
+        : 30;
+    // If a plan already covers this meal's date+start slot, leave mealPlans alone.
+    const existingPlan = state.mealPlans.find(
+      (p) => p.date === log.date && p.start === logStart,
+    );
+    const autoLogPlan =
+      !existingPlan && meal
+        ? {
+            id: logPlanId,
+            mealId: action.mealId,
+            servings: action.servings,
+            date: log.date,
+            start: logStart,
+            duration,
+            fromLog: true,
+          }
+        : null;
+    // For editLog, remove any previous auto-plan for this log id before re-adding.
+    const filteredPlans = state.mealPlans.filter((p) => p.id !== logPlanId);
     return {
       ...state,
       logs: [...state.logs.filter((item) => item.id !== log.id), log],
+      mealPlans: autoLogPlan
+        ? [...filteredPlans, autoLogPlan]
+        : filteredPlans.length !== state.mealPlans.length
+          ? filteredPlans  // editLog: removed stale auto-plan, no new one needed (slot taken)
+          : state.mealPlans,
       logUndo: {
         id: log.id,
         before: state.logs.find((l) => l.id === log.id) ?? null,
+        removedPlanId: autoLogPlan ? logPlanId : null,
       },
     };
   }
@@ -277,9 +320,12 @@ function applyAction(state, action, c = config) {
     requireCapability("mealLogging", c);
     if (!state.logs.some((log) => log.id === action.id))
       throw new Error("This log no longer exists.");
+    // Also remove the auto-created plan for this log, if any.
+    const autoPlanId = `log:${action.id}`;
     return {
       ...state,
       logs: state.logs.filter((log) => log.id !== action.id),
+      mealPlans: state.mealPlans.filter((p) => p.id !== autoPlanId),
       logUndo: {
         id: action.id,
         before: state.logs.find((l) => l.id === action.id) ?? null,
