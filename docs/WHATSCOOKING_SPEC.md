@@ -1,3 +1,5 @@
+> Historical design record. For the current implementation, see the [main README](../README.md) and [handoff](CODEX-HANDOFF-AGENT-VOICE-ONBOARDING.md).
+
 # WhatsCooking Specification
 ## An Agentic Culinary Assistant for University Students
 
@@ -11,11 +13,11 @@
 
 WhatsCooking is an intelligent, context-aware AI cooking agent designed to help university students manage their food, budget, and time. It combines social media recipe transcription, smart inventory management, context-aware meal scheduling, AI-driven meal planning, dynamic cooking assistance, and fallback takeout routing into a unified platform.
 
-**Migration Context:** This spec outlines the migration from the current React + Vite "Daywell" application to a production-ready Next.js application with significantly expanded AI agent capabilities.
+**Migration Context:** This spec outlines the migration from the current React + Vite "WhatsCooking.ai" application to a production-ready Next.js application with significantly expanded AI agent capabilities.
 
 ### Current Implementation Status
 
-The **Daywell** app already has a solid foundation with ~35% of the final vision complete:
+The **WhatsCooking.ai** app already has a solid foundation with ~35% of the final vision complete:
 
 ✅ **Working Features:**
 - Apple Calendar integration (Swift EventKit bridge)
@@ -1317,7 +1319,7 @@ Check for conflicts
 - **Dependencies:** TASK-0.4, TASK-0.5
 - **Estimate:** 2 hours
 
-**TASK-4.1a** Migrate existing Apple Calendar integration from current Daywell app
+**TASK-4.1a** Migrate existing Apple Calendar integration from current WhatsCooking.ai app
 - Port `server/calendar-bridge.js` to Next.js API route structure
 - Port `native/CalendarBridge.swift` to work with Next.js
 - Update compilation script for Swift bridge

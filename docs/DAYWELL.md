@@ -1,4 +1,6 @@
-# Daywell
+> Historical design record. For the current implementation, see the [main README](../README.md) and [handoff](CODEX-HANDOFF-AGENT-VOICE-ONBOARDING.md).
+
+# WhatsCooking.ai
 
 A working React/Vite app for planning a day and finding food around UW. This implementation is in `whatscooking/` on `codex/daywell-calendar-workflow`, based on the current team commit `cd6d653`. Existing backend files and the separate local `daywell/` work are preserved.
 
