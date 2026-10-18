@@ -1,13 +1,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, stat, copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
-const bundle = path.join(root, ".calendar-bridge/DaywellCalendar.app");
-const binary = path.join(bundle, "Contents/MacOS/DaywellCalendar");
+const binary = path.join(root, ".calendar-bridge/DaywellCalendar");
 let compiling;
 export async function ensureCalendarBridge() {
   if (process.platform !== "darwin")
@@ -29,7 +27,6 @@ export async function ensureCalendarBridge() {
       )
         return;
       await mkdir(path.dirname(binary), { recursive: true });
-      await copyFile(info,path.join(bundle,"Contents/Info.plist"));
       await exec(
         "/usr/bin/xcrun",
         [
@@ -63,7 +60,7 @@ export async function ensureCalendarBridge() {
           "-",
           "--identifier",
           "local.daywell.calendar-reader",
-          bundle,
+          binary,
         ],
         { timeout: 10000 },
       );
@@ -79,16 +76,11 @@ export async function readAppleCalendar(command, from, to) {
     command === "events"
       ? ["--events", from, to]
       : [command === "connect" ? "--connect" : "--status"];
-  const temporary=await mkdtemp(path.join(tmpdir(),"daywell-calendar-"));
-  const output=path.join(temporary,"result.json");
-  try {
-    // Launch Services gives the permission prompt the native app's identity and run loop.
-    await exec("/usr/bin/open",["-n","-W",bundle,"--args",...args,"--output",output],{
-      timeout:command==="connect"?90000:20000,
-      maxBuffer:4*1024*1024,
-    });
-    return JSON.parse(await readFile(output,"utf8"));
-  } finally { await rm(temporary,{recursive:true,force:true}); }
+  const { stdout } = await exec(binary, args, {
+    timeout: command === "connect" ? 90000 : 20000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  return JSON.parse(stdout.trim());
 }
 export function calendarApi() {
   return {

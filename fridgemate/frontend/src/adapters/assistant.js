@@ -136,11 +136,17 @@ export function replyFromPatch(patch, state, catalog, c = config) {
     },
     c,
   );
+  const label =
+    mode === "cook"
+      ? "Cook recipes"
+      : mode === "eatOut"
+        ? "eat-out options"
+        : "meals";
   let message = result.cards.length
     ? `Here's what works: ${result.cards
         .map((r) => `${r.meal.name} (${r.duration} min, $${r.meal.cost.toFixed(2)})`)
         .join("; ")}. Open Let’s eat to pick one.`
-    : `Nothing in the catalog fits those exact constraints right now — open Let’s eat to review missing details or adjust your inputs.`;
+    : `Nothing in the catalog fits those exact constraints right now — open Let’s eat to browse everything and choose what looks good anyway.`;
   const unparsed = Array.isArray(patch?.unparsed) ? patch.unparsed : [];
   if (unparsed.length)
     message += ` Not in the catalog: ${unparsed.join(", ")}.`;

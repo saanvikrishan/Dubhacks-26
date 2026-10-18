@@ -23,21 +23,19 @@ export interface FoodRecord {
   equipment: string[];
   ingredients: { name: string; grams: number }[];
   cost: number | null;
-  portionGrams: number | null;
+  portionGrams: number;
   portionLabel: string;
   nutrition: {
     basis: "per_serving" | "per_100g" | "per_recipe";
     yieldServings?: number;
     values: Nutrients;
-    kind: "illustrative_demo" | "published" | "ingredient_estimate" | "unknown";
+    kind: "illustrative_demo" | "published" | "ingredient_estimate";
     source: string;
-    checkedAt: string | null;
+    checkedAt: string;
     preparation: string;
   };
   timing: { prep: number; cook: number; outbound: number };
   steps: string[];
-  suggestion?: boolean;
-  review?: {confirmed: true; checkedAt: string; source: "user_confirmed"; diet: string} | null;
   venue?: {
     name: string;
     location: string;
@@ -101,7 +99,6 @@ export interface AppState {
     after: MealPlan | null;
   } | null;
   logUndo: { id: string; before: Consumption | null } | null;
-  generatedMeals: FoodRecord[];
   logs: Consumption[];
   actions: object[];
 }

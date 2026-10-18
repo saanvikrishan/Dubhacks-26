@@ -1,199 +1,226 @@
-"""Reviewed USDA detail records and deterministic ingredient nutrition; never recipe search."""
+"""USDA FoodData Central lookups for recipe nutrition estimates."""
+
 from __future__ import annotations
-import asyncio
-import copy
-import json
-import math
+
 import os
 import time
-from datetime import datetime, timezone
-from pathlib import Path
+from typing import Any
+
 import httpx
 
-FDC_BASE = 'https://api.nal.usda.gov/fdc/v1'
-DATA = Path(__file__).resolve().parents[1] / 'frontend/src/data/food'
-MANIFEST = json.loads((DATA / 'ingredient-matches.json').read_text())
-MATCHES = {row['key']: row for row in MANIFEST['matches']}
-NUTRIENT_IDS = json.loads((DATA / 'nutrient-map.json').read_text())
-USDA_API_KEY = ''
-TTL = 21600
+FDC_BASE = "https://api.nal.usda.gov/fdc/v1"
+# Prefer a real key; DEMO_KEY works for light hackathon demos with rate limits.
+USDA_API_KEY = (os.getenv("USDA_API_KEY") or os.getenv("FDC_API_KEY") or "").strip()
+
+# FDC nutrientNumber → our schema keys (detail "100x" + search legacy "2xx")
+NUTRIENT_MAP = {
+    "1008": "energy_kcal",
+    "208": "energy_kcal",
+    "957": "energy_kcal",  # Atwater General
+    "958": "energy_kcal",  # Atwater Specific
+    "1003": "protein_g",
+    "203": "protein_g",
+    "1005": "carbohydrate_g",
+    "205": "carbohydrate_g",
+    "1004": "fat_g",
+    "204": "fat_g",
+    "1079": "fiber_g",
+    "291": "fiber_g",
+    "1093": "sodium_mg",
+    "307": "sodium_mg",
+}
+
+_EMPTY = {
+    "energy_kcal": 0.0,
+    "protein_g": 0.0,
+    "carbohydrate_g": 0.0,
+    "fat_g": 0.0,
+    "fiber_g": 0.0,
+    "sodium_mg": 0.0,
+}
+
+# Simple in-process cache: query → (expires_at, per_100g dict | None)
+_cache: dict[str, tuple[float, dict[str, float] | None]] = {}
+_CACHE_TTL = 60 * 60 * 6  # 6 hours
 
 
-def refresh_api_key():
+def usda_configured() -> bool:
+    return bool(USDA_API_KEY)
+
+
+def refresh_api_key() -> str:
     global USDA_API_KEY
-    USDA_API_KEY = (os.getenv('USDA_API_KEY') or os.getenv('FDC_API_KEY') or '').strip()
+    USDA_API_KEY = (
+        os.getenv("USDA_API_KEY") or os.getenv("FDC_API_KEY") or ""
+    ).strip()
     return USDA_API_KEY
 
 
-def usda_configured():
-    return bool(refresh_api_key())
+def _api_key() -> str:
+    return refresh_api_key()
 
 
-def finite(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
-
-
-def stamp():
-    return datetime.now(timezone.utc).isoformat()
-
-
-def unit(text):
-    return str(text or '').strip().lower().replace('µ', 'u').replace('μ', 'u')
-
-
-def converted(value, source, target):
-    if not finite(value):
-        return None
-    source, target = unit(source), unit(target)
-    if target == 'kcal':
-        return value if source == 'kcal' else value / 4.184 if source == 'kj' else None
-    weights = {'g': 1, 'mg': .001, 'ug': .000001, 'mcg': .000001}
-    return value * weights[source] / weights[target] if source in weights and target in weights else None
-
-
-def nutrient_values(food):
-    """IDs are nutrient IDs, not row IDs/nutrient numbers. Missing/conflicting values stay null."""
-    rows = food.get('foodNutrients') or []
-    values, fields = {}, {}
-    for key, normal_ids in NUTRIENT_IDS.items():
-        ids = ([2048, 2047, 1008, 1062] if food.get('dataType') == 'Foundation' else [1008, 2048, 2047, 1062]) if key == 'energy_kcal' else normal_ids
-        target = 'kcal' if key == 'energy_kcal' else 'mg' if key.endswith('_mg') else 'ug' if key.endswith('_mcg') else 'g'
-        values[key] = None
-        fields[key] = {'status': 'unknown', 'originalRows': [], 'unit': target}
-        for ident in ids:
-            selected = [r for r in rows if (r.get('nutrient') or {}).get('id', r.get('nutrientId')) == ident]
-            if not selected:
-                continue
-            parsed = [converted(r.get('amount', r.get('value')), (r.get('nutrient') or {}).get('unitName', r.get('unitName')), target) for r in selected]
-            distinct = set(parsed)
-            value = parsed[0] if len(distinct) == 1 and None not in distinct else None
-            fields[key] = {'status': 'usda_published_normalized' if value is not None else 'unknown', 'nutrientId': ident, 'originalRows': copy.deepcopy(selected), 'unit': target}
-            if value is not None:
-                values[key] = value
-                break
-    return values, fields
-
-
-def _extract_per_100g(food):
-    values, _ = nutrient_values(food)
-    return values if any(v is not None for v in values.values()) else None
-
-
-async def request(path, payload):
-    async with httpx.AsyncClient(timeout=12, follow_redirects=False) as http:
-        response = await http.post(FDC_BASE + path, params={'api_key': refresh_api_key()}, json=payload)
-        return response.status_code, response.json() if response.status_code == 200 else None
-
-
-class FdcClient:
-    def __init__(self, send=request, now=time.time, saved=None):
-        self.send, self.now = send, now
-        rows = saved if saved is not None else json.loads((DATA / 'usda-records.json').read_text())['records']
-        self.saved = {r['fdcId']: copy.deepcopy(r) for r in rows}
-        self.cache = {}
-        self.lock = asyncio.Lock()
-        self.retry_at = 0
-
-    async def details(self, ids, force=False):
-        ids = list(dict.fromkeys(ids))
-        if len(ids) > 100 or any(not isinstance(i, int) or i <= 0 for i in ids):
-            raise ValueError('Use at most 100 positive FDC IDs.')
-        async with self.lock:
-            needed = [i for i in ids if force or i not in self.cache or self.cache[i][0] <= self.now()]
-            status = 'cached' if not needed else 'saved_reference'
-            if needed and usda_configured() and self.now() >= self.retry_at:
-                for offset in range(0, len(needed), 20):
-                    batch = needed[offset:offset+20]
-                    try:
-                        code, body = await self.send('/foods', {'fdcIds': batch, 'format': 'full'})
-                        if code != 200 or not isinstance(body, list):
-                            status = 'rate_limited' if code == 429 else 'api_rejected'
-                            self.retry_at = self.now() + (60 if code == 429 else 30)
-                            break
-                        checked = stamp()
-                        for record in body:
-                            if isinstance(record, dict) and record.get('fdcId') in batch:
-                                record = {**record, 'retrievedAt': checked, 'retrievalUrl': FDC_BASE + '/food/' + str(record['fdcId'])}
-                                self.cache[record['fdcId']] = (self.now()+TTL, record)
-                        status = 'retrieved'
-                    except Exception:
-                        status = 'network_or_invalid_response'
-                        self.retry_at = self.now()+30
-                        break
-            records = []
-            for ident in ids:
-                cached = self.cache.get(ident)
-                record = cached[1] if cached and cached[0] > self.now() else self.saved.get(ident)
-                if record:
-                    records.append(copy.deepcopy(record))
-            return {'status': status, 'records': records, 'missingIds': [i for i in ids if not any(r['fdcId'] == i for r in records)]}
-
-    async def search_candidates(self, query):
-        if not isinstance(query, str) or not 2 <= len(query.strip()) <= 80:
-            raise ValueError('Use a query of 2–80 characters.')
-        if not usda_configured():
-            return {'status': 'missing_configuration', 'candidates': []}
+def _extract_per_100g(food: dict[str, Any]) -> dict[str, float] | None:
+    nutrients = food.get("foodNutrients") or []
+    out = dict(_EMPTY)
+    found = 0
+    for row in nutrients:
+        number = str(
+            row.get("nutrientNumber")
+            or (row.get("nutrient") or {}).get("number")
+            or ""
+        )
+        key = NUTRIENT_MAP.get(number)
+        if not key:
+            continue
+        amount = row.get("value")
+        if amount is None:
+            amount = row.get("amount")
         try:
-            code, body = await self.send('/foods/search', {'query': query.strip(), 'dataType': ['Foundation', 'SR Legacy'], 'pageSize': 10})
-            return {'status': 'needs_review' if code == 200 else 'rate_limited' if code == 429 else 'api_rejected', 'candidates': [{k: r.get(k) for k in ['fdcId', 'description', 'dataType']} for r in (body or {}).get('foods', [])[:10]]}
-        except Exception:
-            return {'status': 'network_or_invalid_response', 'candidates': []}
+            amount = float(amount)
+        except (TypeError, ValueError):
+            continue
+        out[key] = amount
+        found += 1
+    return out if found else None
 
 
-fdc_client = FdcClient()
+async def lookup_per_100g(query: str) -> dict[str, float] | None:
+    """Search FDC and return nutrient amounts per 100 g, or None."""
+    q = " ".join(str(query or "").lower().split())[:80]
+    if not q or not _api_key():
+        return None
+
+    now = time.time()
+    cached = _cache.get(q)
+    if cached and cached[0] > now:
+        return cached[1]
+
+    payload = {
+        "query": q,
+        "pageSize": 5,
+        "dataType": ["Foundation", "SR Legacy", "Survey (FNDDS)"],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            response = await client.post(
+                f"{FDC_BASE}/foods/search",
+                params={"api_key": _api_key()},
+                json=payload,
+            )
+            if response.status_code == 429:
+                print("[USDA] rate limited")
+                _cache[q] = (now + 60, None)
+                return None
+            response.raise_for_status()
+            data = response.json()
+    except Exception as e:
+        print(f"[USDA] search failed for {q!r}: {type(e).__name__}: {e}")
+        _cache[q] = (now + 120, None)
+        return None
+
+    foods = data.get("foods") or []
+
+    def rank(food: dict) -> tuple:
+        desc = (food.get("description") or "").lower()
+        dtype = food.get("dataType") or ""
+        exact = 0 if desc.startswith(q) else 1 if q in desc else 2
+        type_rank = 0 if dtype == "Foundation" else 1 if dtype == "SR Legacy" else 2
+        return (exact, type_rank, -float(food.get("score") or 0))
+
+    result = None
+    for food in sorted(foods, key=rank):
+        parsed = _extract_per_100g(food)
+        if parsed and (parsed.get("energy_kcal") or parsed.get("protein_g")):
+            result = parsed
+            break
+
+    _cache[q] = (now + _CACHE_TTL, result)
+    return result
 
 
-def matched_record(record, match):
-    return bool(record and record.get('fdcId') == match['fdcId'] and record.get('description') == match['expectedDescription'] and record.get('dataType') == match['expectedDataType'])
+def _scale(per_100g: dict[str, float], grams: float) -> dict[str, float]:
+    factor = max(0.0, float(grams)) / 100.0
+    return {k: v * factor for k, v in per_100g.items()}
 
 
-def compact_record(record):
-    ids={ident for group in NUTRIENT_IDS.values() for ident in group}|{2047,2048}
-    return {**{k:record.get(k) for k in ['fdcId','description','dataType','publicationDate','retrievedAt','retrievalUrl','foodPortions']},
-            'foodNutrients':[{k:r[k] for k in ['id','nutrient','amount'] if k in r} for r in record.get('foodNutrients',[]) if r.get('nutrient',{}).get('id') in ids]}
-
-
-async def ingredient_reference():
-    result = await fdc_client.details([m['fdcId'] for m in MATCHES.values()])
-    records = {r['fdcId']: r for r in result['records']}
-    return {**result, 'matches': [m for m in MATCHES.values() if matched_record(records.get(m['fdcId']), m)], 'unresolved': MANIFEST['unresolved']}
-
-
-async def lookup_per_100g(query):
-    match = MATCHES.get(str(query or '').strip().lower())
-    if not match:
-        return None  # Fuzzy search results require explicit review; never auto-certify.
-    result = await fdc_client.details([match['fdcId']])
-    record = next((r for r in result['records'] if matched_record(r, match)), None)
-    return _extract_per_100g(record) if record else None
-
-
-async def enrich_meal(meal):
-    """Compatibility adapter: full coverage per nutrient, positive input grams, explicit yield."""
-    ingredients = meal.get('ingredients') or []
-    servings = (meal.get('nutrition') or {}).get('yieldServings', 1)
-    if not ingredients or not finite(servings) or servings <= 0:
+async def enrich_meal(meal: dict[str, Any]) -> dict[str, Any]:
+    """
+    Replace Gemini placeholder macros with a USDA-based per-serving estimate
+    when enough ingredients match FoodData Central.
+    """
+    if not _api_key():
         return meal
-    result = await ingredient_reference()
-    records = {r['fdcId']: r for r in result['records']}
-    rows = []
+
+    ingredients = meal.get("ingredients") or []
+    if not ingredients:
+        return meal
+
+    totals = dict(_EMPTY)
+    matched: list[str] = []
+    unmatched: list[str] = []
+
     for item in ingredients:
-        name, grams = item.get('name'), item.get('grams')
-        match = MATCHES.get(name)
-        record = records.get(match['fdcId']) if match else None
-        values = nutrient_values(record)[0] if match and matched_record(record, match) and finite(grams) and grams > 0 else {}
-        rows.append({'name': name, 'grams': grams, 'fdcId': match['fdcId'] if values else None, 'values': values, 'record': record if values else None})
-    values, coverage = {}, {}
-    for key in NUTRIENT_IDS:
-        known = [r['values'][key]*r['grams']/100/servings for r in rows if r['values'].get(key) is not None]
-        values[key] = sum(known) if len(known) == len(rows) else None
-        coverage[key] = {'known': len(known), 'total': len(rows), 'knownSubtotal': sum(known) if known else None}
-    return {**meal, 'nutrition': {'basis': 'per_serving', 'kind': 'ingredient_estimate', 'values': values, 'coverage': coverage,
-        'source': 'USDA FoodData Central; reviewed ingredient IDs and measured input grams.',
-        'checkedAt': min((r['record']['retrievedAt'] for r in rows if r['record']), default=None),
-        'preparation': 'Input-weight ingredient estimate; cooking losses, exact brand and final serving weight are not measured.',
-        'matches': [{'name': r['name'], 'grams': r['grams'], 'fdcId': r['fdcId'], 'sourceUrl': FDC_BASE+'/food/'+str(r['fdcId']) if r['fdcId'] else None} for r in rows]}}
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            grams = float(item.get("grams") or 100)
+        except (TypeError, ValueError):
+            grams = 100.0
+        per_100 = await lookup_per_100g(name)
+        if not per_100:
+            unmatched.append(name)
+            continue
+        scaled = _scale(per_100, grams)
+        for key, value in scaled.items():
+            totals[key] += value
+        matched.append(name)
+
+    if not matched:
+        return meal
+
+    yield_servings = meal.get("nutrition", {}).get("yieldServings") or 1
+    try:
+        yield_servings = max(1.0, float(yield_servings))
+    except (TypeError, ValueError):
+        yield_servings = 1.0
+
+    values = {
+        key: round(total / yield_servings, 1) for key, total in totals.items()
+    }
+    confidence = (
+        "high"
+        if len(matched) >= max(2, int(0.75 * len(ingredients)))
+        else "medium"
+        if len(matched) >= max(1, len(ingredients) // 2)
+        else "low"
+    )
+
+    nutrition = dict(meal.get("nutrition") or {})
+    nutrition["values"] = values
+    nutrition["basis"] = "per_serving"
+    nutrition["kind"] = "usda_estimated"
+    nutrition["confidence"] = confidence
+    nutrition["source"] = (
+        f"USDA FoodData Central · {len(matched)}/{len(ingredients)} ingredients "
+        f"matched · confidence {confidence}."
+    )
+    nutrition["preparation"] = (
+        "Estimated from USDA ingredient matches; confirm allergens and portions."
+    )
+    nutrition["usda_matched"] = matched
+    nutrition["usda_unmatched"] = unmatched
+    meal = {**meal, "nutrition": nutrition}
+    return meal
 
 
-async def enrich_meals(meals):
-    return [await enrich_meal(meal) for meal in meals]
+async def enrich_meals(meals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for meal in meals:
+        try:
+            out.append(await enrich_meal(meal))
+        except Exception as e:
+            print(f"[USDA] enrich failed: {type(e).__name__}: {e}")
+            out.append(meal)
+    return out

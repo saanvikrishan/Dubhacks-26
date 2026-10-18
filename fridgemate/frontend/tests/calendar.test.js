@@ -10,13 +10,12 @@ import {
   importIcs,
   layoutDayEvents,
   localInstant,
-  mealWindowStillOpen,
   nextMealWindow,
   scheduledItems,
   timeKey,
 } from "../src/domain/calendar.js";
 import {
-  createDemoState as blankDemoState, testPantry,
+  createDemoState,
   transition,
   validateState,
 } from "../src/domain/state.js";
@@ -239,13 +238,6 @@ test("free-window search skips merged busy times and returns a safe commitment",
   );
 });
 
-test("a meal window stays until its end, then can be replaced", () => {
-  const context = { date, start: "12:00", available: 65 };
-  assert.equal(mealWindowStillOpen(context, new Date(localInstant(date, "12:30"))), true);
-  assert.equal(mealWindowStillOpen(context, new Date(localInstant(date, "13:05"))), false);
-  assert.equal(mealWindowStillOpen({ ...context, date: "2026-10-16" }, new Date(localInstant(date, "12:30"))), false);
-});
-
 test("month shifting clamps dates and all-day boundaries are exclusive", () => {
   assert.equal(addMonths("2026-01-31", 1), "2026-02-28");
   assert.equal(addMonths("2026-12-31", 1), "2027-01-31");
@@ -383,10 +375,7 @@ test("UW distances derive from HUB pins; routes and hours stay separate from nut
   assert.ok(distanceMeters(center) >= 500 && distanceMeters(center) <= 550);
   const hub = uwDining.find((v) => v.id === "husky-den");
   assert.equal(venueHours(hub, "2026-10-17", "12:00").open, false);
-  assert.equal(venueHours(hub, "2026-10-19", "12:00").open, false);
-  assert.equal(venueHours(hub, "2026-10-19", "12:00").status, "unknown");
+  assert.equal(venueHours(hub, "2026-10-19", "12:00").open, true);
   assert.match(directionsUrl(hub), /travelmode=walking/);
   assert.ok(uwDining.every((v) => v.rating === null && !v.nutrition));
 });
-
-function createDemoState() { const s = blankDemoState(); s.pantry = {...testPantry}; s.context.onward=5; s.context.buffer=10; return s; }

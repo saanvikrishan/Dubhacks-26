@@ -33,7 +33,7 @@ test("catalog supports both modes and keeps demo provenance", () => {
 });
 test("full cooking duration counts all components once", () => {
   const result = evaluate(byId["tofu-bowl"], stockedState());
-  // Prep, cooking, eating, cleanup, onward travel and buffer each count once.
+  // prep=5 + cook=15 + eating=20 + cleanup=5 = 45 (onward/buffer removed)
   assert.equal(result.duration, 45);
   assert.equal(result.feasible, true);
   assert.equal(result.score, null);

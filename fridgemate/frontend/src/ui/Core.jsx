@@ -1,9 +1,4 @@
-import {CUISINES,TASTES} from "../domain/preferences.js";
-import {MealWindowPicker} from "./MealWindowPicker.jsx";
-import {contextForWindow} from "../domain/mealWindow.js";
-import { knownPresentAllergens, hasAllergenAbsenceCoverage } from "../domain/allergens.js";
 import { useEffect, useRef, useState } from "react";
-import { EQUIPMENT } from "../domain/generatedMeals";
 import { catalog } from "../data/catalog";
 import { byId } from "../data/suggestions";
 import { capabilities, config } from "../domain/config";
@@ -14,7 +9,8 @@ import {
   estimateGrams,
   goalStatus,
   nutrientInfo,
-  portionNutrition, nutritionDisplayRows,
+  portionNutrition,
+  usdaConfidenceExplain,
 } from "../domain/nutrition";
 import {
   mealSubstitutions,
@@ -239,24 +235,93 @@ function Confirm({ title, onClose, onConfirm, button, children }) {
     </Modal>
   );
 }
-function ContextFields({ value, onChange, state }) {
-  const end = value.available === "" ? value.commitmentTime : clockTime(Math.min(1439, minutes(value.start) + Number(value.available)));
-  const range = (date, start, finish) => {
-    try { onChange(contextForWindow(value, date, start, finish)); }
-    catch { onChange({...value,date,start,available:"",commitmentTime:finish}); }
+function ContextFields({ value, onChange }) {
+  // Helper to ensure time is in 24-hour HH:MM format
+  const normalizeTime = (timeStr) => {
+    if (!timeStr) return timeStr;
+    // If already in HH:MM format, return as-is
+    if (/^\d{2}:\d{2}$/.test(timeStr)) return timeStr;
+    // If has AM/PM, convert to 24-hour
+    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (match) {
+      let hours = parseInt(match[1]);
+      const minutes = match[2];
+      const period = match[3].toUpperCase();
+      if (period === 'PM' && hours !== 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
+      return `${hours.toString().padStart(2, '0')}:${minutes}`;
+    }
+    return timeStr;
   };
-  const number = (key,label,min=0,max=240) => <label>{label}<input type="number" min={min} max={max} required={key!=="service"} value={value[key]??""} onChange={e=>onChange({...value,[key]:e.target.value===""?(key==="service"?null:""):Number(e.target.value)})}/></label>;
-  return <>
-    <div className="form-grid">
-      <label>Meal date<input type="date" required value={value.date} onChange={e=>onChange({...value,date:e.target.value})}/></label>
-      <label>Starts<input type="time" required value={value.start} onChange={e=>{const duration=Number(value.available)||60;range(value.date,e.target.value,clockTime(Math.min(1439,minutes(e.target.value)+duration)));}}/></label>
-      <label>Ends<input type="time" required value={end==="Unknown"?value.commitmentTime:end} onChange={e=>range(value.date,value.start,e.target.value)}/></label>
-      {number("available","Duration (minutes)",1,1440)}
-    </div>
-    <MealWindowPicker state={state} value={value} onChange={onChange}/>
-    <details className="allowances"><summary>Location & next commitment</summary><div className="form-grid"><label>Location / area<input value={value.location??""} onChange={e=>onChange({...value,location:e.target.value})}/></label><label>Next commitment<input value={value.commitment??""} onChange={e=>onChange({...value,commitment:e.target.value})}/></label><label>Next commitment at<input type="time" required value={value.commitmentTime} onChange={e=>onChange({...value,commitmentTime:e.target.value})}/></label></div></details>
-    <details className="allowances"><summary>Meal time allowances</summary><div className="form-grid">{number("eating","Eating (min)")}{number("cleanup","Cleanup (min)")}{number("onward","Onward travel (min)")}{number("buffer","Buffer (min)")}{number("service","Dining service (min)")}</div></details>
-  </>;
+
+  const field = (key, label, type = "number", min = 0, max = 240) => (
+    <label>
+      {label}
+      <input
+        type={type}
+        value={value[key] ?? ""}
+        min={min}
+        max={max}
+        required={key !== "service"}
+        onChange={(e) => {
+          let newValue = type === "number"
+            ? e.target.value === "" && key === "service"
+              ? null
+              : Number(e.target.value)
+            : e.target.value;
+          
+          // Normalize time values to 24-hour format
+          if (type === "time" && newValue) {
+            newValue = normalizeTime(newValue);
+          }
+          
+          const updated = { ...value, [key]: newValue };
+          
+          // Auto-adjust available window when start or commitment time changes
+          if ((key === "start" || key === "commitmentTime") && updated.start && updated.commitmentTime) {
+            const normalizedStart = normalizeTime(updated.start);
+            const normalizedCommitment = normalizeTime(updated.commitmentTime);
+            if (normalizedStart && normalizedCommitment) {
+              const startMinutes = parseInt(normalizedStart.split(':')[0]) * 60 + parseInt(normalizedStart.split(':')[1]);
+              const commitmentMinutes = parseInt(normalizedCommitment.split(':')[0]) * 60 + parseInt(normalizedCommitment.split(':')[1]);
+              const calculatedWindow = commitmentMinutes - startMinutes;
+              if (calculatedWindow > 0) {
+                updated.available = calculatedWindow;
+                updated.start = normalizedStart;
+                updated.commitmentTime = normalizedCommitment;
+              }
+            }
+          }
+          
+          onChange(updated);
+        }}
+      />
+    </label>
+  );
+  return (
+    <>
+      <div className="form-grid">
+        {field("date", "Meal date", "date")}
+        {field("start", "Meal start", "time")}
+        {field("available", "Available window (minutes)", "number", 1, 1440)}
+        {field("commitmentTime", "Next commitment at", "time")}
+        {field("commitment", "Next commitment", "text")}
+        {field("location", "Location / area", "text")}
+      </div>
+      <details className="allowances">
+        <summary>Meal time allowances</summary>
+        <p className="muted">
+          Full activity includes these allowances. Travel and service are your
+          assumptions, not live estimates.
+        </p>
+        <div className="form-grid">
+          {field("eating", "Eating (min)")}
+          {field("cleanup", "Cooking cleanup (min)")}
+          {field("service", "Eat-out service (min)")}
+        </div>
+      </details>
+    </>
+  );
 }
 function Setup({ state, onSave, onClose, timeOnly = false }) {
   const [profile, setProfile] = useState(structuredClone(state.profile)),
@@ -265,9 +330,9 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
   const toggle = (key, item) =>
     setProfile({
       ...profile,
-      [key]: (profile[key]??[]).includes(item)
+      [key]: profile[key].includes(item)
         ? profile[key].filter((v) => v !== item)
-        : [...(profile[key]??[]), item],
+        : [...profile[key], item],
     });
   const editGoal = (i, key, value) =>
     setProfile({
@@ -334,8 +399,8 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
       >
         <p className="muted">
           {timeOnly
-            ? "Choose today, tomorrow or any date. Drag a meal period; your saved meals stay in place."
-            : "Choose what you enjoy. Recipe amounts describe one serving; grocery purchase weight is optional for nutrition."}
+            ? "Update your window. Your saved meal stays until you approve a replacement."
+            : "A few preferences, a little context. Sample values are editable; all catalog food remains demo data."}
         </p>
         {!timeOnly && (
           <>
@@ -377,7 +442,6 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                   }
                 />
               </label>
-              <label>Foods you dislike (optional)<input maxLength={160} value={profile.dislikes??''} placeholder="e.g. mushrooms, olives" onChange={e=>setProfile({...profile,dislikes:e.target.value})}/></label>
               <label className="check-label">
                 <input
                   type="checkbox"
@@ -407,8 +471,6 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                 ? `Text ${profile.reminderFrom.trim()} once to activate reminders.`
                 : "Use international format, like +1XXXXXXXXXX. Saving a number enrolls it for iMessage reminders."}
             </p>
-            <fieldset><legend>Favorite cuisines</legend><div className="checks">{CUISINES.map(value=><label key={value}><input type="checkbox" checked={(profile.cuisines??[]).includes(value)} onChange={()=>toggle('cuisines',value)}/>{value}</label>)}</div></fieldset>
-            <fieldset><legend>Tastes you enjoy</legend><div className="checks">{TASTES.map(value=><label key={value}><input type="checkbox" checked={(profile.tastes??[]).includes(value)} onChange={()=>toggle('tastes',value)}/>{value}</label>)}</div><p className="fine-print">These preferences guide meal suggestions. When connected, Backboard remembers your food, cuisine and taste choices.</p></fieldset>
             <fieldset>
               <legend>Exclude these allergens</legend>
               <p className="muted">
@@ -441,7 +503,14 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
             <fieldset>
               <legend>Available equipment</legend>
               <div className="checks">
-                {EQUIPMENT.map((item) => (
+                {[
+                  "stove", "pan", "pot",
+                  "microwave", "oven", "air fryer", "rice cooker",
+                  "toaster", "blender", "electric kettle",
+                  "baking sheet", "cutting board", "knife",
+                  "mixing bowl", "spatula", "colander",
+                  "slow cooker",
+                ].map((item) => (
                   <label key={item}>
                     <input
                       type="checkbox"
@@ -458,7 +527,7 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
         {flags.manualSchedule.available && (
           <>
             <h3>Your meal window</h3>
-            <ContextFields value={context} onChange={setContext} state={state} />
+            <ContextFields value={context} onChange={setContext} />
           </>
         )}
         {!timeOnly && flags.nutritionGoals.available && (
@@ -583,28 +652,40 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
   );
 }
 function NutritionTable({ meal, servings = 1 }) {
-  const rows=nutritionDisplayRows(meal,servings,config.nutrition.displayNutrients);
-  const unmatched=meal.nutrition.matches?.filter(m=>!m.fdcId).map(m=>m.name)??[];
-  return <>
-    <div className="nutrition-table">{rows.map(row=><div key={row.key}>
-      <span>{nutrientInfo[row.key][0]}{row.partial?' · ingredient subtotal':''}</span>
-      <strong>{num(row.value)} {nutrientInfo[row.key][1]}</strong>
-    </div>)}</div>
-    {!rows.length && <p>Nutrition needs an ingredient match before it can be calculated for this recipe.</p>}
-    <p className="fine-print">{num(servings)} serving{servings===1?'':'s'} · {meal.mode==='cook'?'Calculated from the recipe amounts below; you do not need to weigh your grocery purchase.':'Published source values for this portion.'}</p>
-    {rows.some(r=>r.partial) && <p className="fine-print">Subtotals include published nutrient values only; they are not complete meal totals.{unmatched.length?` Still to match: ${unmatched.join(', ')}.`:''}</p>}
-    {rows.filter(r=>r.partial&&r.missingIngredients.length).map(row=><p className="fine-print" key={row.key}>{nutrientInfo[row.key][0]} is not published for: {row.missingIngredients.join(', ')}.</p>)}
-    {(meal.nutrition.assumptions??[]).map(note=><p className="fine-print" key={note}>{note}</p>)}
-  </>;
+  const values = portionNutrition(meal, servings);
+  return (
+    <>
+      <div className="nutrition-table">
+        {config.nutrition.displayNutrients.map((key) => (
+          <div key={key}>
+            <span>{nutrientInfo[key][0]}</span>
+            <strong>
+              {num(values[key])}
+              {values[key] != null ? ` ${nutrientInfo[key][1]}` : ""}
+            </strong>
+          </div>
+        ))}
+      </div>
+      <p className="fine-print">
+        {meal.nutrition?.kind === "usda_estimated"
+          ? `USDA FoodData Central estimate${meal.nutrition.confidence ? ` · ${meal.nutrition.confidence} confidence` : ""}`
+          : meal.nutrition?.kind === "gemini_suggestion"
+            ? "Gemini estimate · not verified"
+            : "Illustrative demo nutrition"}{" "}
+        · {num(servings)} serving
+        {servings === 1 ? "" : "s"} · {num(meal.portionGrams * servings)} g.{" "}
+        {meal.nutrition.preparation}
+      </p>
+    </>
+  );
 }
-
 function Details({ meal, state, onClose, onChoose, onLog }) {
   const result = evaluate(meal, state);
   return (
     <Modal title={meal.name} onClose={onClose} wide>
       <p className="muted">
-        {modeName(meal.mode)} · {meal.cost==null?'Cost needs a product match':`${money(meal.cost)} estimated`} ·{" "}
-        {meal.portionLabel}{meal.portionGrams==null?'':` (${meal.portionGrams} g)`}
+        {modeName(meal.mode)} · {money(meal.cost)} estimated ·{" "}
+        {meal.portionLabel} ({meal.portionGrams} g)
       </p>
       {flags.nutritionDetails.available && (
         <>
@@ -613,17 +694,34 @@ function Details({ meal, state, onClose, onChoose, onLog }) {
           <details className="allowances" open={meal.nutrition?.kind === "usda_estimated"}>
             <summary>Nutrition source & basis</summary>
             <p>{meal.nutrition.source}</p>
-            {['usda_estimated','ingredient_estimate'].includes(meal.nutrition?.kind) ? (
+            {meal.nutrition?.kind === "usda_estimated" ? (
               <>
-                <p>Calculated from reviewed USDA ingredient records and input grams. Missing ingredients or nutrients leave totals incomplete. Cooking losses and exact brands are not measured.</p>
-                {meal.nutrition.matches?.map(match=><p key={match.name}>{match.name} · {match.grams??'Unknown'} g · {match.sourceUrl?<a href={match.sourceUrl} target="_blank" rel="noreferrer">USDA {match.fdcId}</a>:'No reviewed match'}</p>)}
+                <p>
+                  <strong>
+                    {(meal.nutrition.confidence || "medium").replace(/^./, (c) =>
+                      c.toUpperCase(),
+                    )}{" "}
+                    confidence:
+                  </strong>{" "}
+                  {usdaConfidenceExplain(meal.nutrition)}
+                </p>
+                <p>
+                  High ≈ most ingredients matched · Medium ≈ about half · Low ≈
+                  only a few. Unmatched ingredients are left out of the totals.
+                  Macros are summed from USDA matches and scaled per serving.
+                </p>
               </>
-            ) : <p>Basis: {meal.nutrition.basis} · Checked: {meal.nutrition.checkedAt??'Unknown'}. {meal.nutrition.kind==='illustrative_demo'?'Illustrative demo values.':''}</p>}
+            ) : (
+              <p>
+                ID: {meal.id} · Basis: {meal.nutrition.basis} · Checked:{" "}
+                {meal.nutrition.checkedAt}. No external source verifies these
+                numbers.
+              </p>
+            )}
           </details>
         </>
       )}
-      {meal.pricing && <details className="allowances"><summary>Ingredient cost sources</summary><p>{meal.pricing.basis}</p><p>{meal.pricing.store.name} · Full-package purchase estimate: {money(meal.pricing.purchaseTotal)}</p>{meal.pricing.rows.map(row=><p key={row.name}>{row.name}: {row.consumedCost==null?'Unavailable':money(row.consumedCost)} · {row.quote?.description??row.reason} {row.quote&&<a href={row.quote.sourceUrl} target="_blank" rel="noreferrer">Kroger source</a>}</p>)}</details>}
-      <h3>The full meal window</h3>
+      <h3>Time</h3>
       <div className="time-breakdown">
         {Object.entries(timeParts(meal, state.context)).map(([key, value]) => (
           <div key={key}>
@@ -697,25 +795,21 @@ function Details({ meal, state, onClose, onChoose, onLog }) {
       )}
       <p className="fine-print">
         Allergens:{" "}
-        {knownPresentAllergens(meal).join(", ") || "None confirmed"}
-        {!hasAllergenAbsenceCoverage(meal) && "; other allergens and cross-contact remain unknown"}
-        . Ingredient information does not verify allergen absence or cross-contact safety.
+        {meal.allergens === null
+          ? "Unknown"
+          : meal.allergens.join(", ") || "None listed"}
+        . Demo information does not verify real allergen safety.
       </p>
-      {!result.feasible && (
-        <div className="notice warning">{result.reasons.join(" ")}</div>
-      )}
       <div className="dialog-actions">
-        {result.feasible && (
-          <button
-            className="primary"
-            onClick={() => {
-              onClose();
-              onChoose(meal);
-            }}
-          >
+        <button
+          className="primary"
+          onClick={() => {
+            onClose();
+            onChoose(meal);
+          }}
+        >
             Choose this meal
           </button>
-        )}
         {flags.mealLogging.available && (
           <button
             className="secondary"
@@ -1538,7 +1632,7 @@ function Log({ data, onClose, onSave, onLogged }) {
       >
         <h3>{data.meal.name}</h3>
         <p className="muted">
-          One serving = {data.meal.portionLabel}{data.meal.portionGrams==null?"":` (${data.meal.portionGrams} g)`}.
+          One serving = {data.meal.portionLabel} ({data.meal.portionGrams} g).
           Confirm the amount you actually ate.
         </p>
         <div className="form-grid">

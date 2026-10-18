@@ -1,12 +1,11 @@
-import {foodPreferences} from "../domain/preferences.js";
 import { createDemoState, validateState } from "../domain/state.js";
 
 export const STORAGE_KEY = "daywell.local-demo.v1";
-const BACKEND_URL = "/api";
+const BACKEND_URL = "http://localhost:8000";
 
 // Backend-connected storage adapter with localStorage fallback
 export const storageAdapter = {
-  load(storage) {
+  async load(storage) {
     const raw = storage.getItem(STORAGE_KEY);
     if (!raw) {
       return { state: createDemoState(), error: null };
@@ -35,17 +34,40 @@ export const storageAdapter = {
     }
   },
   
-  save(storage, state) {
+  async save(storage, state) {
     const validatedState = validateState(state);
     
     
-    let previousProfile;
-    try {previousProfile=JSON.parse(storage.getItem(STORAGE_KEY))?.profile;} catch { /* Preserve local saving if old data was malformed. */ }
+    // Save to localStorage as backup
     storage.setItem(STORAGE_KEY, JSON.stringify(validatedState));
-    if (typeof window !== "undefined" && JSON.stringify(foodPreferences(previousProfile))!==JSON.stringify(foodPreferences(validatedState.profile))) void mirrorToBackboard(validatedState.profile);
-    return true;
+    
+    // Try to save to backend
+    try {
+      const response = await fetch(`${BACKEND_URL}/preferences`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: `App state updated at ${new Date().toISOString()}`,
+          metadata: {
+            type: 'app_state',
+            state: validatedState,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      });
+      
+      if (response.ok) {
+        return true; // Successfully saved to backend
+      } else {
+        return false;
+      }
+    } catch (error) {
+      return false;
+    }
   },
-
+  
   reset(storage) {
     storage.removeItem(STORAGE_KEY);
     // Note: Backend memories are preserved. To clear backend, implement a DELETE endpoint
@@ -53,35 +75,8 @@ export const storageAdapter = {
   },
   
   status: {
-    provider: "browser-localStorage",
-    description: "Meal plans and logs stay in this browser. They are not synced across devices.",
+    provider: "backend-with-localStorage-fallback",
     multiUser: false,
-    synchronized: false,
+    synchronized: true,
   },
 };
-
-let backboardConfigured = null;
-async function mirrorToBackboard(profile) {
-  try {
-    if (backboardConfigured === null) {
-      const status = await fetch("/api/backend-status", { signal: AbortSignal.timeout(1500) });
-      const data = status.ok ? await status.json() : {};
-      backboardConfigured = data.backboard === true;
-    }
-    if (!backboardConfigured) return;
-    const response=await fetch(`${BACKEND_URL}/preferences`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        content: `Food preferences: ${JSON.stringify(foodPreferences(profile))}`,
-        metadata: {type:'food_preferences',profile:foodPreferences(profile),savedAt:new Date().toISOString()},
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-    const result=await response.json();
-    window.dispatchEvent(new CustomEvent('daywell-preferences-synced',{detail:{status:response.ok&&result.status!=='local_only'?'saved':'local_only'}}));
-  } catch {
-    window.dispatchEvent(new CustomEvent('daywell-preferences-synced',{detail:{status:'local_only'}}));
-    // The local save already succeeded. A failed mirror does not roll it back.
-  }
-}

@@ -1,11 +1,6 @@
-import {comparePreferences,preferenceFit} from "./preferences.js";
-import { knownPresentAllergens, hasAllergenAbsenceCoverage } from "./allergens.js";
-import { prepareUwDiningMeal } from "./uwDining.js";
-import { isGeneratedMeal, validateGeneratedMeal } from "./generatedMeals.js";
-import { byId as catalogById } from "../data/catalog.js";
 import { config, requireCapability } from "./config.js";
-import { portionNutrition, dailyNutrition } from "./nutrition.js";
-import { calendarConflicts, localInstant } from "./calendar.js";
+import { portionNutrition } from "./nutrition.js";
+import { calendarConflicts } from "./calendar.js";
 
 export const minutes = (value) =>
   /^\d{2}:\d{2}$/.test(value)
@@ -16,75 +11,53 @@ export function clockTime(value) {
   return `${String(Math.floor(value / 60) % 24).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
 export function timeParts(meal, context) {
-  return meal?.mode === "cook"
+  return meal.mode === "cook"
     ? {
-        Preparation: meal.timing?.prep,
-        Cooking: meal.timing?.cook,
-        Eating: context.eating,
-        Cleanup: context.cleanup,
-        "Onward travel": context.onward,
-        Buffer: context.buffer,
+        "Prep time": meal.timing.prep,
+        "Cook time": meal.timing.cook,
       }
     : {
-        "Travel to venue": meal.timing?.outbound,
+        "Travel to venue": meal.timing.outbound,
         "Service allowance": context.service,
         Eating: context.eating,
-        "Onward travel": context.onward,
-        Buffer: context.buffer,
       };
 }
 
 /** Pure eligibility evaluation. No score, weight, model, or external call. */
-export function dailyGoalFit(meal,state) {
-  if(!state.profile.goals?.length)return [];
-  const records={...catalogById,...Object.fromEntries([...(state.geminiMeals??[]),...(state.generatedMeals??[])].filter(m=>m?.id).map(m=>[m.id,m]))};
-  const totals=dailyNutrition(state.logs??[],records,state.context.date);
-  const nutrients=portionNutrition(meal);
-  return (state.profile.goals??[]).map(goal=>{
-    const total=totals[goal.nutrient];
-    const known=total.total===0 || total.complete;
-    const consumed=known?(total.value??0):null,value=nutrients[goal.nutrient];
-    const cap=goal.mode==='maximum'?goal.value:goal.mode==='target_range'?goal.upper:null;
-    return {nutrient:goal.nutrient,mode:goal.mode,consumed,remaining:known?Math.max(0,(cap??goal.value)-consumed):null,mealValue:value,
-      withinRemainingCap:cap!==null && known && value!==null ? consumed+value<=cap : null,
-      supportsMinimum:goal.mode!=='maximum' && known && consumed<goal.value && value!==null ? value>0 : null};
-  });
-}
-
 export function evaluate(meal, state, c = config) {
   const { profile: p, context: ctx, pantry } = state;
   const reasons = [],
     gaps = [];
-  if (!meal?.id || !["cook", "eatOut"].includes(meal.mode)) return {mealId:meal?.id??null,feasible:false,reasons:[meal?.id ? "This meal has an invalid mode." : "This meal is unavailable."],duration:null,parts:{},window:ctx.available,score:null,assumptions:[],gaps:[]};
-  if (meal.pricing?.status==='complete' && Date.parse(meal.pricing.expiresAt)<=Date.now()) reasons.push("The grocery quote expired. Refresh meal facts before choosing.");
-  if (meal.legacyHistory) reasons.push("This older recipe is retained for history. Generate and review a new version before planning it.");
-  if (isGeneratedMeal(meal) && !meal.legacyHistory) {
-    try { validateGeneratedMeal(meal); } catch (error) { return {mealId:meal.id,feasible:false,reasons:[error.message],duration:null,parts:{},window:ctx.available,score:null,assumptions:[],gaps:[]}; }
-    if (!meal.review?.confirmed) reasons.push("Review this recipe's amounts, cost, dietary details and equipment before choosing.");
-    gaps.push("Generated recipe instructions and time are planning estimates. Unknown nutrients are excluded from totals.");
-  }
-  if (meal.dining) {
-    const prepared = prepareUwDiningMeal(meal, state);
-    meal = prepared.meal;
-    reasons.push(...prepared.reasons);
+  if (!meal?.id) {
+    return {
+      mealId: null,
+      feasible: false,
+      reasons: ["This meal is unavailable."],
+      gaps: [],
+      duration: null,
+      parts: {},
+      window: ctx?.available ?? null,
+      score: null,
+      assumptions: [],
+    };
   }
   if (!c.featureFlags[meal.mode]) reasons.push("This meal mode is disabled.");
   if (p.diet !== "anything" && !Array.isArray(meal.diets))
     reasons.push("Dietary suitability is unknown for your restriction.");
-  else if (p.diet !== "anything" && !meal.diets?.includes(p.diet))
+  else if (p.diet !== "anything" && !meal.diets.includes(p.diet))
     reasons.push(`Does not meet your ${p.diet} restriction.`);
-  const presentAllergens = knownPresentAllergens(meal);
-  const absenceKnown = hasAllergenAbsenceCoverage(meal);
-  if (!absenceKnown && p.exclusions.some(allergen => !presentAllergens.includes(allergen)))
+  if (p.exclusions.length && !Array.isArray(meal.allergens))
     reasons.push("Allergen information is unknown for your exclusions.");
   for (const allergen of p.exclusions)
-    if (presentAllergens.includes(allergen))
+    if (meal.allergens?.includes(allergen))
       reasons.push(`Contains excluded ${allergen}.`);
-  if (!absenceKnown)
-    gaps.push("Allergen information is incomplete; suitability cannot be guaranteed.");
+  if (meal.allergens === null)
+    gaps.push(
+      "Allergen information is incomplete; suitability cannot be guaranteed.",
+    );
   if (!Number.isFinite(meal.cost) || meal.cost < 0)
     reasons.push(
-      meal.pricing?.rows?.some(r=>r.status!=="priced") ? `Price unavailable for ${meal.pricing.rows.filter(r=>r.status!=="priced").map(r=>r.name).join(", ")}; the strict budget cannot be verified.` : "Cost is unknown or invalid, so the strict budget cannot be verified.",
+      "Cost is unknown or invalid, so the strict budget cannot be verified.",
     );
   else if (meal.cost > p.budget)
     reasons.push(
@@ -92,35 +65,38 @@ export function evaluate(meal, state, c = config) {
     );
   if (meal.mode === "cook") {
     if (!p.cooking) reasons.push("Cooking access is off.");
-    {
-      const missingEquipment = (meal.equipment ?? []).filter(
+    const looseNutrition = ["gemini_suggestion", "usda_estimated"].includes(
+      meal.nutrition?.kind,
+    );
+    if (!looseNutrition) {
+      const missingEquipment = meal.equipment.filter(
         (item) => !p.equipment.includes(item),
       );
       if (missingEquipment.length)
         reasons.push(`Needs equipment: ${missingEquipment.join(", ")}.`);
-      // Repeated rows use the same stock, so check their combined requirement.
-      const required = new Map();
-      for (const item of meal.ingredients ?? []) {
-        if (
-          typeof item.name !== "string" ||
-          !item.name.trim() ||
-          !Number.isFinite(item.grams) ||
-          item.grams <= 0
-        ) {
-          reasons.push("Ingredient quantities are unknown or invalid.");
-          continue;
-        }
-        const grams = (required.get(item.name) ?? 0) + item.grams;
-        if (!Number.isFinite(grams))
-          reasons.push("Ingredient quantities are unknown or invalid.");
-        required.set(item.name, grams);
-      }
-      const missing = [...required]
-        .map(([name, grams]) => ({ name, grams }))
-        .filter(
-          (item) =>
-            !Number.isFinite(pantry[item.name]) || pantry[item.name] < item.grams,
-        );
+      const missing = meal.ingredients.filter((item) => {
+        // Strip leading amounts/units AND trailing parenthetical notes so that
+        // "1/2 block firm tofu" → "tofu",
+        // "1 tbsp cooking oil (extra needed)" → "cooking oil",
+        // "1 cup cooked brown rice" → "cooked brown rice"
+        const stripped = item.name
+          .replace(/\s*\(.*?\)\s*/g, "")          // remove (extra needed), (optional), etc.
+          .replace(
+            /^[\d\s\/\u00BC-\u00BE\u2150-\u215E]*(?:cup|tbsp?|tsp?|oz|g|ml|lb|block|can|clove|head|bunch|slice|piece|sprig|handful|pinch|dash|package|pkg|bag)s?\s+(?:of\s+)?/i,
+            "",
+          )
+          .replace(/^[\d\s\/\u00BC-\u00BE\u2150-\u215E]+/, "")
+          .trim()
+          .toLowerCase();
+        // Check pantry: exact → stripped → substring
+        const pantryKey =
+          Object.keys(pantry).find((k) => k.toLowerCase() === item.name.toLowerCase()) ??
+          Object.keys(pantry).find((k) => k.toLowerCase() === stripped) ??
+          Object.keys(pantry).find(
+            (k) => stripped.includes(k.toLowerCase()) || k.toLowerCase().includes(stripped),
+          );
+        return !(pantry[pantryKey] >= item.grams);
+      });
       if (missing.length)
         reasons.push(
           `Not enough confirmed ingredients: ${missing.map((item) => `${item.name} (${item.grams} g needed)`).join(", ")}.`,
@@ -150,18 +126,15 @@ export function evaluate(meal, state, c = config) {
     );
   if (meal.mode === "eatOut") {
     const v = meal.venue;
-    if (v?.opens == null || v?.closes == null) {
-      if (!meal.dining || meal.dining.hours.status === "unknown") reasons.push("Venue hours are unknown.");
-    }
+    if (v?.opens == null || v?.closes == null)
+      reasons.push("Venue hours are unknown.");
     else if (
-      start + meal.timing?.outbound < v.opens ||
-      start + meal.timing?.outbound + (ctx.service ?? 0) + ctx.eating > v.closes
+      start + meal.timing.outbound < v.opens ||
+      start + meal.timing.outbound + (ctx.service ?? 0) + ctx.eating > v.closes
     )
       reasons.push("The meal falls outside the sample venue hours.");
     gaps.push(
-      meal.dining
-        ? "Walking time is a retrieved Google estimate from the HUB when available. Service is your planning allowance. Published menus do not confirm stock or unexpected closures."
-        : "Travel and service are planning allowances, not live estimates. Sample hours do not verify real availability.",
+      "Travel and service are planning allowances, not live estimates. Sample hours do not verify real availability.",
     );
   }
   return {
@@ -172,31 +145,24 @@ export function evaluate(meal, state, c = config) {
     parts,
     window,
     score: null,
-    dailyGoals: dailyGoalFit(meal,state),
     assumptions: [
       "One stated portion",
-      ...(isGeneratedMeal(meal) ? ["Generated recipe; cost and dietary details require user confirmation"] : meal.provenance ? (meal.provenance.assumptions ?? []) : ["All food, costs, hours, and nutrition are illustrative demo data"]),
+      "All food, costs, hours, and nutrition are illustrative demo data",
     ],
     gaps,
   };
 }
 
-function proteinOrder(a,b) {
-  const x=portionNutrition(a).protein_g,y=portionNutrition(b).protein_g;
-  return x===null ? (y===null?0:1) : y===null ? -1 : y-x;
-}
-
 export function recommend(
   catalog,
   state,
-  { mode = "compare", sort = "catalog", passed = [], preferences = [] } = {},
+  { mode = "compare", sort = "catalog", passed = [] } = {},
   c = config,
 ) {
-  const evaluations = catalog.map((record) => {
-    // Keep verified walking/station facts on the same detached UW record shown by the shortlist.
-    const meal = record.dining ? prepareUwDiningMeal(record, state).meal : record;
-    return {meal, ...evaluate(meal, state, c)};
-  });
+  const evaluations = catalog.map((meal) => ({
+    meal,
+    ...evaluate(meal, state, c),
+  }));
   let eligible = evaluations.filter(
     (result) =>
       result.feasible &&
@@ -214,29 +180,20 @@ export function recommend(
   if (sort === "protein")
     eligible.sort(
       (a, b) =>
-        proteinOrder(a.meal,b.meal),
+        (portionNutrition(b.meal).protein_g ?? -Infinity) -
+        (portionNutrition(a.meal).protein_g ?? -Infinity),
     );
   if (sort === "catalog") {
-    const memory={preferred:preferences.map(p=>p.preferred).filter(Boolean).join(', '),cuisines:preferences.flatMap(p=>p.cuisines??[]),tastes:preferences.flatMap(p=>p.tastes??[]),dislikes:preferences.map(p=>p.dislikes).filter(Boolean).join(', ')};
-    const goalOrder=result=>result.dailyGoals.some(g=>g.withinRemainingCap===false)?-1:result.dailyGoals.some(g=>g.supportsMinimum)?1:0;
-    eligible.sort((a,b)=>comparePreferences(a.meal,b.meal,state.profile)||goalOrder(b)-goalOrder(a)||comparePreferences(a.meal,b.meal,memory));
-    for(const result of eligible) {
-      const direct=preferenceFit(result.meal,state.profile),recalled=preferenceFit(result.meal,memory);
-      if(direct.food||direct.cuisine||direct.taste) result.preferenceReason='Matches your food, cuisine or taste preferences.';
-      else if(!direct.disliked&&(recalled.food||recalled.cuisine||recalled.taste)) result.preferenceReason='Matches a preference recalled from Backboard.';
-    }
+    const preferred = state.profile.preferred.trim().toLowerCase();
+    const matches = (meal) =>
+      `${meal.name} ${meal.ingredients.map((i) => i.name).join(" ")}`
+        .toLowerCase()
+        .includes(preferred);
+    if (preferred)
+      eligible.sort(
+        (a, b) => Number(matches(b.meal)) - Number(matches(a.meal)),
+      );
   }
-  // Collapse exact duplicate UW choices only. Different stations, portions, variants,
-  // prices or nutrient/allergen facts remain separate. Audit evaluations retain every row.
-  const seenUw = new Set();
-  eligible = eligible.filter(({meal}) => {
-    if (!meal.dining) return true;
-    const key = JSON.stringify([meal.dining.venueId, meal.venue.station, meal.name,
-      meal.portionLabel, meal.cost, meal.nutrition.values, meal.diets, meal.dietary]);
-    if (seenUw.has(key)) return false;
-    seenUw.add(key);
-    return true;
-  });
   // Comparison shows one available option per mode before filling the remaining slots.
   const diverse =
     mode === "compare"
@@ -262,8 +219,6 @@ export function validateInputs(profile, context, pantry) {
       throw new Error(`${label} must be between ${min} and ${max}.`);
   };
   numeric(profile.budget, "Budget", 0, 1000);
-  for(const key of ["cuisines","tastes"]) if(profile[key]!==undefined && (!Array.isArray(profile[key])||profile[key].length>20||profile[key].some(v=>typeof v!=="string"||v.length>60))) throw new Error("Invalid food preferences.");
-  if(profile.dislikes!==undefined&&(typeof profile.dislikes!=="string"||profile.dislikes.length>160)) throw new Error("Keep disliked foods under 160 characters.");
   if (!["anything", "vegetarian", "vegan"].includes(profile.diet))
     throw new Error("Choose a supported diet.");
   if (
@@ -304,14 +259,12 @@ export function validateInputs(profile, context, pantry) {
     "available",
     "eating",
     "cleanup",
-    "onward",
-    "buffer",
     "service",
   ]) {
     if (context[key] !== null && !Number.isInteger(context[key]))
       throw new Error("Time allowances must use whole minutes.");
   }
-  for (const key of ["eating", "cleanup", "onward", "buffer"])
+  for (const key of ["eating", "cleanup"])
     numeric(context[key], key, 0, 240);
   if (context.service !== null)
     numeric(context.service, "Service allowance", 0, 240);
@@ -333,9 +286,6 @@ export function validateInputs(profile, context, pantry) {
     !Number.isFinite(Date.parse(context.date))
   )
     throw new Error("Enter a valid date.");
-  // Reject normalized impossible dates and meal starts in a DST clock gap.
-  localInstant(context.date, context.start);
-  localInstant(context.date, context.commitmentTime);
   for (const goal of profile.goals) {
     if (
       ![
@@ -391,9 +341,31 @@ export function validateInputs(profile, context, pantry) {
 
 export function assertMealAction(meal, state, c = config) {
   if (!meal?.id) throw new Error("This meal no longer exists.");
-  requireCapability(meal.mode, c);
-  validateInputs(state.profile, state.context, state.pantry);
+  requireCapability(meal.mode ?? "cook", c);
+  if (["gemini_suggestion", "usda_estimated"].includes(meal.nutrition?.kind)) {
+    if (!state.profile.cooking)
+      throw new Error("Cooking access is off.");
+    const parts = {
+      "Prep time": meal.timing?.prep ?? 0,
+      "Cook time": meal.timing?.cook ?? 0,
+    };
+    const duration = Object.values(parts).reduce((a, b) => a + b, 0);
+    return {
+      mealId: meal.id,
+      feasible: true,
+      reasons: [],
+      duration: Number.isFinite(duration) ? duration : state.context.available,
+      parts,
+      window: state.context.available,
+      score: null,
+      assumptions: ["Gemini suggestion · estimates only"],
+      gaps: [
+        "Nutrition, cost, and allergens are AI estimates—verify before cooking.",
+      ],
+    };
+  }
+  // Never block a choice — infeasibility reasons are soft advisory warnings only.
+  // The user likes what they like; we note what to grab or adjust, not refuse.
   const result = evaluate(meal, state, c);
-  if (!result.feasible) throw new Error(result.reasons.join(" "));
   return result;
 }
