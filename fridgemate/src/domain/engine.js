@@ -1,6 +1,6 @@
 import { config, requireCapability } from "./config.js";
 import { portionNutrition } from "./nutrition.js";
-import { calendarConflicts } from "./calendar.js";
+import { calendarConflicts, localInstant } from "./calendar.js";
 
 export const minutes = (value) =>
   /^\d{2}:\d{2}$/.test(value)
@@ -63,9 +63,29 @@ export function evaluate(meal, state, c = config) {
     );
     if (missingEquipment.length)
       reasons.push(`Needs equipment: ${missingEquipment.join(", ")}.`);
-    const missing = meal.ingredients.filter(
-      (item) => !(pantry[item.name] >= item.grams),
-    );
+    // Repeated rows use the same stock, so check their combined requirement.
+    const required = new Map();
+    for (const item of meal.ingredients) {
+      if (
+        typeof item.name !== "string" ||
+        !item.name.trim() ||
+        !Number.isFinite(item.grams) ||
+        item.grams <= 0
+      ) {
+        reasons.push("Ingredient quantities are unknown or invalid.");
+        continue;
+      }
+      const grams = (required.get(item.name) ?? 0) + item.grams;
+      if (!Number.isFinite(grams))
+        reasons.push("Ingredient quantities are unknown or invalid.");
+      required.set(item.name, grams);
+    }
+    const missing = [...required]
+      .map(([name, grams]) => ({ name, grams }))
+      .filter(
+        (item) =>
+          !Number.isFinite(pantry[item.name]) || pantry[item.name] < item.grams,
+      );
     if (missing.length)
       reasons.push(
         `Not enough confirmed ingredients: ${missing.map((item) => `${item.name} (${item.grams} g needed)`).join(", ")}.`,
@@ -250,6 +270,9 @@ export function validateInputs(profile, context, pantry) {
     !Number.isFinite(Date.parse(context.date))
   )
     throw new Error("Enter a valid date.");
+  // Reject normalized impossible dates and meal starts in a DST clock gap.
+  localInstant(context.date, context.start);
+  localInstant(context.date, context.commitmentTime);
   for (const goal of profile.goals) {
     if (
       ![
