@@ -6,29 +6,8 @@ const BACKEND_URL = "http://localhost:8000";
 // Backend-connected storage adapter with localStorage fallback
 export const storageAdapter = {
   async load(storage) {
-    try {
-      // Try to load from backend first
-      const response = await fetch(`${BACKEND_URL}/preferences`);
-      if (response.ok) {
-        const data = await response.json();
-        const memories = data.memories || [];
-        
-        // Find the most recent state saved to backend
-        const stateMemory = memories
-          .filter(m => m.metadata?.type === 'app_state')
-          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-        
-        if (stateMemory && stateMemory.metadata?.state) {
-          return {
-            state: validateState(stateMemory.metadata.state),
-            error: null,
-          };
-        }
-      }
-    } catch (error) {
-    }
-    
-    // Fallback to localStorage
+    // Always load from localStorage — the backend uses append-only Backboard memory
+    // which can return stale state if earlier saves failed or Backboard isn't connected.
     try {
       const raw = storage.getItem(STORAGE_KEY);
       if (raw) {

@@ -422,6 +422,20 @@ export function FoodDiscovery({
                   ? r.meal.timing.prep + r.meal.timing.cook >= 15
                   : false),
       );
+  // When constraints filter everything out, fall back to the full catalog so
+  // there is always something to swipe — the card will note it doesn't fit.
+  const allEvaluations = usingGemini
+    ? null
+    : all.evaluations.filter(
+        (r) =>
+          r.meal.mode === "cook" && !passed.includes(r.meal.id),
+      );
+  const cookCards =
+    mode === "cook" && !usingGemini && meals.length === 0 && (allEvaluations?.length ?? 0) > 0
+      ? allEvaluations
+      : meals;
+  const constrainedFallback =
+    mode === "cook" && !usingGemini && meals.length === 0 && cookCards.length > 0;
   const venues = uwDining
     .filter(
       (v) =>
@@ -430,8 +444,8 @@ export function FoodDiscovery({
           venueHours(v, state.context.date, state.context.start).open),
     )
     .sort((a, b) => distanceMeters(a) - distanceMeters(b));
-  const meal = meals[0]?.meal,
-    result = meals[0],
+  const meal = (mode === "cook" ? cookCards : meals)[0]?.meal,
+    result = (mode === "cook" ? cookCards : meals)[0],
     venue = venues[0],
     nutrition = meal ? portionNutrition(meal) : null;
   const pass = (id) => setPassed((p) => [...p, id]);
@@ -554,7 +568,9 @@ export function FoodDiscovery({
             {mode === "cook"
               ? usingGemini
                 ? `${meals.length} Gemini ideas${groceryList.length ? ` · from your list` : ""}`
-                : `${meals.length} meals fit your groceries`
+                : constrainedFallback
+                  ? `${cookCards.length} meals · showing all (none fit current constraints)`
+                  : `${cookCards.length} meals fit your groceries`
               : `${venues.length} UW locations`}
           </span>
           <span>← Pass · {mode === "cook" ? "Choose" : "Directions"} →</span>
@@ -600,7 +616,9 @@ export function FoodDiscovery({
                 <Icon name="check" size={16} />
                 {usingGemini
                   ? "AI idea from your ingredients · estimates only"
-                  : "Ingredients, equipment, budget and calendar checked"}
+                  : constrainedFallback
+                    ? `Showing outside constraints · ${result.reasons?.[0] ?? "adjust window or groceries"}`
+                    : "Ingredients, equipment, budget and calendar checked"}
               </div>
               <div className="swipe-actions">
                 <button
@@ -720,32 +738,18 @@ export function FoodDiscovery({
             <h2>
               {passed.length
                 ? "You’ve seen these options."
-                : mode === "eatOut"
-                  ? "No UW locations open at this time."
-                  : "No meals fit right now."}
+                : "No UW locations open at this time."}
             </h2>
             <p>
               {passed.length
                 ? "Bring back passed cards or change your mood."
-                : mode === "eatOut"
-                  ? "Change the meal time or include locations outside their published hours."
-                  : "Check the meal window, groceries, restrictions and budget."}
+                : "Change the meal time or include locations outside their published hours."}
             </p>
             <button
               className="primary"
-              onClick={() =>
-                passed.length
-                  ? setPassed([])
-                  : mode === "eatOut"
-                    ? setOpenOnly(false)
-                    : onPreferences()
-              }
+              onClick={() => passed.length ? setPassed([]) : setOpenOnly(false)}
             >
-              {passed.length
-                ? "Show passed cards"
-                : mode === "eatOut"
-                  ? "Show all locations"
-                  : "Adjust constraints"}
+              {passed.length ? "Show passed cards" : "Show all locations"}
             </button>
           </div>
         )}

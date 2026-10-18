@@ -138,19 +138,24 @@ export default function App() {
     }
   }
   async function goFood(nextMode) {
-    // Only auto-calculate window if coming from Today tab and no manual override
+    // Only auto-calculate window if coming from Today tab AND the user hasn't
+    // manually set a window for today already.
     if (tab === "Today") {
-      const window = nextMealWindow(
-        items,
-        day,
-        new Date(now),
-        Math.max(45, state.context.available),
-      );
-      if (window && !(await safe({ type: "updateContext", context: window }))) return;
-      if (!window)
-        setNotice(
-          "No free window of 35 minutes or more was found. Adjust the meal window in Food.",
+      const contextIsForToday = state.context.date === day;
+      const userSetManually = state.context.manuallySet === true;
+      if (!contextIsForToday || !userSetManually) {
+        const window = nextMealWindow(
+          items,
+          day,
+          new Date(now),
+          Math.max(45, state.context.available),
         );
+        if (window && !(await safe({ type: "updateContext", context: { ...window, manuallySet: false } }))) return;
+        if (!window)
+          setNotice(
+            "No free window of 35 minutes or more was found. Adjust the meal window in Food.",
+          );
+      }
     }
     setMode(nextMode);
     if (nextMode === "cook") {

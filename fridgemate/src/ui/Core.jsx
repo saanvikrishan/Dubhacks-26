@@ -329,7 +329,7 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
           try {
             await onSave(
               timeOnly
-                ? { type: "updateContext", context }
+                ? { type: "updateContext", context: { ...context, manuallySet: true } }
                 : flags.manualSchedule.available
                   ? { type: "configure", profile, context }
                   : { type: "updateProfile", profile },
