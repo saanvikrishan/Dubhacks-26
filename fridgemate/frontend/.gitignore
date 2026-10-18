@@ -23,3 +23,7 @@ dist-ssr
 .env
 .env.*
 !.env.example
+
+# UW dining ingest cache and generated catalog (npm run dining:ingest / dining:build)
+src/data/uw/sources/
+src/data/uw/catalog.json

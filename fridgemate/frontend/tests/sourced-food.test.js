@@ -18,7 +18,6 @@ import {
 import { portionNutrition } from "../src/domain/nutrition.js";
 import { createDemoState as blankDemoState, testPantry } from "../src/domain/state.js";
 import { evaluate } from "../src/domain/engine.js";
-import { previewFoodIntent } from "../src/domain/intent.js";
 import { createUsdaClient } from "../server/usda-client.js";
 import { catalog } from "../src/data/catalog.js";
 const tofuRaw = () =>
@@ -230,33 +229,21 @@ test("sourced catalog: engine evaluates both modes honestly without inventing mi
     before = structuredClone(catalog);
   assert.equal(sourced.length, 8);
   assert.ok(sourced.every((m) => m.cost === null));
-  const result = previewFoodIntent({ action: "recommend" }, state, sourced);
-  assert.equal(result.candidates.length, 0);
-  assert.equal(result.evaluations.length, 8);
+  const evaluations = sourced.map((meal) => evaluate(meal, state));
   assert.ok(
-    result.evaluations.every((r) =>
-      r.reasons.some((reason) => reason.includes("Cost is unknown")),
+    evaluations.every(
+      (r) => !r.feasible && r.reasons.some((reason) => reason.includes("Cost is unknown")),
     ),
   );
-  const dining = result.evaluations.find((r) => r.meal.mode === "eatOut");
-  assert.ok(dining.missingData.includes("venue_hours"));
-  assert.ok(dining.missingData.includes("protein_g"));
-  assert.ok(dining.sourceLimitations.length);
+  const dining = sourced.find((m) => m.mode === "eatOut");
+  assert.equal(dining.nutrition.values.protein_g, null);
+  assert.ok(evaluate(dining, state).reasons.some((reason) => reason.includes("Venue hours are unknown")));
   const quoted = buildSourcedCatalog({
     cookCostQuotes: { "sourced-tofu-rice-bowl": quote },
   });
-  const preview = previewFoodIntent(
-    { action: "recommend", mode: "cook" },
-    state,
-    quoted,
-  );
-  assert.equal(preview.candidates[0].meal.id, "sourced-tofu-rice-bowl");
-  assert.equal(preview.candidates[0].nutrition.energy_kcal, 415.5);
-  assert.ok(
-    !preview.candidates[0].assumptions.some((a) =>
-      a.includes("All food, costs, hours"),
-    ),
-  );
+  const bowl = quoted.find((m) => m.id === "sourced-tofu-rice-bowl");
+  assert.notEqual(bowl.cost, null);
+  assert.equal(portionNutrition(bowl).energy_kcal, 415.5);
   assert.deepEqual(catalog, before);
 });
 

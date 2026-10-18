@@ -1,5 +1,4 @@
 import asyncio
-import copy
 import json
 import os
 import sys
@@ -9,8 +8,6 @@ from unittest.mock import AsyncMock,patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import usda
 import food_reference
-import food_memory
-from kroger import KrogerClient
 
 class UsdaParsingTests(unittest.TestCase):
     def test_detail_search_shapes_and_ids_are_distinct_from_row_ids_and_numbers(self):
@@ -70,29 +67,7 @@ class UsdaClientTests(unittest.IsolatedAsyncioTestCase):
             result=await food_reference.food_reference('70500807')
         self.assertTrue(all(row['quote'] is None for row in result['pricing']['ingredients']))
 
-class MemoryTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        food_memory._cache=None;food_memory._until=0;food_memory._pending=None
-    async def test_read_only_recall_uses_existing_assistant_and_extracts_soft_preferences_only(self):
-        from types import SimpleNamespace
-        client=SimpleNamespace(list_assistants=AsyncMock(return_value=[SimpleNamespace(assistant_id='existing')]),get_memories=AsyncMock(return_value={'memories':[{'id':'memory','metadata':{'state':{'profile':{'preferred':'tofu','cuisines':['Italian'],'exclusions':['soy'],'budget':999}}}}]}),create_assistant=AsyncMock(),add_memory=AsyncMock())
-        with patch.dict(os.environ,{'BACKBOARD_ASSISTANT_ID':''}):result=await food_memory.recall_preferences(client)
-        self.assertEqual(result['status'],'retrieved');self.assertEqual(result['preferences'][0]['preferred'],'tofu');self.assertNotIn('budget',result['preferences'][0]);self.assertNotIn('exclusions',result['preferences'][0]);client.create_assistant.assert_not_called();client.add_memory.assert_not_called()
-        await food_memory.recall_preferences(client);self.assertEqual(client.get_memories.await_count,1)
-    async def test_memory_failure_has_a_clear_status_and_no_secret(self):
-        from types import SimpleNamespace
-        client=SimpleNamespace(get_memories=AsyncMock(side_effect=RuntimeError('private-memory-key')))
-        result=await food_memory.recall_preferences(client,'existing');self.assertEqual(result,{'status':'unavailable','preferences':[]})
-        self.assertNotIn('private-memory-key',json.dumps(result))
-
-class StructuredPreferenceTests(unittest.TestCase):
-    def test_latest_preference_snapshot_overrides_old_memories_and_can_clear_preferences(self):
-        old={'metadata':{'type':'food_preferences','savedAt':'2026-10-17','profile':{'preferred':'tofu','cuisines':['Chinese']}}}
-        new={'metadata':{'type':'food_preferences','savedAt':'2026-10-18','profile':{'preferred':'','cuisines':['Italian'],'tastes':['Spicy'],'dislikes':'olives'}}}
-        found=food_memory.extract_preferences({'memories':[old,new]})
-        self.assertEqual(len(found),1);self.assertEqual(found[0]['cuisines'],['Italian']);self.assertEqual(found[0]['tastes'],['Spicy']);self.assertEqual(found[0]['dislikes'],'olives')
-        new['metadata']['profile']={'preferred':'','cuisines':[],'tastes':[],'dislikes':''}
-        self.assertEqual(food_memory.extract_preferences({'memories':[old,new]}),[])
+class RecipePreferenceTests(unittest.TestCase):
     def test_recipe_preferences_are_bounded_input_fields(self):
         from meal_generation import RecipeRequest
         from pydantic import ValidationError

@@ -29,7 +29,7 @@ import db as store
 import substitutions as swaps
 import usda
 from food_reference import food_reference
-from food_memory import invalidate_preferences, MealFeedback, record_feedback, learned_preferences
+from food_memory import MealFeedback, record_feedback, learned_preferences
 
 
 app = FastAPI(title="FridgeMate API")
@@ -508,8 +508,7 @@ async def store_preference(request: PreferenceRequest):
             request.content,
             metadata=request.metadata,
         )
-        invalidate_preferences()
-        print("[Success] Preference stored to Backboard")
+        print(f"[Success] Preference stored to Backboard")
         return result
     except Exception as e:
         print(f"Backboard add_memory error (detailed): {type(e).__name__}: {str(e)}")

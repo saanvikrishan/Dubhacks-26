@@ -6,7 +6,7 @@ This extends the existing Daywell application. Cook discovery, Gemini recipes, m
 
 The existing Python backend loads `GOOGLE_MAPS_API_KEY` from `backend/.env`, then the application `.env`. No browser variable or client key is used.
 
-Start the backend as usual from `backend/` with `uvicorn main:app --host 127.0.0.1 --port 8000`, and run `npm run dev` from `fridgemate/`. Restart an already-running backend to load the new route. The new button in Food → Eat at school explicitly requests `POST /api/dining/walking`; Vite forwards that to `POST /dining/walking` on FastAPI. Production hosting must proxy that path to the running Python backend. A static `dist/` alone cannot supply walking results. `DAYWELL_DINING_BACKEND_URL` optionally overrides the development backend proxy targets.
+Start the backend as usual from `backend/` with `uvicorn main:app --host 127.0.0.1 --port 8000`, and run `npm run dev` from `fridgemate/frontend/`. Restart an already-running backend to load the new route. The new button in Food → Eat at school explicitly requests `POST /api/dining/walking`; Vite forwards that to `POST /dining/walking` on FastAPI. Production hosting must proxy that path to the running Python backend. A static `dist/` alone cannot supply walking results. `DAYWELL_DINING_BACKEND_URL` optionally overrides the development backend proxy targets.
 
 The endpoint uses Google Routes **Compute Route Matrix**, `travelMode: WALK`, a fixed UW HUB origin and the existing three venue pins. It sends the API key only in Google's request header. No Places, Geocoding, legacy matrix fallback or additional paid service is introduced. Successful and partial matrices are cached in process memory for five minutes; no Google results enter persisted application state. Missing keys, rejected requests, invalid elements and expired results leave walking values unknown. A Maps directions link is available independently of API success. The HUB/Husky Den identical pin is a zero route, not an indoor directions or entrance-distance measurement.
 
@@ -21,10 +21,10 @@ Use Python 3.11+ with `pip install -r server/uw-requirements.txt` and the existi
 
 Artifacts under `src/data/uw/`:
 
-- `sources/`: original HTML/PDF files, checksums in the snapshot, original retrieval-date sidecars, deterministic PDF text and local OCR with page coordinates/confidence.
+- `sources/` (local ingest cache, not committed): original HTML/PDF files, checksums in the snapshot, original retrieval-date sidecars, deterministic PDF text and local OCR with page coordinates/confidence.
 - `snapshot.json`: all extracted station rows, discovered links, source URLs, hashes, original hours text and PDF evidence.
 - `reviewed.json`: explicitly reviewed menu records, match decisions, price scopes, dates, weekday applicability, original values, station hours and conflicts; separate Husky Deals.
-- `catalog.json`: full normalized local catalog and import report. Nutrition listings remain distinct from dated menu entries and value deals.
+- `catalog.json` (generated, not committed): full normalized local catalog and import report. Nutrition listings remain distinct from dated menu entries and value deals.
 - `browser.json`: compact source/review input; the browser uses the same pure normalization as the local builder.
 
 Nutrition figures are UW-published approximations, not measured guarantees. Blank allergen cells never establish absence. Protein, total fat, fiber and final serving weights remain null when unpublished. Full-plate calories are not inferred from a protein choice, and a build-your-own bowl price is not transferred to a pasta component. A published menu establishes a schedule, not stock. Exact special-closure information was not published; station service windows are enforced only within the reviewed date period.
