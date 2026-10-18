@@ -185,7 +185,8 @@ class RouteTests(unittest.TestCase):
             self.assertEqual(app.get('/food/preferences', params={'user': B}).json()['learned']['events'], 0)
             response = app.post('/recipes', json={'ingredients': ['tofu'], 'equipment': [], 'userId': A})
             self.assertEqual(response.status_code, 200)
-            context = json.loads(call.call_args.kwargs['contents'].split('\nPreferences: ', 1)[1])
+            recipe_call = next(c for c in call.call_args_list if 'Preferences: ' in str(c.kwargs['contents']))   # photo calls follow it
+            context = json.loads(recipe_call.kwargs['contents'].split('\nPreferences: ', 1)[1])
             self.assertEqual(context['learnedFromHistory']['likedCuisines'], ['Korean'])
             self.assertEqual(app.post('/food/feedback', json={**payload, 'user': 'not-a-uuid', 'eventId': 'new'}).status_code, 422)
 

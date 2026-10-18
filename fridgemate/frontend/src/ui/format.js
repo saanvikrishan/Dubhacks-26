@@ -75,297 +75,176 @@ export function isMealPlaceholder(url) {
   );
 }
 
-const thumbCache = new Map();
-const inflight = new Map();
-const usedThumbs = new Set();
+// ── Meal photos ─────────────────────────────────────────────────────────────
+// Each Cook recipe and each published UW menu item gets one AI photo, generated and
+// accuracy-checked by the backend (POST /api/food/image) and cached there for good.
+// Campus photos are labelled as AI images, never as dining-hall photography.
+const generated = new Map(); // request key -> image URL, or null after a failure
+const BUNDLED = { pasta: "/food/pasta.png", chickpeas: "/food/chickpeas.png", tofu: "/food/tofu.png" };
 
-const STOP = new Set([
-  "a",
-  "an",
-  "the",
-  "and",
-  "or",
-  "with",
-  "in",
-  "of",
-  "style",
-  "homemade",
-  "easy",
-  "quick",
-  "bowl",
-  "plate",
-  "dish",
-  "recipe",
-  "meal",
-  "fresh",
-  "zesty",
-  "spicy",
-  "simple",
-  "classic",
-  "best",
-  "loaded",
-  "healthy",
-]);
+const isCampusDish = (meal) => Boolean(meal?.name && meal.dining);
+const canGenerate = (meal) =>
+  isCampusDish(meal) || (Boolean(meal?.name) && meal.mode !== "eatOut" && (meal.ingredients?.length ?? 0) > 0);
 
-/** Strong food signals — if the photo has these and the dish doesn't, reject. */
-const CONFLICT_FOODS = new Set([
-  "shrimp",
-  "prawn",
-  "prawns",
-  "chicken",
-  "beef",
-  "pork",
-  "lamb",
-  "fish",
-  "salmon",
-  "tuna",
-  "bacon",
-  "sausage",
-  "crab",
-  "lobster",
-  "turkey",
-  "duck",
-  "steak",
-  "pepperoni",
-  "anchovy",
-  "clam",
-  "mussel",
-  "tofu",
-]);
+function imageRequest(meal) {
+  if (isCampusDish(meal)) {
+    const portion = /unpublished/i.test(meal.portionLabel ?? "") ? "" : meal.portionLabel ?? "";
+    const place = [meal.venue?.station, portion].filter(Boolean).join(", ").slice(0, 80);
+    return { name: String(meal.name).trim().slice(0, 80), ingredients: [], setting: "campus", ...(place ? { place } : {}) };
+  }
+  const ingredients = [...meal.ingredients]
+    .sort((a, b) => (b.grams ?? 0) - (a.grams ?? 0))
+    .slice(0, 6)
+    .map((i) => String(i.name ?? "").trim().toLowerCase())
+    .filter(Boolean);
+  return {
+    name: String(meal.name).trim().slice(0, 80),
+    ingredients,
+    ...(meal.cuisines?.[0] ? { cuisine: meal.cuisines[0] } : {}),
+    ...(meal.dishType ? { dishType: meal.dishType } : {}),
+  };
+}
+/** The photo request for a recipe or campus dish, or null; used to start a prepared batch's photos. */
+export const photoRequestFor = (meal) => (canGenerate(meal) ? imageRequest(meal) : null);
+const requestKey = (req) => JSON.stringify([req.setting ?? "home", req.place ?? "", req.name.toLowerCase(), [...req.ingredients].sort()]);
 
-const SYNONYM = {
-  veggie: "vegetable",
-  veggies: "vegetable",
-  veg: "vegetable",
-  eggs: "egg",
-  tomatoes: "tomato",
-  peppers: "pepper",
-  noodles: "noodle",
+/** Kept for existing callers; random tagged stock photos are no longer used. */
+export function taggedMealImage() {
+  return MEAL_IMAGE_PLACEHOLDER;
+}
+
+// ── Photo store ─────────────────────────────────────────────────────────────
+// Each photo is tracked by the server's photo key: recipes arrive with one (the server already
+// started drawing them); other dishes get one from /predraw. One cheap status request every
+// 1.5 s reports which are ready, so decks can show only cards whose photo has loaded.
+const serverKeys = new Map(); // request key -> server photo key
+const requests = new Map(); // request key -> photo request
+const trackedAt = new Map(); // request key -> when tracking started
+const waiters = new Map(); // request key -> resolve callbacks
+const listeners = new Set();
+let version = 0;
+let pollTimer = null;
+const GIVE_UP_MS = 120000;
+
+export const subscribePhotos = (listener) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 };
+export const photoVersion = () => version;
 
-function norm(text) {
-  return String(text || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function settle(key, url) {
+  if (generated.has(key)) return;
+  generated.set(key, url);
+  serverKeys.delete(key);
+  version++;
+  for (const listener of listeners) listener();
+  for (const resolve of waiters.get(key) ?? []) resolve(url ?? MEAL_IMAGE_PLACEHOLDER);
+  waiters.delete(key);
 }
 
-function tokens(text) {
-  return norm(text)
-    .split(" ")
-    .map((t) => SYNONYM[t] || t)
-    .filter((t) => t && !STOP.has(t) && t.length > 2);
+/** 'ready', 'failed' or 'pending'. Cards that never get generated photos count as ready. */
+export function photoState(meal) {
+  if (!canGenerate(meal)) return "ready";
+  const key = requestKey(imageRequest(meal));
+  if (!generated.has(key)) return "pending";
+  return generated.get(key) ? "ready" : "failed";
 }
 
-function hashPick(seed, size) {
-  let h = 0;
-  const s = String(seed || "");
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return size > 0 ? h % size : 0;
-}
-
-function providedUrl(mealOrName) {
-  if (!mealOrName || typeof mealOrName !== "object") return null;
-  for (const key of ["imageUrl", "photo"]) {
-    const v = mealOrName[key];
-    if (typeof v === "string" && /^https?:\/\//.test(v)) return v;
+async function drawNow(key) {
+  serverKeys.delete(key);
+  try {
+    const response = await fetch("/api/food/image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requests.get(key)),
+      signal: AbortSignal.timeout(90000),
+    });
+    const data = response.ok ? await response.json() : {};
+    settle(key, typeof data.url === "string" && data.url.startsWith("/api/food/image/") ? data.url : null);
+  } catch {
+    settle(key, null);
   }
-  return null;
 }
 
-/** Prefer the full recipe title so "egg veggie fried rice" isn't shortened away. */
-function photoQuery(mealOrName) {
-  if (mealOrName && typeof mealOrName === "object") {
-    const name = String(mealOrName.name || "").trim();
-    const search = String(mealOrName.imageSearch || "").trim();
-    // Prefer Gemini's short imageSearch when it is specific enough
-    if (search && tokens(search).length >= 2) return search.slice(0, 100);
-    const primary =
-      name.length >= search.length ? name || search : search || name;
-    return primary.slice(0, 100) || "homemade meal";
-  }
-  return String(mealOrName || "homemade meal").trim().slice(0, 100);
-}
-
-function searchQuery(mealOrName) {
-  const q = photoQuery(mealOrName);
-  const toks = tokens(q);
-  const core = toks.slice(0, 6).join(" ");
-  return `${core || q} food`.trim();
-}
-
-/** Soft placeholder tagged with dish words (only when no real photo exists). */
-export function taggedMealImage(name) {
-  const tags = tokens(name).slice(0, 5);
-  const ordered = [...tags].sort((a, b) => {
-    const rank = (t) =>
-      CONFLICT_FOODS.has(t) || t === "egg" || t === "vegetable" || t === "tofu"
-        ? 0
-        : t === "rice" || t === "pasta" || t === "noodle"
-          ? 2
-          : 1;
-    return rank(a) - rank(b);
-  });
-  const tagStr = (ordered.length ? ordered : ["food"]).concat("food").join(",");
-  const lock = hashPick(name, 999999);
-  return `https://loremflickr.com/768/768/${encodeURIComponent(tagStr)}/all?lock=${lock}`;
-}
-
-/**
- * Score a candidate photo against the dish.
- * Shared ingredients help; conflicting proteins hurt a lot.
- */
-function scoreCandidate(query, title, tagText = "") {
-  const want = new Set(tokens(query));
-  const blob = `${title} ${tagText}`;
-  const gotList = tokens(blob);
-  const got = new Set(gotList);
-  if (!want.size) return -999;
-
-  let shared = 0;
-  for (const t of want) if (got.has(t)) shared += 1;
-
-  if (shared === 0) return -400;
-  // One shared token is only OK for short dish names ("pad thai")
-  if (want.size >= 3 && shared < 2) return -200;
-
-  let score = shared * 120;
-  // Coverage bonus: matching most of the dish name
-  score += Math.round((180 * shared) / Math.max(1, want.size));
-
-  for (const t of want) {
-    if (got.has(t) && t !== "fried" && t !== "rice" && t !== "food") score += 80;
-  }
-
-  for (const t of got) {
-    if (CONFLICT_FOODS.has(t) && !want.has(t)) score -= 500;
-  }
-
-  const extras = gotList.filter((t) => !want.has(t) && t !== "food").length;
-  score -= Math.min(80, extras * 10);
-
-  return score;
-}
-
-async function searchOpenverse(query, signal) {
-  const res = await fetch(
-    `/api/openverse/images/?q=${encodeURIComponent(query)}&page_size=20`,
-    { signal },
-  );
-  if (!res.ok) return [];
-  const data = await res.json().catch(() => ({}));
-  return Array.isArray(data?.results) ? data.results : [];
-}
-
-function pickOpenverseUrl(dishQuery, results) {
-  if (!results?.length) return null;
-  const ranked = results
-    .map((r, index) => {
-      const tagText = Array.isArray(r.tags)
-        ? r.tags.map((t) => (typeof t === "string" ? t : t?.name || "")).join(" ")
-        : "";
-      return {
-        url: r.url || r.thumbnail,
-        score: scoreCandidate(dishQuery, r.title || "", tagText),
-        index,
-        title: r.title || "",
-      };
-    })
-    .filter((r) => r.url && /^https?:\/\//.test(r.url))
-    .sort((a, b) => b.score - a.score || a.index - b.index);
-
-  if (!ranked.length) return null;
-
-  // Require a real shared-token match (score >= 100 ≈ one shared token)
-  const good = ranked.filter((r) => r.score >= 140);
-  if (!good.length) return null;
-
-  const fresh = good.filter((r) => !usedThumbs.has(r.url));
-  const choices = fresh.length ? fresh : good;
-  const top = choices[0].score;
-  const band = choices.filter((r) => r.score >= top - 60);
-  const chosen = band[hashPick(dishQuery, band.length)] || choices[0];
-  usedThumbs.add(chosen.url);
-  return chosen.url;
-}
-
-/**
- * Resolve a photo that matches the dish name.
- * Prefers Openverse when confident; otherwise keeps a provided CDN URL;
- * only uses LoremFlickr as a last resort.
- */
-export async function resolveMealImage(nameOrMeal) {
-  const dish = photoQuery(nameOrMeal);
-  const key = dish.toLowerCase();
-  if (!key) return MEAL_IMAGE_PLACEHOLDER;
-  const hit = thumbCache.get(key);
-  if (hit) return hit;
-  if (inflight.has(key)) return inflight.get(key);
-
-  const fallback = providedUrl(nameOrMeal);
-
-  const job = (async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
+function poll(delay = 1500) {
+  if (pollTimer || !serverKeys.size) return;
+  pollTimer = setTimeout(async () => {
+    pollTimer = null;
+    const waiting = [...serverKeys].slice(0, 16);
     try {
-      const q = searchQuery(nameOrMeal);
-      const results = await searchOpenverse(q, controller.signal);
-      const url = pickOpenverseUrl(dish, results);
-      // Prefer a confident Openverse hit; otherwise keep backend TheMealDB URL
-      const finalUrl = url || fallback || taggedMealImage(dish);
-      thumbCache.set(key, finalUrl);
-      return finalUrl;
+      const keys = [...new Set(waiting.map(([, server]) => server))].join(",");
+      const response = await fetch(`/api/food/image-status?keys=${keys}`);
+      const status = response.ok ? await response.json() : {};
+      for (const [key, server] of waiting) {
+        const state = status[server]?.status;
+        if (state === "ready") settle(key, status[server].url);
+        else if (state === "failed" || Date.now() - trackedAt.get(key) > GIVE_UP_MS) settle(key, null);
+        else if (state === "none") void drawNow(key);
+      }
     } catch {
-      const finalUrl = fallback || taggedMealImage(dish);
-      thumbCache.set(key, finalUrl);
-      return finalUrl;
-    } finally {
-      clearTimeout(timer);
-      inflight.delete(key);
+      /* try again on the next tick */
     }
-  })();
-
-  inflight.set(key, job);
-  return job;
+    poll();
+  }, delay);
+  pollTimer.unref?.(); // in Node (tests), background polling never keeps the process alive
 }
 
-export function prefetchMealImages(meals) {
-  usedThumbs.clear();
-  for (const meal of meals || []) {
-    if (!meal?.name && !meal?.imageSearch) continue;
-    const key = photoQuery(meal).toLowerCase();
-    if (key) thumbCache.delete(key);
-    void resolveMealImage(meal);
+/** Start (or join) photos for these meals and keep polling until each is ready or has failed. */
+export function trackMealPhotos(meals) {
+  const ask = [];
+  for (const meal of meals ?? []) {
+    if (!canGenerate(meal)) continue;
+    const req = imageRequest(meal);
+    const key = requestKey(req);
+    if (generated.has(key) || requests.has(key)) continue;
+    requests.set(key, req);
+    trackedAt.set(key, Date.now());
+    if (/^[0-9a-f]{32}$/.test(meal.photoKey ?? "")) serverKeys.set(key, meal.photoKey);
+    else ask.push(key);
   }
+  for (let i = 0; i < ask.length; i += 16) {
+    const batch = ask.slice(i, i + 16);
+    fetch("/api/food/image/predraw", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requests: batch.map((key) => requests.get(key)) }),
+    })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("predraw"))))
+      .then((data) => {
+        batch.forEach((key, n) => (/^[0-9a-f]{32}$/.test(data.keys?.[n] ?? "") ? serverKeys.set(key, data.keys[n]) : settle(key, null)));
+        poll(0);
+      })
+      .catch(() => batch.forEach((key) => settle(key, null)));
+  }
+  poll(0); // already-drawn photos show at once
+}
+
+export function resolveMealImage(meal) {
+  if (!canGenerate(meal)) return Promise.resolve(mealImage(meal));
+  const key = requestKey(imageRequest(meal));
+  if (generated.has(key)) return Promise.resolve(generated.get(key) ?? MEAL_IMAGE_PLACEHOLDER);
+  trackMealPhotos([meal]);
+  return new Promise((resolve) => waiters.set(key, [...(waiters.get(key) ?? []), resolve]));
+}
+
+/** Recipes from the server are already being drawn, so tracking them only polls. */
+export function prefetchMealImages(meals) {
+  trackMealPhotos((meals ?? []).slice(0, 8));
 }
 
 export function mealImage(meal) {
   if (!meal) return MEAL_IMAGE_PLACEHOLDER;
-
-  const isAiSuggestion =
-    meal.suggestion ||
-    meal.nutrition?.kind === "gemini_suggestion" ||
-    meal.nutrition?.kind === "usda_estimated";
-
-  // Local catalog assets for known venues / catalog meals
-  if (
-    !isAiSuggestion &&
-    (meal.photo === "pasta" ||
-      meal.photo === "chickpeas" ||
-      meal.photo === "tofu")
-  ) {
-    return `/food/${meal.photo}.png`;
+  if (canGenerate(meal)) {
+    const key = requestKey(imageRequest(meal));
+    // Cards that do not call resolveMealImage (e.g. Today) still get their photo on the next render.
+    if (!generated.has(key) && typeof window !== "undefined") trackMealPhotos([meal]);
+    return generated.get(key) ?? MEAL_IMAGE_PLACEHOLDER;
   }
-
-  const key = photoQuery(meal).toLowerCase();
-  const cached = thumbCache.get(key);
-  if (cached) return cached;
-
-  // Backend TheMealDB URL (only when scoring accepted it)
-  const url = providedUrl(meal);
-  if (url) return url;
-
+  // Dining and other non-recipe cards keep their bundled art or a published photo URL.
+  if (!meal.suggestion && BUNDLED[meal.photo]) return BUNDLED[meal.photo];
+  for (const field of ["imageUrl", "photo"]) {
+    if (typeof meal[field] === "string" && /^https?:\/\//.test(meal[field])) return meal[field];
+  }
   return MEAL_IMAGE_PLACEHOLDER;
 }
 

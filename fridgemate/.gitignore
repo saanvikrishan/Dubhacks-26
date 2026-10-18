@@ -41,3 +41,6 @@ backend/**/__pycache__/
 /node_modules/
 /dist/
 /.calendar-bridge/
+
+# Generated meal photos (regenerated on demand)
+backend/generated-images/

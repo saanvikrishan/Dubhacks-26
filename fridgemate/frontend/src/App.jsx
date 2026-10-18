@@ -43,6 +43,7 @@ import { today, transition } from "./domain/state";
 import { storageAdapter } from "./adapters/storage";
 import { persistSavedMeal, savePantryItems } from "./adapters/database";
 import { recordActionFeedback } from "./adapters/mealFeedback";
+import { prepareCook, prepareRecipeDrafts, requestRecipeDrafts, startPreparedPhotos } from "./adapters/recipes";
 import { directionsUrl } from "./data/uwDining";
 import "./App.css";
 import "./ui/redesign.css";
@@ -95,6 +96,12 @@ export default function App() {
   }, []);
   
   useCalendarRefresh(stateRef, dispatch, setError);
+
+  // Opening Cook prepares likely photos and, for returning users, a saved-pantry batch.
+  const cookOpen = tab === "Let's eat" && mode === "cook" && Boolean(state);
+  useEffect(() => {
+    if (cookOpen && stateRef.current) void prepareCook(stateRef.current);
+  }, [cookOpen]);
 
   // Show loading screen while state is loading
   if (loading || !state) {
@@ -235,6 +242,22 @@ export default function App() {
       setGroceryList([]);
       setCookPhase("discover");
     }
+  }
+  // A fresh batch of AI recipes that avoids every recipe already suggested.
+  const shownRecipeNames = () => (state.generatedMeals ?? []).filter((m) => m.suggestion === true).map((m) => m.name);
+  // Requested quietly while the user is still swiping, so "More ideas" can be instant:
+  // recipes halfway through the deck, their photos when two cards are left.
+  function prepareMore(stage = "recipes") {
+    const args = { state, ingredients: groceryList, exclude: shownRecipeNames() };
+    if (stage === "photos") startPreparedPhotos(args);
+    else prepareRecipeDrafts(args);
+  }
+  async function moreIdeas() {
+    const meals = await requestRecipeDrafts({ state, ingredients: groceryList, exclude: shownRecipeNames(), signal: AbortSignal.timeout(60000) });
+    if (!meals.length) throw new Error("No new recipes fit right now. Try other groceries or a longer meal window.");
+    await dispatch({ type: "addGeneratedMeals", meals, pantry: {}, groceryList });
+    prefetchMealImages(meals);
+    setGeminiMeals(meals.map((m) => m.id));
   }
   async function choose(meal) {
     if(meal.sourceRecipeId && !byId[meal.id] && !(await safe({type:"captureSourcedMeal",meal}))) return;
@@ -866,6 +889,8 @@ export default function App() {
               geminiMeals={mode === "cook" && geminiMeals ? geminiMeals.map(id=>byId[id]).filter(Boolean) : null}
               onReview={meal=>setDialog({type:"reviewRecipe",meal})}
               groceryList={groceryList}
+              onMoreIdeas={geminiMeals ? moreIdeas : null}
+              onPrepareMore={geminiMeals ? prepareMore : null}
             />
           )}
         {tab === "Grocery list" && (

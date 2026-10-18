@@ -62,4 +62,38 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         a=normalize_draft(RecipeDraft(**DRAFT));b=normalize_draft(RecipeDraft(**{**DRAFT,'cook':1}))
         self.assertNotEqual(a['id'],b['id'])
 
+class MoreOptionsTests(unittest.IsolatedAsyncioTestCase):
+    def test_strongest_fast_model_first_with_low_thinking(self):
+        import os
+        from unittest.mock import patch
+        with patch.dict(os.environ,{},clear=False):
+            os.environ.pop('GEMINI_RECIPE_MODEL',None);os.environ.pop('GEMINI_MODEL',None)
+            self.assertEqual(RecipeGenerator().models,['gemini-3.1-flash-lite'])
+    async def test_eight_distinct_drafts_and_exclude_reaches_prompt_and_cache_key(self):
+        drafts=[{**DRAFT,'name':f'Dish {i}','ingredients':[{'name':f'item {i}','grams':100}]} for i in range(8)]
+        call=AsyncMock(return_value=SimpleNamespace(text=json.dumps({'recipes':drafts})))
+        client=SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=call)))
+        g=RecipeGenerator(models=['test'])
+        first=await g.generate(client,RecipeRequest())
+        self.assertEqual(len(first['meals']),8)
+        self.assertEqual(call.call_args.kwargs['config']['thinking_config'],{'thinking_level':'low'})
+        self.assertNotIn('Already suggested',call.call_args.kwargs['contents'])
+        await g.generate(client,RecipeRequest(exclude=['Dish 0','Dish 1']))
+        self.assertEqual(call.await_count,2)
+        self.assertIn('Already suggested (do not repeat or closely imitate): ["Dish 0", "Dish 1"]',call.call_args.kwargs['contents'])
+        with self.assertRaises(ValidationError): RecipeRequest(exclude=['x'*81])
+    async def test_conflicting_groceries_are_set_aside_not_fatal(self):
+        from meal_generation import diet_conflicts
+        req=RecipeRequest(ingredients=['chicken','white rice','eggs','pork belly'],pantry={'chicken':200.0,'eggs':100.0},diet='vegetarian')
+        self.assertEqual(diet_conflicts(req),['chicken','pork belly'])
+        self.assertEqual(diet_conflicts(RecipeRequest(ingredients=['eggs','tofu'],diet='vegan')),['eggs'])
+        client,call=fake();await RecipeGenerator(models=['test']).generate(client,req)
+        prompt=call.call_args.kwargs['contents'];sent=json.loads(prompt.split('Input: ',1)[1].split('\nPreferences: ',1)[0])
+        self.assertEqual(sent['ingredients'],['white rice','eggs']);self.assertEqual(sent['pantry'],{'eggs':100.0})
+        self.assertIn('Set aside for this diet or allergies (do not use): chicken, pork belly',prompt)
+    async def test_unsupported_setting_on_one_model_falls_back(self):
+        client,call=fake([ProviderError(400),SimpleNamespace(text=json.dumps({'recipes':[DRAFT]}))])
+        result=await RecipeGenerator(models=['old','new']).generate(client,RecipeRequest())
+        self.assertEqual(result['model'],'new')
+
 if __name__=='__main__':unittest.main()

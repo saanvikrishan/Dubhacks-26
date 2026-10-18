@@ -41,6 +41,8 @@ export function normalizeGeneratedMeal(raw) {
     // AI-tagged labels for preference matching and variety only; unknown labels are dropped.
     cuisines:(Array.isArray(raw?.cuisines)?raw.cuisines:[]).filter(c=>CUISINES.includes(c)).slice(0,1),
     tastes:(Array.isArray(raw?.tastes)?raw.tastes:[]).filter(t=>TASTES.includes(t)).slice(0,3),
+    // Short generic dish name; identical dishes share one photo.
+    dishType:typeof raw?.dishType==='string'&&raw.dishType.trim()?raw.dishType.trim().toLowerCase().slice(0,40):null,
     cost:null,portionGrams:null,portionLabel:'1 recipe portion',diets:null,allergens:null,suggestion:true,review:null,
     nutrition:{basis:'per_serving',values:Object.fromEntries(Object.keys(nutrientInfo).map(k=>[k,null])),kind:'unknown'},
   };
