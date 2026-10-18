@@ -1,6 +1,39 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon, Modal } from "./Core";
-import { money, num, photoFor } from "./format";
+import {
+  MEAL_IMAGE_PLACEHOLDER,
+  mealImage,
+  money,
+  num,
+  resolveMealImage,
+} from "./format";
+
+function MealPhoto({ meal, alt, className }) {
+  const initial = mealImage(meal);
+  const [src, setSrc] = useState(initial);
+  useEffect(() => {
+    const ready = mealImage(meal);
+    setSrc(ready);
+    if (ready !== MEAL_IMAGE_PLACEHOLDER) return undefined;
+    let cancelled = false;
+    resolveMealImage(meal?.name).then((url) => {
+      if (!cancelled && url) setSrc(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [meal?.id, meal?.name, meal?.imageUrl, meal?.photo]);
+  return (
+    <img
+      className={className}
+      draggable={false}
+      src={src}
+      alt={alt || meal?.name || "Meal"}
+      loading="eager"
+      decoding="async"
+    />
+  );
+}
 import { catalog, pantryItems } from "../data/catalog";
 import { byId } from "../data/suggestions";
 import { config } from "../domain/config";
@@ -653,11 +686,7 @@ export function FoodDiscovery({
               onClick={() => onDetails(meal)}
               aria-label={`View ${meal.name} details`}
             >
-              <img
-                draggable={false}
-                src={`/food/${photoFor(meal)}.png`}
-                alt={`Stock photo matched to ${meal.name}`}
-              />
+              <MealPhoto meal={meal} alt={meal.name} />
               <span className="cover-tag">
                 <Icon name="leaf" size={14} />
                 {usingGemini
@@ -666,7 +695,7 @@ export function FoodDiscovery({
                     : "Gemini suggestion"
                   : "Cook with your groceries"}
               </span>
-              <span className="photo-label">Closest stock photo</span>
+              <span className="photo-label">Photo for this dish</span>
             </button>
             <div className="flashcard-body">
               <h2>{meal.name}</h2>

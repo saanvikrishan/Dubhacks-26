@@ -18,7 +18,7 @@ import {
   PlanCalendar,
 } from "./ui/CalendarViews";
 import { CookStart, FoodDiscovery, VenueDetails } from "./ui/FoodViews";
-import { money, num, photoFor } from "./ui/format";
+import { money, mealImage, num } from "./ui/format";
 import { pantryItems } from "./data/catalog";
 import { byId, rememberSuggestions } from "./data/suggestions";
 import { capabilities } from "./domain/config";
@@ -471,8 +471,8 @@ export default function App() {
               {showLastPlan && (
                 <section className="today-saved-meal">
                   <img
-                    src={`/food/${photoFor(byId[lastPlan.mealId])}.png`}
-                    alt="Meal illustration"
+                    src={mealImage(byId[lastPlan.mealId])}
+                    alt={byId[lastPlan.mealId].name}
                   />
                   <div>
                     <span className="eyebrow">YOUR MEAL PLAN</span>

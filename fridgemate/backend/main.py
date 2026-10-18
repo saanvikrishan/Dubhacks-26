@@ -6,6 +6,7 @@ import time
 from datetime import date
 from pathlib import Path
 
+import httpx
 from backboard import BackboardClient
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -76,61 +77,6 @@ backboard_key = (os.getenv("BACKBOARD_API_KEY") or "").strip()
 backboard_client = BackboardClient(api_key=backboard_key) if backboard_key else None
 _assistant_id = None
 DEMO_ASSISTANT_NAME = "FridgeMate demo"
-PHOTOS = ("pasta", "chickpeas", "tofu")
-# Weighted cues → stock photos in public/food/{key}.png
-PHOTO_SIGNALS = {
-    "pasta": (
-        ("penne", 6),
-        ("spaghetti", 6),
-        ("linguine", 6),
-        ("fettuccine", 6),
-        ("macaroni", 6),
-        ("lasagna", 6),
-        ("ravioli", 6),
-        ("pasta", 5),
-        ("noodle", 4),
-        ("carbonara", 4),
-        ("alfredo", 4),
-        ("bolognese", 4),
-        ("marinara", 3),
-        ("arrabbiata", 4),
-        ("tomato sauce", 3),
-        ("parmesan", 1),
-        ("basil", 1),
-    ),
-    "chickpeas": (
-        ("chickpea", 6),
-        ("garbanzo", 6),
-        ("hummus", 6),
-        ("falafel", 5),
-        ("chana", 5),
-        ("tzatziki", 4),
-        ("mediterranean", 3),
-        ("cucumber", 2),
-        ("lentil", 3),
-        ("dal", 3),
-        ("bean salad", 3),
-        ("black bean", 2),
-        ("kidney bean", 2),
-        ("white bean", 2),
-        ("bean", 2),
-    ),
-    "tofu": (
-        ("tofu", 6),
-        ("tempeh", 5),
-        ("stir-fry", 4),
-        ("stir fry", 4),
-        ("teriyaki", 4),
-        ("sesame", 2),
-        ("buddha bowl", 4),
-        ("grain bowl", 2),
-        ("rice bowl", 3),
-        ("broccoli", 2),
-        ("bell pepper", 1),
-        ("soy", 1),
-        ("edamame", 3),
-    ),
-}
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg",
     "image/jpg",
@@ -487,43 +433,74 @@ def slug(name: str, index: int) -> str:
     return f"gemini-{base or 'meal'}-{index}"
 
 
-def pick_photo(
-    raw: str | None,
-    name: str,
-    description: str = "",
-    ingredients: list | None = None,
-    steps: list | None = None,
-) -> str:
-    """Pick the stock image that best matches the dish (name weighted highest)."""
-    ing_text = " ".join(
-        (i if isinstance(i, str) else str((i or {}).get("name") or ""))
-        for i in (ingredients or [])
-    )
-    step_text = " ".join(str(s) for s in (steps or []))
-    name_l = (name or "").lower()
-    desc_l = (description or "").lower()
-    rest_l = f"{ing_text} {step_text}".lower()
+# TheMealDB CDN thumbs — existing photos, not AI generation (fast).
+_image_cache: dict[str, str] = {}
 
-    scores = {key: 0 for key in PHOTOS}
-    for key, signals in PHOTO_SIGNALS.items():
-        for token, weight in signals:
-            if token in name_l:
-                scores[key] += weight * 3  # dish title wins
-            if token in desc_l:
-                scores[key] += weight * 2
-            if token in rest_l:
-                scores[key] += weight
 
-    # Model hint is a weak tie-break only — never override a clear keyword win.
-    hint = (raw or "").strip().lower()
-    if hint in scores:
-        scores[hint] += 1
+def _image_search_queries(name: str) -> list[str]:
+    base = re.sub(r"\s+", " ", (name or "").strip())
+    base = re.sub(r"\([^)]*\)", "", base).strip(" ,-")
+    parts = [p for p in re.split(r"[\s/]+", base) if p]
+    candidates = [base, " ".join(parts[:3]), " ".join(parts[:2])]
+    if parts:
+        candidates.append(parts[0])
+    out: list[str] = []
+    seen: set[str] = set()
+    for q in candidates:
+        q = q.strip(" ,-")[:60]
+        key = q.lower()
+        if q and key not in seen:
+            seen.add(key)
+            out.append(q)
+    return out
 
-    best = max(PHOTOS, key=lambda k: (scores[k], PHOTOS.index(k)))
-    if scores[best] <= 0:
-        # No cues: prefer a grain bowl look over random pasta.
-        return "tofu"
-    return best
+
+async def resolve_dish_image(name: str, client: httpx.AsyncClient | None = None) -> str | None:
+    """Look up a real food photo by dish name (TheMealDB). Cached + ~ms CDN."""
+    key = (name or "").strip().lower()
+    if not key:
+        return None
+    cached = _image_cache.get(key)
+    if cached:
+        return cached
+
+    async def _search(http: httpx.AsyncClient) -> str | None:
+        for q in _image_search_queries(name):
+            try:
+                response = await http.get(
+                    "https://www.themealdb.com/api/json/v1/1/search.php",
+                    params={"s": q},
+                )
+                if response.status_code != 200:
+                    continue
+                meals = (response.json() or {}).get("meals") or []
+                thumb = meals[0].get("strMealThumb") if meals else None
+                if thumb:
+                    _image_cache[key] = thumb
+                    return thumb
+            except Exception as e:
+                print(f"[Image] TheMealDB miss for {q!r}: {type(e).__name__}")
+        return None
+
+    if client is not None:
+        return await _search(client)
+    async with httpx.AsyncClient(timeout=2.0) as http:
+        return await _search(http)
+
+
+async def attach_dish_images(meals: list[dict]) -> None:
+    """Attach fast CDN image URLs in parallel (does not block on AI image gen)."""
+    if not meals:
+        return
+    async with httpx.AsyncClient(timeout=2.0) as client:
+
+        async def one(meal: dict) -> None:
+            url = await resolve_dish_image(meal.get("name") or "", client)
+            if url:
+                meal["imageUrl"] = url
+                meal["photo"] = url
+
+        await asyncio.gather(*[one(m) for m in meals])
 
 
 def normalize_ingredient(item) -> dict:
@@ -601,13 +578,8 @@ def normalize_meal(raw: dict, index: int, fallback_ingredients: list[str]) -> di
             "Taste and adjust seasoning.",
         ],
         "mode": "cook",
-        "photo": pick_photo(
-            raw.get("photo"),
-            name,
-            description,
-            mapped,
-            steps,
-        ),
+        "photo": None,
+        "imageUrl": None,
         "suggestion": True,
     }
 
@@ -1012,7 +984,6 @@ Return valid JSON only:
       "ingredients": ["ingredient 1", "ingredient 2"],
       "steps": ["Step 1", "Step 2"],
       "nutrition_note": "Brief, cautious nutrition note",
-      "photo": "tofu",
       "diets": ["vegetarian"],
       "allergens": [],
       "energy_kcal": 450,
@@ -1021,11 +992,7 @@ Return valid JSON only:
   ]
 }
 
-photo must be the closest visual match among ONLY these stock photos:
-- pasta = penne in red tomato sauce with basil/cheese
-- chickpeas = Mediterranean chickpea rice bowl with cucumber, tomato, herbs
-- tofu = seared tofu stir-fry bowl with broccoli, peppers, carrots over rice
-Match the recipe name first (e.g. any pasta dish → pasta; hummus/falafel/chickpea → chickpeas; tofu/stir-fry/teriyaki bowl → tofu).
+Do not invent a photo field — images are generated from the recipe name separately.
 """
 
     last_error = None
@@ -1047,6 +1014,7 @@ Match the recipe name first (e.g. any pasta dish → pasta; hummus/falafel/chick
             ]
             if usda.usda_configured():
                 meals = await usda.enrich_meals(meals)
+            await attach_dish_images(meals)
             if model != GEMINI_MODEL:
                 print(f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)")
             return redact_output(

@@ -9,91 +9,102 @@ export const niceTime = (t) => {
   return `${Math.floor(m / 60) % 12 || 12}:${String(m % 60).padStart(2, "0")} ${m >= 720 ? "PM" : "AM"}`;
 };
 
-const PHOTOS = ["pasta", "chickpeas", "tofu"];
-const PHOTO_SIGNALS = {
-  pasta: [
-    ["penne", 6],
-    ["spaghetti", 6],
-    ["linguine", 6],
-    ["fettuccine", 6],
-    ["macaroni", 6],
-    ["lasagna", 6],
-    ["ravioli", 6],
-    ["pasta", 5],
-    ["noodle", 4],
-    ["carbonara", 4],
-    ["alfredo", 4],
-    ["bolognese", 4],
-    ["marinara", 3],
-    ["arrabbiata", 4],
-    ["tomato sauce", 3],
-  ],
-  chickpeas: [
-    ["chickpea", 6],
-    ["garbanzo", 6],
-    ["hummus", 6],
-    ["falafel", 5],
-    ["chana", 5],
-    ["tzatziki", 4],
-    ["mediterranean", 3],
-    ["cucumber", 2],
-    ["lentil", 3],
-    ["dal", 3],
-    ["bean salad", 3],
-    ["black bean", 2],
-    ["kidney bean", 2],
-    ["white bean", 2],
-    ["bean", 2],
-  ],
-  tofu: [
-    ["tofu", 6],
-    ["tempeh", 5],
-    ["stir-fry", 4],
-    ["stir fry", 4],
-    ["teriyaki", 4],
-    ["sesame", 2],
-    ["buddha bowl", 4],
-    ["grain bowl", 2],
-    ["rice bowl", 3],
-    ["broccoli", 2],
-    ["edamame", 3],
-  ],
-};
+/** Tiny inline placeholder — paints instantly while CDN photo resolves. */
+export const MEAL_IMAGE_PLACEHOLDER =
+  "data:image/svg+xml," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="768" height="768" viewBox="0 0 768 768">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop stop-color="#e7efe6"/><stop offset="1" stop-color="#d5e4d3"/>
+      </linearGradient></defs>
+      <rect width="768" height="768" fill="url(#g)"/>
+    </svg>`,
+  );
 
-/** Pick stock photo that best matches the dish name / ingredients. */
-export function photoFor(meal) {
-  if (!meal) return "tofu";
-  const name = String(meal.name || "").toLowerCase();
-  const desc = String(meal.description || "").toLowerCase();
-  const rest = [
-    ...(meal.ingredients || []).map((i) =>
-      typeof i === "string" ? i : i?.name || "",
-    ),
-    ...(meal.steps || []),
-    meal.id || "",
-  ]
-    .join(" ")
-    .toLowerCase();
+const thumbCache = new Map();
 
-  const scores = Object.fromEntries(PHOTOS.map((k) => [k, 0]));
-  for (const [key, signals] of Object.entries(PHOTO_SIGNALS)) {
-    for (const [token, weight] of signals) {
-      if (name.includes(token)) scores[key] += weight * 3;
-      if (desc.includes(token)) scores[key] += weight * 2;
-      if (rest.includes(token)) scores[key] += weight;
+function searchQueries(name) {
+  const base = String(name || "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const parts = base.split(/[\s/]+/).filter(Boolean);
+  const list = [base, parts.slice(0, 3).join(" "), parts.slice(0, 2).join(" ")];
+  if (parts[0]) list.push(parts[0]);
+  const out = [];
+  const seen = new Set();
+  for (const q of list) {
+    const t = q.trim().slice(0, 60);
+    const key = t.toLowerCase();
+    if (t && !seen.has(key)) {
+      seen.add(key);
+      out.push(t);
     }
   }
-
-  const hinted = PHOTOS.includes(meal.photo) ? meal.photo : null;
-  if (hinted) scores[hinted] += 1;
-
-  let best = "tofu";
-  let bestScore = -1;
-  for (const key of PHOTOS) {
-    if (scores[key] > bestScore) {
-      bestScore = scores[key];
-      best = key;
-    }
-  }
-  return bestScore > 0 ? best : hinted || "tofu";
+  return out;
 }
+
+/** Fast TheMealDB lookup (existing CDN photos, not AI generation). */
+export async function resolveMealImage(name) {
+  const key = String(name || "")
+    .trim()
+    .toLowerCase();
+  if (!key) return null;
+  if (thumbCache.has(key)) return thumbCache.get(key);
+
+  for (const q of searchQueries(name)) {
+    try {
+      const res = await fetch(
+        `https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(q)}`,
+      );
+      if (!res.ok) continue;
+      const data = await res.json();
+      const thumb = data?.meals?.[0]?.strMealThumb;
+      if (thumb) {
+        thumbCache.set(key, thumb);
+        return thumb;
+      }
+    } catch {
+      // try next query
+    }
+  }
+  thumbCache.set(key, null);
+  return null;
+}
+
+/**
+ * Sync URL for <img src>. Prefers backend imageUrl; catalog stock keys stay local.
+ * Never hits a slow generative image API.
+ */
+export function mealImage(meal) {
+  if (!meal) return MEAL_IMAGE_PLACEHOLDER;
+  if (typeof meal.imageUrl === "string" && /^https?:\/\//.test(meal.imageUrl))
+    return meal.imageUrl;
+  if (typeof meal.photo === "string" && /^https?:\/\//.test(meal.photo))
+    return meal.photo;
+
+  const isAiSuggestion =
+    meal.suggestion ||
+    meal.nutrition?.kind === "gemini_suggestion" ||
+    meal.nutrition?.kind === "usda_estimated";
+
+  if (
+    !isAiSuggestion &&
+    (meal.photo === "pasta" ||
+      meal.photo === "chickpeas" ||
+      meal.photo === "tofu")
+  ) {
+    return `/food/${meal.photo}.png`;
+  }
+
+  const cached = thumbCache.get(
+    String(meal.name || "")
+      .trim()
+      .toLowerCase(),
+  );
+  if (cached) return cached;
+  return MEAL_IMAGE_PLACEHOLDER;
+}
+
+/** @deprecated use mealImage */
+export const photoFor = (meal) => mealImage(meal);
