@@ -1013,3 +1013,108 @@ If nothing edible is visible, return {"ingredients":[]}.
                 break
 
     raise_gemini_failure(last_error, "Fridge photo scan")
+
+
+# ── Google Calendar OAuth ────────────────────────────────────────────────────
+_GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+_GCAL_REDIRECT = "http://localhost:8000/google-calendar/callback/"
+_gcal_tokens: dict = {}
+
+
+def _gcal_flow():
+    cid = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
+    csec = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip()
+    if not cid or not csec:
+        raise HTTPException(
+            status_code=500,
+            detail="Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to backend/.env",
+        )
+    try:
+        from google_auth_oauthlib.flow import Flow  # type: ignore
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="pip install google-auth-oauthlib google-api-python-client",
+        )
+    return Flow.from_client_config(
+        {"web": {
+            "client_id": cid, "client_secret": csec,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [_GCAL_REDIRECT],
+        }},
+        scopes=_GCAL_SCOPES,
+        redirect_uri=_GCAL_REDIRECT,
+    )
+
+
+@app.get("/google-calendar/auth-url")
+def gcal_auth_url():
+    flow = _gcal_flow()
+    url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+    return {"url": url}
+
+
+@app.get("/google-calendar/callback")
+def gcal_callback(code: str):
+    from fastapi.responses import HTMLResponse  # type: ignore
+    flow = _gcal_flow()
+    flow.fetch_token(code=code)
+    creds = flow.credentials
+    _gcal_tokens["access_token"] = creds.token
+    _gcal_tokens["refresh_token"] = creds.refresh_token
+    _gcal_tokens["connected"] = True
+    return HTMLResponse("""<!doctype html><html><body><script>
+if(window.opener){window.opener.postMessage({type:'gcal-connected'},'http://localhost:5173');window.close();}
+else{document.write('<p>Connected! Close this tab.</p>');}
+</script></body></html>""")
+
+
+@app.get("/google-calendar/status")
+def gcal_status():
+    return {"connected": _gcal_tokens.get("connected", False)}
+
+
+@app.get("/google-calendar/events")
+async def gcal_events(from_: str | None = None, to: str | None = None):
+    if not _gcal_tokens.get("connected"):
+        raise HTTPException(status_code=401, detail="Google Calendar not connected.")
+    try:
+        from google.oauth2.credentials import Credentials  # type: ignore
+        from googleapiclient.discovery import build  # type: ignore
+    except ImportError:
+        raise HTTPException(status_code=500, detail="pip install google-api-python-client")
+    cid = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
+    csec = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip()
+    creds = Credentials(
+        token=_gcal_tokens["access_token"],
+        refresh_token=_gcal_tokens.get("refresh_token"),
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=cid, client_secret=csec, scopes=_GCAL_SCOPES,
+    )
+    service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, cache_discovery=False)
+    tmin = from_ or (date.today().isoformat() + "T00:00:00Z")
+    tmax = to or (date.today().isoformat() + "T23:59:59Z")
+    raw = await asyncio.to_thread(
+        lambda: service.events().list(
+            calendarId="primary", timeMin=tmin, timeMax=tmax,
+            maxResults=500, singleEvents=True, orderBy="startTime",
+        ).execute()
+    )
+    events = []
+    for item in raw.get("items", []):
+        s = item.get("start", {}); e = item.get("end", {})
+        events.append({
+            "id": item["id"],
+            "title": item.get("summary", "Untitled"),
+            "start": s.get("dateTime") or (s.get("date", "") + "T00:00:00Z"),
+            "end":   e.get("dateTime") or (e.get("date", "") + "T23:59:59Z"),
+            "allDay": "date" in s,
+            "location": item.get("location", ""),
+            "calendar": "Google Calendar",
+            "source": "ics",
+            "busy": item.get("transparency", "opaque") != "transparent",
+            "readOnly": True,
+            "completed": False,
+        })
+    return {"events": events, "authorized": True}
