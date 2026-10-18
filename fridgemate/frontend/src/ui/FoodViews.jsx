@@ -585,15 +585,12 @@ export function FoodDiscovery({
     }
   }
   const canGetMore = mode === "cook" && Boolean(onMoreIdeas);
-  // Halfway through the deck, quietly prepare the next batch (and its photos).
-  const halfwaySeen = canGetMore && passed.length >= 4;
-  const nearEnd = canGetMore && passed.length >= 6;
+  // On the last of the 3 cards, quietly prepare the next 3 recipes (text only; photos are drawn
+  // when the user actually asks for more, so unseen choices cost nothing).
+  const onLastCard = canGetMore && passed.length >= 2;
   useEffect(() => {
-    if (halfwaySeen) onPrepareMore?.("recipes");
-  }, [halfwaySeen, onPrepareMore]);
-  useEffect(() => {
-    if (nearEnd) onPrepareMore?.("photos");
-  }, [nearEnd, onPrepareMore]);
+    if (onLastCard) onPrepareMore?.();
+  }, [onLastCard, onPrepareMore]);
   const allDayBusy = eventsForDay(state.events ?? [], state.context.date).filter(e=>e.allDay && blocksMealPlanning(e) && !e.completed);
   const usingGemini = mode === "cook" && Array.isArray(geminiMeals);
   useEffect(() => {

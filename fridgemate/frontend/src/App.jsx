@@ -43,7 +43,7 @@ import { today, transition } from "./domain/state";
 import { storageAdapter } from "./adapters/storage";
 import { persistSavedMeal, savePantryItems } from "./adapters/database";
 import { recordActionFeedback } from "./adapters/mealFeedback";
-import { prepareCook, prepareRecipeDrafts, requestRecipeDrafts, startPreparedPhotos } from "./adapters/recipes";
+import { prepareCook, prepareRecipeDrafts, requestRecipeDrafts } from "./adapters/recipes";
 import { directionsUrl } from "./data/uwDining";
 import "./App.css";
 import "./ui/redesign.css";
@@ -245,12 +245,9 @@ export default function App() {
   }
   // A fresh batch of AI recipes that avoids every recipe already suggested.
   const shownRecipeNames = () => (state.generatedMeals ?? []).filter((m) => m.suggestion === true).map((m) => m.name);
-  // Requested quietly while the user is still swiping, so "More ideas" can be instant:
-  // recipes halfway through the deck, their photos when two cards are left.
-  function prepareMore(stage = "recipes") {
-    const args = { state, ingredients: groceryList, exclude: shownRecipeNames() };
-    if (stage === "photos") startPreparedPhotos(args);
-    else prepareRecipeDrafts(args);
+  // Next 3 recipes requested quietly on the last card, so "More ideas" only waits for photos.
+  function prepareMore() {
+    prepareRecipeDrafts({ state, ingredients: groceryList, exclude: shownRecipeNames() });
   }
   async function moreIdeas() {
     const meals = await requestRecipeDrafts({ state, ingredients: groceryList, exclude: shownRecipeNames(), signal: AbortSignal.timeout(60000) });

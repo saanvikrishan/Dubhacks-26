@@ -52,17 +52,6 @@ export function prepareRecipeDrafts(args,{fetchImpl=globalThis.fetch}={}) {
   return true;
 }
 
-/** Two cards before the end: start the prepared batch's photos so "More ideas" opens on loaded photos. */
-export function startPreparedPhotos(args,{fetchImpl=globalThis.fetch}={}) {
-  let body;
-  try {body=recipeBody(args);} catch {return false;}
-  const ready=prepared.get(preparedKey(body));
-  if(!ready || ready.photosStarted) return false;
-  ready.photosStarted=true;
-  ready.promise.then(meals=>predrawPhotos(meals,fetchImpl),()=>{});
-  return true;
-}
-
 /** exclude: names already suggested, so a "more ideas" request returns new recipes. */
 export async function requestRecipeDrafts({state,ingredients,pantry={},exclude=[],fetchImpl=globalThis.fetch,signal}) {
   const body=recipeBody({state,ingredients,pantry,exclude});

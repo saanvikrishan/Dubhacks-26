@@ -249,7 +249,7 @@ class MealImageService:
                         'warmup': warm_limit if warm_limit is not None else int(os.getenv('MEAL_IMAGE_WARM_LIMIT', '40'))}
         self.today = today or (lambda: time.strftime('%Y-%m-%d', time.gmtime()))
         # A card someone is looking at never queues behind background pre-drawing.
-        # A whole batch (8) draws at once, so every card's photo is ready about when the first one is.
+        # A whole batch draws at once (up to 8 jobs), so every card's photo is ready about when the first one is.
         self.lanes = {'visible': asyncio.Semaphore(2), 'background': asyncio.Semaphore(8)}
         self.pending, self.used, self.index, self.reused = {}, {}, index, {}
         self.started, self.tasks = set(), set()   # jobs already drawing; fire-and-forget tasks kept alive
