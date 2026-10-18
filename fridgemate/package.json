@@ -8,7 +8,9 @@
     "test": "node --test tests/*.test.js",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dining:ingest": "python3 server/uw_ingest.py",
+    "dining:build": "node server/uw-build.js"
   },
   "dependencies": {
     "ical.js": "^2.2.1",

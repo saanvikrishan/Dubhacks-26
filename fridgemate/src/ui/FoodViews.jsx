@@ -1,12 +1,48 @@
-import { useRef, useState } from "react";
+import { withSourcedWalking } from "../domain/uwDining.js";
+import { useUwWalking, refreshWalking } from "../adapters/uwWalking.js";
+import { UwDiningCatalog, UwMenuPreview, UwWalkingSummary } from "./UwDining.jsx";
+import { useEffect, useRef, useState } from "react";
 import { Icon, Modal } from "./Core";
-import { money, num, photoFor } from "./format";
+import {
+  MEAL_IMAGE_PLACEHOLDER,
+  mealImage,
+  money,
+  num,
+  resolveMealImage,
+} from "./format";
+
+function MealPhoto({ meal, alt, className }) {
+  const [src, setSrc] = useState(() => mealImage(meal));
+  useEffect(() => {
+    let cancelled = false;
+    resolveMealImage(meal).then((url) => {
+      if (!cancelled && url) setSrc(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [meal]);
+  return (
+    <><img
+      className={className}
+      draggable={false}
+      src={src}
+      alt={alt || meal?.name || "Meal"}
+      loading="eager"
+      decoding="async"
+      onError={() => {if(src!==MEAL_IMAGE_PLACEHOLDER)setSrc(MEAL_IMAGE_PLACEHOLDER);}}
+    /><span className="photo-label">{src===MEAL_IMAGE_PLACEHOLDER?"Photo unavailable":src.startsWith('/food/')?"Meal illustration":"Illustrative dish photo"}</span></>
+  );
+}
 import { catalog, pantryItems } from "../data/catalog";
+import { buildSourcedCatalog } from "../data/sourcedCatalog";
 import { byId } from "../data/suggestions";
-import { config } from "../domain/config";
-import { recommend, clockTime, evaluate } from "../domain/engine";
-import { portionNutrition } from "../domain/nutrition";
-import { prettyDate } from "../domain/calendar";
+import { clockTime, evaluate } from "../domain/engine";
+import { discoverCookMeals } from "../domain/discovery";
+import { requestRecipeDrafts, cookingMinutes } from "../adapters/recipes";
+import { portionNutrition, usdaConfidenceExplain } from "../domain/nutrition";
+import { mealSubstitutions, substitutionLine } from "../domain/substitutions";
+import { prettyDate, eventsForDay, blocksMealPlanning } from "../domain/calendar";
 import {
   DEAL_SOURCE,
   UW_MAP_SOURCE,
@@ -20,20 +56,19 @@ import {
 function matchPantryName(raw) {
   const q = raw.trim().toLowerCase();
   if (!q) return null;
-  return (
-    pantryItems.find((item) => item === q) ||
-    pantryItems.find((item) => item.includes(q) || q.includes(item)) ||
-    null
-  );
+  return pantryItems.find((item) => item === q) || null;
 }
 
 /** First step when Cook is chosen: free-form groceries → Gemini suggestions. */
-export function CookStart({ state, onSuggested, onEatOut }) {
+export function CookStart({ state, onSuggested, onEatOut, onBrowseLocal, onUnavailable, onWindow, onPreferences }) {
   const [items, setItems] = useState([]),
     [draft, setDraft] = useState(""),
     [loading, setLoading] = useState(false),
     [scanning, setScanning] = useState(false),
     [error, setError] = useState("");
+  const [amounts,setAmounts]=useState({});
+  const controller=useRef(null);
+  useEffect(()=>()=>controller.current?.abort(),[]);
   const busy = loading || scanning;
 
   function addParts(parts) {
@@ -107,50 +142,24 @@ export function CookStart({ state, onSuggested, onEatOut }) {
     }
   }
 
-  async function requestSuggestions(ingredients) {
+  async function requestSuggestions(ingredients, quantities=amounts) {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/recipes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ingredients,
-          diet: state.profile.diet || "anything",
-          time: state.context.available || 45,
-          exclusions: state.profile.exclusions || [],
-        }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const detail =
-          typeof data.detail === "string"
-            ? data.detail
-            : Array.isArray(data.detail)
-              ? data.detail.map((d) => d.msg || d).join(" ")
-              : data.error || "Could not get meal suggestions.";
-        if (response.status === 429)
-          throw new Error(
-            detail ||
-              "Gemini quota exceeded. Try again later or use another API key.",
-          );
-        throw new Error(
-          detail.includes("ECONNREFUSED")
-            ? "Start the FastAPI backend on port 8000 (see fridgemate/backend)."
-            : detail,
-        );
-      }
-      const meals = data.meals || data.recipes || [];
-      if (!Array.isArray(meals) || !meals.length)
-        throw new Error("No meals came back. Try different ingredients.");
-      onSuggested(meals, ingredients);
+      controller.current?.abort();
+      controller.current=new AbortController();
+      const pantry=Object.fromEntries(ingredients.filter(name=>quantities[name]!==undefined && quantities[name]!=='' && Number(quantities[name])>=0).map(name=>[name,Number(quantities[name])]));
+      const meals=await requestRecipeDrafts({state,ingredients,pantry,signal:AbortSignal.any([controller.current.signal,AbortSignal.timeout(40000)])});
+      if(!meals.length) throw new Error('No recipes matched those inputs. Adjust the cooking window or browse local recipes.');
+      await onSuggested(meals,ingredients,pantry);
     } catch (err) {
-      const msg = err.message || "Could not get meal suggestions.";
-      setError(
-        /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+      if (err.name === "AbortError") return;
+      const msg = err.name === "TimeoutError" ? "Recipe generation timed out. Try again or browse local recipes." : err.message || "Could not get meal suggestions.";
+      const shown = /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
           ? "Start the FastAPI backend on port 8000 (cd fridgemate/backend && uvicorn main:app --reload --port 8000)."
-          : msg,
-      );
+          : msg;
+      if (onUnavailable) onUnavailable(shown);
+      else setError(shown);
     } finally {
       setLoading(false);
     }
@@ -186,6 +195,8 @@ export function CookStart({ state, onSuggested, onEatOut }) {
             Type what you have, or upload a fridge photo—we’ll spot ingredients,
             then suggest meals you can swipe through.
           </p>
+          <p className="fine-print">{cookingMinutes(state)} min for preparation and cooking · ${state.profile.budget.toFixed(2)} portion budget. Eating, cleanup, travel and buffer are reserved.</p>
+          <div className="dialog-actions"><button className="text-button" onClick={onWindow}>Adjust meal window</button><button className="text-button" onClick={onPreferences}>Diet, budget & equipment</button></div>
           <div className="cook-start-photo">
             <label className="cook-start-photo-button">
               <input
@@ -252,8 +263,7 @@ export function CookStart({ state, onSuggested, onEatOut }) {
             ))}
             {!items.length && (
               <span className="cook-start-empty">
-                No ingredients yet—upload a photo, type above, or tap a quick
-                add.
+                No ingredients yet—upload a photo or type what you have above.
               </span>
             )}
           </div>
@@ -273,6 +283,7 @@ export function CookStart({ state, onSuggested, onEatOut }) {
               </button>
             ))}
           </div>
+          {items.length>0 && <div className="pantry-grid">{items.map(name=><label key={name}>{name}<input aria-label={`Grams available: ${name}`} type="number" min="0" max="100000" step="any" disabled={busy} placeholder="Unknown grams" value={amounts[name]??''} onChange={e=>setAmounts({...amounts,[name]:e.target.value})}/><small>Available edible grams · optional until review</small></label>)}</div>}
           {items.length > 0 && (
             <p className="cook-start-count">
               {items.length} ingredient{items.length === 1 ? "" : "s"}
@@ -297,10 +308,11 @@ export function CookStart({ state, onSuggested, onEatOut }) {
           type="button"
           className="cook-start-skip"
           disabled={busy}
-          onClick={() => requestSuggestions([])}
+          onClick={() => {const names=Object.keys(state.pantry).filter(k=>state.pantry[k]>0).slice(0,30); requestSuggestions(names,Object.fromEntries(names.map(n=>[n,state.pantry[n]])));}}
         >
-          {loading ? "Working…" : "Just suggest meals"}
+          {loading ? "Working…" : "Suggest from my saved pantry"}
         </button>
+        <button className="secondary" type="button" disabled={busy} onClick={onBrowseLocal}>Browse local recipes without Gemini</button>
       </section>
     </div>
   );
@@ -310,24 +322,45 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
   const point = useRef(null),
     swiped = useRef(false),
     [dx, setDx] = useState(0),
-    [flyingOff, setFlyingOff] = useState(null);
-  
+    [dy, setDy] = useState(0),
+    [flyingOff, setFlyingOff] = useState(null),
+    [entered, setEntered] = useState(false);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
+  }, [label]);
+
+  const lean =
+    dx > 28 ? "lean-accept" : dx < -28 ? "lean-pass" : flyingOff === "right"
+      ? "lean-accept"
+      : flyingOff === "left"
+        ? "lean-pass"
+        : "";
+  const rot = flyingOff
+    ? flyingOff === "right"
+      ? 18
+      : -18
+    : Math.max(-14, Math.min(14, dx / 14));
+  const lift = flyingOff ? 0 : Math.min(10, Math.abs(dx) / 20);
+
   return (
     <article
-      className="swipe-card"
+      className={`swipe-card ${lean} ${entered ? "is-in" : ""}`}
       aria-label={label}
       tabIndex={0}
+      style={{ "--swipe-progress": Math.min(1, Math.abs(dx) / 120) }}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget) return;
         if (e.key === "ArrowLeft") {
           e.preventDefault();
           setFlyingOff("left");
-          setTimeout(onPass, 300);
+          setTimeout(()=>{setFlyingOff(null);setDx(0);onPass();}, 300);
         }
         if (e.key === "ArrowRight") {
           e.preventDefault();
           setFlyingOff("right");
-          setTimeout(onAccept, 300);
+          setTimeout(()=>{setFlyingOff(null);setDx(0);onAccept();}, 300);
         }
         if (e.key === "Enter") onDetails();
       }}
@@ -340,35 +373,42 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
           return;
         point.current = { x: e.clientX, y: e.clientY };
         swiped.current = false;
+        e.currentTarget.classList.add("is-dragging");
       }}
       onPointerMove={(e) => {
         if (!point.current || flyingOff) return;
         const x = e.clientX - point.current.x,
           y = e.clientY - point.current.y;
-        if (Math.abs(x) > 12 && Math.abs(x) > Math.abs(y) * 1.2) {
+        if (Math.abs(x) > 10 && Math.abs(x) > Math.abs(y) * 1.1) {
           e.currentTarget.setPointerCapture(e.pointerId);
-          setDx(Math.max(-200, Math.min(200, x)));
+          setDx(Math.max(-220, Math.min(220, x)));
+          setDy(Math.max(-40, Math.min(40, y * 0.35)));
         }
       }}
       onPointerUp={(e) => {
+        e.currentTarget.classList.remove("is-dragging");
         if (!point.current || flyingOff) return;
         const x = e.clientX - point.current.x,
           y = e.clientY - point.current.y;
         point.current = null;
-        if (Math.abs(x) > 75 && Math.abs(x) > Math.abs(y) * 1.2) {
+        if (Math.abs(x) > 75 && Math.abs(x) > Math.abs(y) * 1.1) {
           swiped.current = true;
           setFlyingOff(x > 0 ? "right" : "left");
           setTimeout(() => {
+            setFlyingOff(null);setDx(0);
             x > 0 ? onAccept() : onPass();
-          }, 300);
+          }, 320);
         } else {
           setDx(0);
+          setDy(0);
         }
       }}
-      onPointerCancel={() => {
+      onPointerCancel={(e) => {
+        e.currentTarget.classList.remove("is-dragging");
         if (flyingOff) return;
         point.current = null;
         setDx(0);
+        setDy(0);
       }}
       onClickCapture={(e) => {
         if (swiped.current) {
@@ -378,28 +418,41 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
         }
       }}
     >
+      <div className="swipe-stack-shadow" aria-hidden="true" />
       <div
         className="swipe-moving"
         style={{
-          transform: flyingOff 
-            ? `translateX(${flyingOff === "right" ? 1000 : -1000}px) translateY(${flyingOff === "right" ? -30 : 30}px) rotate(${flyingOff === "right" ? 15 : -15}deg)`
-            : `translateX(${dx}px)`,
-          transition: flyingOff 
-            ? "transform 0.3s cubic-bezier(0.4, 0, 1, 1), opacity 0.3s ease-out"
-            : dx ? "none" : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
-          opacity: flyingOff 
-            ? 0
-            : dx ? Math.max(0.7, 1 - Math.abs(dx) / 300) : 1,
+          transform: flyingOff
+            ? `translateX(${flyingOff === "right" ? 1100 : -1100}px) translateY(${flyingOff === "right" ? -48 : 48}px) rotate(${rot}deg) scale(0.94)`
+            : `translateX(${dx}px) translateY(${dy - lift}px) rotate(${rot}deg)`,
+          transition: flyingOff
+            ? "transform 0.32s cubic-bezier(0.4, 0, 1, 1), opacity 0.28s ease-out"
+            : dx
+              ? "none"
+              : "transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1)",
+          opacity: flyingOff ? 0 : dx ? Math.max(0.78, 1 - Math.abs(dx) / 340) : 1,
         }}
       >
         <div
+          className="swipe-tint"
+          style={{
+            opacity: flyingOff
+              ? 0.28
+              : Math.min(0.22, Math.abs(dx) / 380),
+            background:
+              dx > 0 || flyingOff === "right"
+                ? "rgba(78, 139, 87, 0.55)"
+                : "rgba(189, 120, 85, 0.5)",
+          }}
+        />
+        <div
           className={`swipe-stamp ${dx > 0 || flyingOff === "right" ? "accept" : "pass"}`}
-          style={{ 
-            opacity: flyingOff ? 1 : Math.min(1, Math.abs(dx) / 50),
-            transform: `scale(${flyingOff ? 1.2 : Math.min(1.2, 0.8 + Math.abs(dx) / 100)})`,
+          style={{
+            opacity: flyingOff ? 1 : Math.min(1, Math.abs(dx) / 42),
+            transform: `scale(${flyingOff ? 1.18 : Math.min(1.15, 0.75 + Math.abs(dx) / 110)}) rotate(${rot * -0.4}deg)`,
           }}
         >
-          {(dx > 0 || flyingOff === "right") ? "YES" : "PASS"}
+          {dx > 0 || flyingOff === "right" ? "✓" : "✕"}
         </div>
         {children}
       </div>
@@ -407,12 +460,6 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
   );
 }
 
-const fresh = new Set([
-  "chickpea-bowl",
-  "chickpea-toast",
-  "tofu-cucumber",
-  "chickpea-rice-salad",
-]);
 export function FoodDiscovery({
   state,
   mode,
@@ -421,11 +468,11 @@ export function FoodDiscovery({
   onVenue,
   onVenueDirections,
   onDetails,
-  onKitchen,
   onPreferences,
   onWindow,
   onUndoPlan,
   onChangeGroceries,
+  onReview,
   geminiMeals = null,
   groceryList = [],
 }) {
@@ -433,83 +480,25 @@ export function FoodDiscovery({
     [mood, setMood] = useState("any"),
     [sort, setSort] = useState("catalog"),
     [openOnly, setOpenOnly] = useState(true);
+  const allDayBusy = eventsForDay(state.events ?? [], state.context.date).filter(e=>e.allDay && blocksMealPlanning(e) && !e.completed);
   const usingGemini = mode === "cook" && Array.isArray(geminiMeals);
-  const all = recommend(
-    catalog,
-    state,
-    { mode: "cook", sort, passed },
-    { ...config, recommendation: { ...config.recommendation, maxCards: 100 } },
-  );
-  const geminiCards = usingGemini
-    ? geminiMeals
-        .filter((meal) => !passed.includes(meal.id))
-        .filter((meal) => {
-          if (mood === "any") return true;
-          if (mood === "comfort") return !fresh.has(meal.id);
-          if (mood === "quick")
-            return meal.timing.prep + meal.timing.cook <= 10;
-          if (mood === "hungry")
-            return (meal.nutrition.values.energy_kcal ?? 0) >= 550;
-          if (mood === "fancy")
-            return meal.timing.prep + meal.timing.cook >= 15;
-          return true;
-        })
-        .map((meal) => {
-          const result = evaluate(meal, state);
-          return {
-            ...result,
-            meal,
-            feasible: true,
-            duration:
-              result.duration ??
-              meal.timing.prep +
-                meal.timing.cook +
-                state.context.eating +
-                state.context.cleanup +
-                state.context.onward +
-                state.context.buffer,
-          };
-        })
-    : null;
-  const meals = usingGemini
-    ? geminiCards
-    : all.cards.filter(
-        (r) =>
-          mood === "any" ||
-          (mood === "comfort"
-            ? !fresh.has(r.meal.id)
-            : mood === "quick"
-              ? r.meal.timing.prep + r.meal.timing.cook <= 10
-              : mood === "hungry"
-                ? r.meal.nutrition.values.energy_kcal >= 550
-                : mood === "fancy"
-                  ? r.meal.timing.prep + r.meal.timing.cook >= 15
-                  : false),
-      );
-  // When constraints filter everything out, fall back to the full catalog so
-  // there is always something to swipe — the card will note it doesn't fit.
-  const allEvaluations = usingGemini
-    ? null
-    : all.evaluations.filter(
-        (r) =>
-          r.meal.mode === "cook" && !passed.includes(r.meal.id),
-      );
-  const cookCards =
-    mode === "cook" && !usingGemini && meals.length === 0 && (allEvaluations?.length ?? 0) > 0
-      ? allEvaluations
-      : meals;
-  const constrainedFallback =
-    mode === "cook" && !usingGemini && meals.length === 0 && cookCards.length > 0;
+  const walking = useUwWalking();
+  const sourced = buildSourcedCatalog().map(record => {
+    const item = withSourcedWalking(record, walking.routes);
+    return {meal:item, ...evaluate(item, state)};
+  });
+  const all=discoverCookMeals(usingGemini?geminiMeals:[...catalog,...(state.generatedMeals??[]).filter(m=>m.review?.confirmed)],state,{sort,mood,passed});
+  const meals=all.display;
   const venues = uwDining
     .filter(
       (v) =>
         !passed.includes(v.id) &&
         (!openOnly ||
-          venueHours(v, state.context.date, state.context.start).open),
+          (venueHours(v, state.context.date, state.context.start).open || venueHours(v, state.context.date, state.context.start).status === "unknown")),
     )
     .sort((a, b) => distanceMeters(a) - distanceMeters(b));
-  const meal = (mode === "cook" ? cookCards : meals)[0]?.meal,
-    result = (mode === "cook" ? cookCards : meals)[0],
+  const meal = meals[0]?.meal,
+    result = meals[0],
     venue = venues[0],
     nutrition = meal ? portionNutrition(meal) : null;
   const pass = (id) => setPassed((p) => [...p, id]);
@@ -550,6 +539,7 @@ export function FoodDiscovery({
             <span>Adjust</span>
           </button>
         </div>
+        {mode === "cook" && onChangeGroceries && <button className="secondary" onClick={onChangeGroceries}>Your groceries & photo scan</button>}
         {mode === "cook" ? (
           <div className="food-filters">
             <label>
@@ -603,14 +593,14 @@ export function FoodDiscovery({
         )}
         {saved && (
           <div
-            className={`food-saved-slot ${savedCheck.feasible ? "" : "needs-review"}`}
+            className="food-saved-slot"
           >
             <div>
               <span>PLANNED · {saved.start}</span>
               <strong>{byId[saved.mealId].name}</strong>
-              {!savedCheck.feasible && (
-                <p>
-                  {savedCheck.reasons.join(" ")} Choose a replacement below.
+              {savedCheck && !savedCheck.feasible && savedCheck.reasons.length > 0 && (
+                <p className="fine-print">
+                  Heads up: {savedCheck.reasons[0].replace(/^Not enough confirmed ingredients:/i, "You may need:").replace(/^Needs \d+ minutes;.*$/, "Takes a bit longer than your window.")}
                 </p>
               )}
             </div>
@@ -631,10 +621,8 @@ export function FoodDiscovery({
           <span>
             {mode === "cook"
               ? usingGemini
-                ? `${meals.length} Gemini ideas${groceryList.length ? ` · from your list` : ""}`
-                : constrainedFallback
-                  ? `${cookCards.length} meals · showing all (none fit current constraints)`
-                  : `${cookCards.length} meals fit your groceries`
+                ? `${all.cards.length} fit · ${all.drafts.length} to review${groceryList.length ? ' · from your list' : ''}`
+                : `${all.cards.length} meals fit your groceries`
               : `${venues.length} UW locations`}
           </span>
           <span>← Pass · {mode === "cook" ? "Choose" : "Directions"} →</span>
@@ -644,7 +632,7 @@ export function FoodDiscovery({
             key={meal.id}
             label={`Meal swipe card: ${meal.name}`}
             onPass={() => pass(meal.id)}
-            onAccept={() => onChoose(meal)}
+            onAccept={() => result.feasible ? onChoose(meal) : onReview(meal)}
             onDetails={() => onDetails(meal)}
           >
             <button
@@ -653,16 +641,11 @@ export function FoodDiscovery({
               onClick={() => onDetails(meal)}
               aria-label={`View ${meal.name} details`}
             >
-              <img
-                draggable={false}
-                src={`/food/${photoFor(meal)}.png`}
-                alt={`AI illustration representing ${meal.name}`}
-              />
+              <MealPhoto key={meal.id} meal={meal} alt={meal.name} />
               <span className="cover-tag">
                 <Icon name="leaf" size={14} />
-                {usingGemini ? "Gemini suggestion" : "Cook with your groceries"}
+                {meal.suggestion ? (meal.review?.confirmed?'Reviewed recipe':'Recipe draft · needs review') : "Cook with your groceries"}
               </span>
-              <span className="photo-label">AI illustration</span>
             </button>
             <div className="flashcard-body">
               <h2>{meal.name}</h2>
@@ -670,27 +653,64 @@ export function FoodDiscovery({
               <div className="flash-facts">
                 <span>
                   <Icon name="clock" size={17} />
-                  {result.duration} min total
+                  {result.duration ?? 'Unknown'} min total
                 </span>
                 <span>{money(meal.cost)} estimate</span>
                 <span>{num(nutrition.energy_kcal)} kcal</span>
                 <span>{num(nutrition.protein_g)} g protein</span>
               </div>
-              <div className="fits-line">
+              <div
+                className="fits-line"
+                title={
+                  meal.nutrition?.kind === "usda_estimated"
+                    ? usdaConfidenceExplain(meal.nutrition)
+                    : undefined
+                }
+              >
                 <Icon name="check" size={16} />
-                {usingGemini
-                  ? "AI idea from your ingredients · estimates only"
-                  : constrainedFallback
-                    ? `Showing outside constraints · ${result.reasons?.[0] ?? "adjust window or groceries"}`
-                    : "Ingredients, equipment, budget and calendar checked"}
+                {result.feasible ? "Ingredients, equipment, budget and calendar checked" : "Not ready to choose"}
               </div>
+              {!result.feasible && <div className="notice warning" role="status">{result.reasons.join(' ')}</div>}
+              {(() => {
+                const alts = mealSubstitutions(
+                  meal,
+                  groceryList.length ? groceryList : state.pantry,
+                ).slice(0, 3);
+                if (!alts.length) return null;
+                return (
+                  <div className="substitution-callout">
+                    <strong>Alternatives</strong>
+                    <div className="substitution-chips">
+                      {alts.map((s) => (
+                        <button
+                          type="button"
+                          key={`${s.missing}-${s.useInstead || "omit"}`}
+                          className={`sub-chip ${s.fromPantry ? "from-pantry" : ""}`}
+                          title={s.note || substitutionLine(s)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.classList.toggle("is-open");
+                          }}
+                        >
+                          <span className="sub-chip-main">
+                            {substitutionLine(s)}
+                          </span>
+                          {s.note ? (
+                            <span className="sub-chip-note">{s.note}</span>
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="swipe-actions">
                 <button
                   className="decline-button"
                   onClick={() => pass(meal.id)}
                   aria-label="Pass on this meal"
                 >
-                  ×
+                  ✕
                 </button>
                 <button
                   className="detail-button"
@@ -700,14 +720,14 @@ export function FoodDiscovery({
                 </button>
                 <button
                   className="accept-button"
-                  onClick={() => onChoose(meal)}
-                  aria-label="Choose this meal"
+                  onClick={() => result.feasible ? onChoose(meal) : onReview(meal)}
+                  aria-label={result.feasible ? "Choose this meal" : "Review recipe details"}
                 >
-                  <Icon name="check" size={23} />
+                  ✓
                 </button>
               </div>
               <p className="swipe-hint">
-                Swipe left to pass, right to choose. Tap for details.
+                Swipe left to pass. Swipe right to {result.feasible?'choose':'review details'}. Tap for recipe and nutrition.
               </p>
             </div>
           </SwipeCard>
@@ -751,30 +771,23 @@ export function FoodDiscovery({
                 >
                   {venueHours(venue, state.context.date, state.context.start)
                     .open
-                    ? "Within published hours"
-                    : "Closed at selected time"}
+                    ? "Within venue hours; stations vary"
+                    : venueHours(venue, state.context.date, state.context.start).status === "unknown" ? "Hours unverified for selected date" : "Outside venue hours"}
                 </span>
                 <span>Rating: view on Maps</span>
               </div>
               <h2>{venue.name}</h2>
               <p className="venue-address">{venue.location}</p>
               <p>{venue.description}</p>
-              <div className="published-offers">
-                {venue.offers.slice(0, 2).map((offer) => (
-                  <span key={offer.name}>
-                    {offer.name}
-                    <strong>{money(offer.price)}</strong>
-                  </span>
-                ))}
-                {!venue.offers.length && <p>Current prices: check menu</p>}
-              </div>
+              <UwWalkingSummary venueId={venue.id} />
+              <UwMenuPreview venueId={venue.id} state={state} />
               <div className="swipe-actions">
                 <button
                   className="decline-button"
                   onClick={() => pass(venue.id)}
                   aria-label="Pass on this restaurant"
                 >
-                  ×
+                  ✕
                 </button>
                 <button
                   className="detail-button"
@@ -787,7 +800,7 @@ export function FoodDiscovery({
                   onClick={() => onVenueDirections(venue)}
                   aria-label="Open walking directions"
                 >
-                  <Icon name="arrow" size={23} />
+                  ✓
                 </button>
               </div>
               <p className="swipe-hint">
@@ -802,21 +815,24 @@ export function FoodDiscovery({
             <h2>
               {passed.length
                 ? "You’ve seen these options."
-                : "No UW locations open at this time."}
+                : mode==='cook' ? "No meals fit this window." : "No UW locations open at this time."}
             </h2>
             <p>
               {passed.length
                 ? "Bring back passed cards or change your mood."
-                : "Change the meal time or include locations outside their published hours."}
+                : mode==='cook' ? (Object.values(state.pantry).some(g => g > 0) ? "Choose a later time or review the reasons below. Your food restrictions stay in place." : "Add the groceries you have, or explore UW dining. You can plan for today or a future date.") : "Change the meal time or include locations outside their published hours."}
             </p>
+            {mode === "cook" && allDayBusy.length>0 && <p className="error">Your calendar marks {allDayBusy.map(e=>e.title).join(", ")} busy all day. Open the event in My Plan to change whether it blocks meals, or choose another date.</p>}
             <button
               className="primary"
-              onClick={() => passed.length ? setPassed([]) : setOpenOnly(false)}
+              onClick={() => passed.length ? setPassed([]) : mode==='cook' ? (Object.values(state.pantry).some(g => g > 0) ? onWindow() : onChangeGroceries()) : setOpenOnly(false)}
             >
-              {passed.length ? "Show passed cards" : "Show all locations"}
+              {passed.length ? "Show passed cards" : mode==='cook'?(Object.values(state.pantry).some(g => g > 0)?'Choose meal time':'Add groceries'):"Show all locations"}
             </button>
           </div>
         )}
+        {mode === "cook" && !meal && !passed.length && <div className="empty-meal-actions"><button className="secondary" onClick={onWindow}>Plan for later or tomorrow</button><button className="text-button" onClick={() => onMode("eatOut")}>Explore UW dining</button></div>}
+        {mode==='cook' && all.evaluations.some(r=>!r.feasible && !all.drafts.some(d=>d.meal.id===r.meal.id)) && <details className="allowances"><summary>Why other meals do not fit</summary>{all.evaluations.filter(r=>!r.feasible && !all.drafts.some(d=>d.meal.id===r.meal.id)).map(r=><p key={r.meal.id}><strong>{r.meal.name}</strong> — {r.reasons.join(' ')}</p>)}</details>}
         <div className="deck-footer">
           <button
             className="text-button"
@@ -833,11 +849,14 @@ export function FoodDiscovery({
           <span>
             {mode === "cook"
               ? usingGemini
-                ? "Gemini estimates · not verified nutrition"
+                ? geminiMeals.some((m) => m.nutrition?.kind === "usda_estimated")
+                  ? "USDA macros from matched ingredients"
+                  : "Gemini estimates · not verified nutrition"
                 : "Nutrition & costs are demo estimates"
               : "UW sources checked Oct 17 · hours can change"}
           </span>
         </div>
+
       </section>
       <aside className="food-explainer">
         <section className="small-panel">
@@ -870,7 +889,7 @@ export function FoodDiscovery({
             Edit preferences
           </button>
         </section>
-        <details className="small-panel how-decisions" open>
+        <details className="small-panel how-decisions">
           <summary>How Daywell chooses</summary>
           <p>
             Cook cards come from{" "}
@@ -889,26 +908,73 @@ export function FoodDiscovery({
             assistant currently supports local food commands.
           </p>
         </details>
+        {mode === "cook" && <details className="small-panel" aria-label="Sourced records">
+          <summary>More sourced records</summary>
+          <button className="secondary" disabled={walking.status === "loading"} onClick={refreshWalking}>Retrieve Google walking routes</button>
+          {walking.status === "unavailable" && <p className="fine-print">Refresh failed. Previously retrieved routes retain their original timestamps and expire after five minutes.</p>}
+          <p className="fine-print">
+            USDA ingredient estimates and published UW HFS rows. They stay out
+            of the swipe deck until price, travel, service, and hours are
+            known. Straight-line distance is meters, not walking minutes.
+          </p>
+          {sourced.map(({ meal: item, feasible, reasons }) => {
+            const place = uwDining.find(
+              (venue) =>
+                venue.name === item.venue?.name ||
+                venue.name === item.provenance?.locationReference?.name,
+            );
+            return (
+              <p className="fine-print" key={item.id}>
+                <strong>{item.name}</strong> — {feasible ? "Feasible" : "Not feasible"}
+                {" · "}
+                {item.nutrition?.kind ?? "unknown source"}
+                {" · "}
+                {item.cost == null ? "Price unknown" : money(item.cost)}
+                {" · "}
+                {item.provenance?.fields.walking?.status === "retrieved_route"
+                  ? `${item.timing.outbound} min walking · ${item.provenance.fields.walking.distanceMeters} m route · Google Maps · retrieved ${new Date(item.provenance.fields.walking.checkedAt).toLocaleTimeString()}`
+                  : item.timing?.outbound == null ? "Travel time unknown" : `${item.timing.outbound} min stated travel`}
+                {item.venue?.opens == null && item.mode === "eatOut"
+                  ? " · Hours unknown"
+                  : ""}
+                {place ? ` · ${distanceMeters(place)} m straight-line from the HUB` : ""}
+                {!feasible && reasons.length ? `. ${reasons.join(" ")}` : ""}
+              </p>
+            );
+          })}
+        </details>}
         {mode === "cook" &&
+          !usingGemini &&
           all.evaluations.some(
             (r) => r.meal.mode === "cook" && !r.feasible,
           ) && (
             <details className="small-panel">
-              <summary>Why some recipes are unavailable</summary>
+              <summary>Tips for these meals</summary>
               {all.evaluations
                 .filter((r) => r.meal.mode === "cook" && !r.feasible)
-                .map((r) => (
-                  <p className="fine-print" key={r.meal.id}>
-                    <strong>{r.meal.name}:</strong> {r.reasons.join(" ")}
-                  </p>
-                ))}
+                .map((r) => {
+                  const note = r.reasons.map((reason) => {
+                    if (/not enough confirmed ingredients/i.test(reason)) {
+                      const match = reason.match(/:\s*(.+)/);
+                      const items = match
+                        ? match[1].split(",").map((s) => s.replace(/\s*\(.*?\)/g, "").trim()).filter(Boolean)
+                        : [];
+                      return items.length ? `Grab: ${items.slice(0, 3).join(", ")}` : "A few ingredients needed";
+                    }
+                    if (/needs equipment/i.test(reason)) return reason.replace("Needs equipment:", "Helpful to have:");
+                    if (/needs \d+ minutes/i.test(reason)) return "Takes a bit longer than your window";
+                    if (/costs \$/i.test(reason)) return reason.replace("Costs", "Est.").replace(", above your", " · cap");
+                    return reason;
+                  }).join(" · ");
+                  return (
+                    <p className="fine-print" key={r.meal.id}>
+                      <strong>{r.meal.name}:</strong> {note}
+                    </p>
+                  );
+                })}
             </details>
           )}
       </aside>
-      <button className="floating-groceries" onClick={onKitchen}>
-        <Icon name="kitchen" size={20} />
-        My groceries
-      </button>
     </div>
   );
 }
@@ -931,7 +997,7 @@ export function VenueDetails({ venue, state, onClose, onPlan }) {
           <strong>
             {hours.range
               ? `${clockTime(hours.range[0])}–${clockTime(hours.range[1])}`
-              : "Closed"}
+              : hours.status === "unknown" ? "Unknown" : "Closed"}
           </strong>
           published hours for {state.context.date}
         </span>
@@ -943,7 +1009,10 @@ export function VenueDetails({ venue, state, onClose, onPlan }) {
         Distance is straight-line between official UW building pins. Open
         walking directions for the actual route and travel time.
       </p>
-      <h3>Published menu options</h3>
+      <UwWalkingSummary venueId={venue.id} />
+      <UwMenuPreview venueId={venue.id} state={state} />
+      <details className="allowances"><summary>Full menu, nutrition & sources</summary><UwDiningCatalog state={state} initialVenueId={venue.id} /></details>
+      <h3>Published value deals · current service unverified</h3>
       <div className="published-offers detail-offers">
         {venue.offers.length ? (
           venue.offers.map((o) => (

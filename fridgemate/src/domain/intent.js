@@ -1,3 +1,4 @@
+import { hasAllergenAbsenceCoverage } from "./allergens.js";
 import { config, validateConfig } from "./config.js";
 import { recommend, validateInputs } from "./engine.js";
 import { nutrientInfo, portionNutrition } from "./nutrition.js";
@@ -152,7 +153,7 @@ function annotate(result) {
         ? Object.keys(nutrientInfo).filter((key) => nutrition[key] === null)
         : Object.keys(nutrientInfo)),
       ...(!Number.isFinite(meal?.cost) ? ["cost"] : []),
-      ...(meal?.allergens === null ? ["allergen_absence"] : []),
+      ...(!meal || !hasAllergenAbsenceCoverage(meal) ? ["allergen_absence"] : []),
       ...(meal?.portionGrams == null ? ["portionGrams"] : []),
       ...(meal?.mode === "eatOut" && !Number.isFinite(meal?.timing?.outbound)
         ? ["outbound_travel"]

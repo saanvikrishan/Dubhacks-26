@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import {recipeSnapshots} from "./domain/generatedMeals.js";
+import {useCalendarRefresh} from "./adapters/calendarRefresh.js";
+import { useEffect, useRef, useState } from "react";
 import {
   Icon,
   Modal,
@@ -9,6 +11,7 @@ import {
   Intake,
   Assistant,
   Log,
+  UsedUpDialog,
 } from "./ui/Core";
 import {
   Agenda,
@@ -18,14 +21,15 @@ import {
   PlanCalendar,
 } from "./ui/CalendarViews";
 import { CookStart, FoodDiscovery, VenueDetails } from "./ui/FoodViews";
-import { money, num, photoFor } from "./ui/format";
-import { pantryItems } from "./data/catalog";
-import { byId, rememberSuggestions } from "./data/suggestions";
+import { money, num, mealImage, prefetchMealImages } from "./ui/format";
+import { RecipeReview } from "./ui/RecipeReview";
+import { byId, restoreSuggestions } from "./data/suggestions";
 import { capabilities } from "./domain/config";
 import { clockTime, minutes } from "./domain/engine";
 import { dailyNutrition } from "./domain/nutrition";
 import {
   localInstant,
+  mealWindowStillOpen,
   nextMealWindow,
   prettyDate,
   scheduledItems,
@@ -33,25 +37,39 @@ import {
 } from "./domain/calendar";
 import { today, transition } from "./domain/state";
 import { storageAdapter } from "./adapters/storage";
+import { persistSavedMeal, savePantryItems } from "./adapters/database";
 import { directionsUrl } from "./data/uwDining";
 import "./App.css";
 import "./ui/redesign.css";
 const flags = capabilities();
 
 export default function App() {
+  const stateRef = useRef(null);
   const [state, setState] = useState(null);
   const [storageError, setStorageError] = useState(null);
   const [loading, setLoading] = useState(true);
   
+  const [tab, setTab] = useState("Today"),
+    [mode, setMode] = useState("cook"),
+    [cookPhase, setCookPhase] = useState("discover"),
+    [geminiMeals, setGeminiMeals] = useState(null),
+    [groceryList, setGroceryList] = useState([]),
+    [date, setDate] = useState(today());
+
   // Load state on mount
   useEffect(() => {
     async function loadState() {
       try {
         const loaded = await storageAdapter.load(window.localStorage);
+        stateRef.current=loaded.state;
+        restoreSuggestions(recipeSnapshots(loaded.state));
+        if(loaded.state.generatedMeals?.length) {setGeminiMeals(loaded.state.generatedMeals.map(m=>m.id));setGroceryList(loaded.state.groceryList??[]);}
         setState(loaded.state);
         setStorageError(loaded.error);
-      } catch (error) {
-        setState(storageAdapter.reset(window.localStorage));
+      } catch {
+        stateRef.current=storageAdapter.reset(window.localStorage);
+        restoreSuggestions(recipeSnapshots(stateRef.current));
+        setState(stateRef.current);
         setStorageError('Failed to load saved state. Starting fresh.');
       } finally {
         setLoading(false);
@@ -59,12 +77,6 @@ export default function App() {
     }
     loadState();
   }, []);
-  const [tab, setTab] = useState("Today"),
-    [mode, setMode] = useState("cook"),
-    [cookPhase, setCookPhase] = useState("groceries"),
-    [geminiMeals, setGeminiMeals] = useState(null),
-    [groceryList, setGroceryList] = useState([]),
-    [date, setDate] = useState(today());
   const [dialog, setDialog] = useState(null),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
@@ -75,6 +87,8 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
   
+  useCalendarRefresh(stateRef, dispatch, setError);
+
   // Show loading screen while state is loading
   if (loading || !state) {
     return (
@@ -87,6 +101,7 @@ export default function App() {
     );
   }
   
+  restoreSuggestions(recipeSnapshots(state));
   const items = scheduledItems(state, byId),
     day = today(),
     summary = dailyNutrition(state.logs, byId, day),
@@ -94,9 +109,12 @@ export default function App() {
   const close = () => setDialog(null);
   async function dispatch(action) {
     if (storageError) throw new Error(storageError);
-    const next = transition(state, action);
+    const next = transition(stateRef.current, action);
     try {
-      const savedToBackend = await storageAdapter.save(window.localStorage, next);
+      storageAdapter.save(window.localStorage, next);
+      stateRef.current=next;
+      restoreSuggestions(recipeSnapshots(next));
+      if (["updatePantry","addGeneratedMeals","reviewGeneratedMeal"].includes(action.type)) void savePantryItems(next.pantry);
       
       // Always use the next state we just saved
       // Don't reload from backend because that might give us stale or empty data
@@ -109,6 +127,7 @@ export default function App() {
       );
       throw new Error(
         "Could not save. Check browser storage or reload before continuing.",
+        {cause:err},
       );
     }
     setError("");
@@ -138,30 +157,24 @@ export default function App() {
     }
   }
   async function goFood(nextMode) {
-    // Only auto-calculate window if coming from Today tab AND the user hasn't
-    // manually set a window for today already.
-    if (tab === "Today") {
-      const contextIsForToday = state.context.date === day;
-      const userSetManually = state.context.manuallySet === true;
-      if (!contextIsForToday || !userSetManually) {
-        const window = nextMealWindow(
-          items,
-          day,
-          new Date(now),
-          Math.max(45, state.context.available),
+    if (tab === "Today" && !mealWindowStillOpen(state.context, new Date(now))) {
+      const window = nextMealWindow(
+        items,
+        day,
+        new Date(now),
+        Math.max(45, state.context.available),
+      );
+      if (window && !(await safe({ type: "updateContext", context: { ...window, manuallySet: false } }))) return;
+      if (!window)
+        setNotice(
+          "No free window of 35 minutes or more was found. Adjust the meal window in Food.",
         );
-        if (window && !(await safe({ type: "updateContext", context: { ...window, manuallySet: false } }))) return;
-        if (!window)
-          setNotice(
-            "No free window of 35 minutes or more was found. Adjust the meal window in Food.",
-          );
-      }
     }
     setMode(nextMode);
     if (nextMode === "cook") {
       setGeminiMeals(null);
       setGroceryList([]);
-      setCookPhase("groceries");
+      setCookPhase("discover");
     }
     setTab("Food");
   }
@@ -170,7 +183,7 @@ export default function App() {
     if (nextMode === "cook") {
       setGeminiMeals(null);
       setGroceryList([]);
-      setCookPhase("groceries");
+      setCookPhase("discover");
     }
   }
   async function choose(meal) {
@@ -182,7 +195,12 @@ export default function App() {
       return;
     }
     if (await safe({ type: "choose", mealId: meal.id })) {
-      setNotice(`${meal.name} added to My Plan.`);
+      const saved = await persistSavedMeal(meal);
+      setNotice(
+        saved.status === "ok"
+          ? `${meal.name} added to My Plan and saved to Postgres.`
+          : `${meal.name} added to My Plan.`,
+      );
       setDialog({ type: "details", meal });
     }
   }
@@ -218,12 +236,16 @@ export default function App() {
     )
       return;
     setMode(byId[plan.mealId].mode);
+    if(byId[plan.mealId].mode==='cook') {
+      setGeminiMeals(byId[plan.mealId].suggestion?state.generatedMeals.map(m=>m.id):null);
+      setCookPhase('discover');
+    }
     setTab("Food");
     close();
   }
   const openLog = (meal, log = null) =>
     setDialog({ type: "log", meal, log, id: log?.id ?? crypto.randomUUID() });
-  const openEvent = (event) => setDialog({ type: "event", event });
+  const openEvent = (event) => setDialog({ type: "event", event: state.events.find(e=>e.id===event.id) ?? event });
   const openDetails = (meal) => setDialog({ type: "details", meal });
   const addEvent = (eventDate) => setDialog({ type: "event", date: eventDate });
   const latest = logs.toSorted((a, b) =>
@@ -233,11 +255,7 @@ export default function App() {
     .filter((p) => p.date === day)
     .sort((a, b) => a.start.localeCompare(b.start))
     .at(-1);
-  // Hide the hero card if this meal has been logged as eaten
-  const lastPlanWasEaten = lastPlan && logs.some(
-    (log) => log.mealId === lastPlan.mealId && log.date === lastPlan.date
-  );
-  const showLastPlan = lastPlan && !lastPlanWasEaten;
+  const showLastPlan = lastPlan && !logs.some(log=>log.mealId===lastPlan.mealId && log.date===lastPlan.date);
   function undoLog() {
     safe(
       state.logUndo
@@ -297,12 +315,12 @@ export default function App() {
           </nav>
           <div className="header-right">
             <button
-              className="assistant-nav"
-              aria-label="Assistant"
-              onClick={() => setDialog({ type: "assistant" })}
+              className="groceries-nav"
+              aria-label="My groceries"
+              onClick={() => setDialog({ type: "kitchen" })}
             >
-              <Icon name="spark" />
-              <span>Assistant</span>
+              <Icon name="kitchen" />
+              <span>My groceries</span>
             </button>
             <button
               className="avatar"
@@ -465,8 +483,8 @@ export default function App() {
               {showLastPlan && (
                 <section className="today-saved-meal">
                   <img
-                    src={`/food/${photoFor(byId[lastPlan.mealId])}.png`}
-                    alt="Meal illustration"
+                    src={mealImage(byId[lastPlan.mealId])}
+                    alt={byId[lastPlan.mealId].name}
                   />
                   <div>
                     <span className="eyebrow">YOUR MEAL PLAN</span>
@@ -540,7 +558,7 @@ export default function App() {
                   {logs.length
                     ? `${summary.energy_kcal.known}/${logs.length} logs have energy data. `
                     : "Confirm what you ate to start a subtotal. "}
-                  Planned meals are excluded. Recipe nutrition is illustrative.
+                  Planned meals are excluded. Cook recipes use USDA when configured.
                 </p>
               </section>
             </div>
@@ -602,6 +620,7 @@ export default function App() {
               </label>
             </div>
             <PlanCalendar
+              onAddRange={(day,range)=>setDialog({type:"event",event:{id:crypto.randomUUID(),title:"",start:localInstant(day,range.start),end:localInstant(day,range.end),kind:"event",source:"manual",busy:true,readOnly:false,draft:true}})}
               items={items}
               now={now}
               connected={state.calendar.connected}
@@ -619,33 +638,25 @@ export default function App() {
             <CookStart
               key={`cook-start-${JSON.stringify(state.pantry)}`}
               state={state}
-              onSuggested={(meals, ingredients) => {
-                rememberSuggestions(meals);
-                setGeminiMeals(meals);
+              onSuggested={async (meals, ingredients, pantry) => {
+                // Drafts and explicit grocery quantities are persisted together. No invented stock.
+                await dispatch({type:'addGeneratedMeals',meals,pantry,groceryList:ingredients});
+                prefetchMealImages(meals);
+                setGeminiMeals(meals.map(m=>m.id));
                 setGroceryList(ingredients || []);
-                if (ingredients?.length) {
-                  const pantry = { ...state.pantry };
-                  for (const item of pantryItems) {
-                    if (
-                      !ingredients.some(
-                        (g) => g.toLowerCase() === item.toLowerCase(),
-                      )
-                    )
-                      pantry[item] = pantry[item] ?? 0;
-                  }
-                  for (const name of ingredients)
-                    pantry[name] = Math.max(pantry[name] ?? 0, 500);
-                  safe({ type: "updatePantry", pantry });
-                }
                 setCookPhase("discover");
               }}
+              onBrowseLocal={()=>{setGeminiMeals(null);setCookPhase('discover');}}
+              onUnavailable={(message)=>{setGeminiMeals(null);setCookPhase('discover');setError(message);}}
+              onWindow={()=>setDialog({type:'time'})}
+              onPreferences={()=>setDialog({type:'profile'})}
               onEatOut={() => setFoodMode("eatOut")}
             />
           )}
         {tab === "Food" &&
           !(mode === "cook" && cookPhase === "groceries") && (
             <FoodDiscovery
-              key={`${mode}-${state.context.date}-${state.context.start}-${state.context.available}-${geminiMeals?.map((m) => m.id).join(",") || "catalog"}-${state.events.length}`}
+              key={`${mode}-${state.context.date}-${state.context.start}-${state.context.available}-${geminiMeals?.join(",") || "catalog"}-${state.events.length}`}
               state={state}
               mode={mode}
               onMode={setFoodMode}
@@ -655,14 +666,15 @@ export default function App() {
                 window.location.assign(directionsUrl(venue));
               }}
               onDetails={openDetails}
-              onKitchen={() => setDialog({ type: "kitchen" })}
               onPreferences={() => setDialog({ type: "profile" })}
               onWindow={() => setDialog({ type: "time" })}
               onUndoPlan={() => safe({ type: "undo" })}
               onChangeGroceries={() => {
+                safe({ type: "clearGeminiMeals" });
                 setCookPhase("groceries");
               }}
-              geminiMeals={mode === "cook" ? geminiMeals : null}
+              geminiMeals={mode === "cook" && geminiMeals ? geminiMeals.map(id=>byId[id]).filter(Boolean) : null}
+              onReview={meal=>setDialog({type:"reviewRecipe",meal})}
               groceryList={groceryList}
             />
           )}
@@ -682,6 +694,14 @@ export default function App() {
           </button>
         </footer>
       </main>
+      <button
+        className="floating-assistant"
+        aria-label="Open food assistant"
+        onClick={() => setDialog({ type: "assistant" })}
+      >
+        <Icon name="spark" size={22} />
+      </button>
+      {dialog?.type === "reviewRecipe" && <RecipeReview meal={dialog.meal} state={state} onSave={dispatch} onClose={close}/> }
       {dialog?.type === "calendar" && (
         <CalendarConnect
           state={state}
@@ -751,11 +771,43 @@ export default function App() {
           data={dialog}
           onSave={dispatch}
           onClose={close}
-          onLogged={() =>
-            setNotice(
-              "Meal recorded. Use Undo to reverse it, or Meal log to edit a portion.",
-            )
-          }
+          onLogged={(meal) => {
+            // After logging a meal, ask which ingredients got used up
+            const mealObj = meal ?? dialog.meal;
+            if (mealObj?.ingredients?.length) {
+              // Find ingredients that are in the pantry (fuzzy match same as engine)
+              const pantryKeys = Object.keys(state.pantry).filter(
+                (k) => (state.pantry[k] ?? 0) > 0,
+              );
+              const usedIngredients = mealObj.ingredients
+                .map((ing) => {
+                  const stripped = ing.name
+                    .replace(/\s*\(.*?\)\s*/g, "")
+                    .replace(
+                      /^[\d\s/\u00BC-\u00BE\u2150-\u215E]*(?:cup|tbsp?|tsp?|oz|g|ml|lb|block|can|clove|head|bunch|slice|piece|sprig|handful|pinch|dash|package|pkg|bag)s?\s+(?:of\s+)?/i,
+                      "",
+                    )
+                    .replace(/^[\d\s/\u00BC-\u00BE\u2150-\u215E]+/, "")
+                    .trim()
+                    .toLowerCase();
+                  const key =
+                    pantryKeys.find((k) => k.toLowerCase() === ing.name.toLowerCase()) ??
+                    pantryKeys.find((k) => k.toLowerCase() === stripped) ??
+                    pantryKeys.find(
+                      (k) => stripped.includes(k.toLowerCase()) || k.toLowerCase().includes(stripped),
+                    );
+                  return key ? { display: key, original: ing.name } : null;
+                })
+                .filter(Boolean)
+                .filter((v, i, arr) => arr.findIndex((x) => x.display === v.display) === i);
+
+              if (usedIngredients.length) {
+                setDialog({ type: "usedUp", meal: mealObj, ingredients: usedIngredients });
+                return;
+              }
+            }
+            setNotice("Meal recorded. Use Undo to reverse it, or Meal log to edit a portion.");
+          }}
         />
       )}
       {dialog?.type === "replace" && (
@@ -793,13 +845,36 @@ export default function App() {
           </p>
         </Confirm>
       )}
+      {dialog?.type === "usedUp" && (
+        <UsedUpDialog
+          meal={dialog.meal}
+          ingredients={dialog.ingredients}
+          onDone={async (finishedKeys) => {
+            if (finishedKeys.length) {
+              const pantry = { ...state.pantry };
+              for (const key of finishedKeys) delete pantry[key];
+              await safe({ type: "updatePantry", pantry });
+              setNotice(
+                `Removed ${finishedKeys.join(", ")} from your pantry. Meal recorded.`,
+              );
+            } else {
+              setNotice("Meal recorded. Use Undo to reverse it, or Meal log to edit a portion.");
+            }
+            close();
+          }}
+          onClose={() => {
+            setNotice("Meal recorded. Use Undo to reverse it, or Meal log to edit a portion.");
+            close();
+          }}
+        />
+      )}
       {dialog?.type === "reset" && (
         <Confirm
           title="Start a fresh demo?"
           onClose={close}
           button="Reset local demo"
           onConfirm={() => {
-            setState(storageAdapter.reset(window.localStorage));
+            stateRef.current=storageAdapter.reset(window.localStorage); restoreSuggestions([]); setState(stateRef.current);
             setStorageError(null);
             setNotice("Sample preferences restored.");
             close();

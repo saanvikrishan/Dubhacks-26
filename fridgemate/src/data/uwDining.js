@@ -1,3 +1,4 @@
+import uwSource from "./uw/browser.json" with {type:"json"};
 export const UW_MAP_SOURCE =
   "https://www.washington.edu/maps/?json=campusmap.get_locations";
 export const DEAL_SOURCE = "https://hfs.washington.edu/eat/husky-deals/";
@@ -157,6 +158,15 @@ export const directionsUrl = (venue) =>
 export const ratingUrl = (venue) =>
   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue.name + ", University of Washington, Seattle")}`;
 export function venueHours(venue, date, time) {
+  if (["local-point","center-table","husky-den"].includes(venue.id)) {
+    const h = uwSource.reviewed.hours.find(h=>h.venueId===venue.id && uwSource.snapshot.venues.some(v=>v.id===h.venueId && v.hoursSha256===h.hoursSha256));
+    if (!h || date<h.validFrom || date>h.validTo) return {range:null,open:false,status:"unknown"};
+    const day = new Date(`${date}T12:00:00Z`).getUTCDay();
+    const minute = Number(time.slice(0,2))*60+Number(time.slice(3));
+    const range = h.general[day]?.[0]??null;
+    const knownStationOpen = h.stationHours.some(s=>s.week[day]?.some(([open,close])=>minute>=open&&minute<close));
+    return {range,open:(!!range&&minute>=range[0]&&minute<range[1]) || knownStationOpen,status:range?"published":"closed"};
+  }
   const day = new Date(`${date}T12:00:00Z`).getUTCDay(),
     range = venue.hours[day];
   const minute = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));

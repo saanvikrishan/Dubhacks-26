@@ -8,7 +8,7 @@ import {
   portionNutrition,
 } from "../src/domain/nutrition.js";
 import { importIcs } from "../src/domain/calendar.js";
-import { createDemoState } from "../src/domain/state.js";
+import { createDemoState as blankDemoState, testPantry } from "../src/domain/state.js";
 import { byId } from "../src/data/catalog.js";
 
 const bowl = () => structuredClone(byId["tofu-bowl"]);
@@ -346,3 +346,5 @@ test("Kevin: a direct confirmed exception can override a cancelled future series
     ["2026-10-17T16:00:00.000Z", "2026-10-19T18:00:00.000Z"],
   );
 });
+
+function createDemoState() { const s = blankDemoState(); s.pantry = {...testPantry}; s.context.onward=5; s.context.buffer=10; return s; }

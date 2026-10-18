@@ -1,0 +1,17 @@
+.meal-window-shortcuts { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; }
+.meal-window-shortcuts strong { margin-left:auto; }
+.meal-window-track { position:relative; height:270px; margin:1rem .25rem 1.5rem 2rem; border:1px solid #d5dbd1; border-radius:8px; background:#fff; touch-action:none; user-select:none; cursor:crosshair; }
+.meal-window-hour { position:absolute; width:100%; border-top:1px solid #e4e8df; pointer-events:none; }
+.meal-window-hour span { position:absolute; right:calc(100% + 8px); top:-8px; font-size:.7rem; color:#61705d; }
+.meal-window-busy, .meal-window-selection { position:absolute; left:6px; right:6px; padding:0 6px; overflow:hidden; border-radius:4px; font-size:.72rem; pointer-events:none; }
+.meal-window-busy { background:#e8e6ef; color:#61537c; }
+.meal-window-selection { background:#d9e8ca; color:#254e37; border:1px solid #557d45; z-index:1; }
+.empty-meal-actions { display:flex; gap:.8rem; justify-content:center; flex-wrap:wrap; margin:1rem 0; }
+.week-day { touch-action:pan-x; }
+.calendar-drag-range { position:absolute; left:2px; right:2px; background:#d9e8ca; border:1px solid #557d45; border-radius:5px; pointer-events:none; z-index:5; font-size:.7rem; padding:3px; }
+.uw-walk > p { margin:.3rem 0; }
+.uw-walk > small { display:block; }
+.compact-menu { display:block; margin:.8rem 0; }
+.uw-menu-row { display:flex; justify-content:space-between; gap:.8rem; padding:.45rem 0; border-bottom:1px solid #e4e8df; font-size:.85rem; }
+.uw-menu-row > span:last-child { text-align:right; white-space:nowrap; }
+.uw-menu-row small, .compact-menu > small { display:block; font-size:.72rem; color:#61705d; margin-top:.2rem; }

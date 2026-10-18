@@ -2,12 +2,16 @@ import { byId as catalogById } from "./catalog.js";
 
 const extras = Object.create(null);
 
-/** Keep Gemini (or other) suggestion meals resolvable for plan/choose. */
+/** UI lookup cache only. The state service uses its persisted recipe snapshots. */
 export function rememberSuggestions(meals) {
-  for (const key of Object.keys(extras)) delete extras[key];
   for (const meal of meals || []) {
     if (meal?.id) extras[meal.id] = meal;
   }
+}
+
+export function restoreSuggestions(meals) {
+  clearSuggestions();
+  rememberSuggestions(meals);
 }
 
 export function clearSuggestions() {

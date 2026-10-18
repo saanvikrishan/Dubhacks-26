@@ -1,6 +1,9 @@
+import {dragWindow} from "../domain/mealWindow.js";
 import { useEffect, useRef, useState } from "react";
 import { Icon, Modal } from "./Core";
 import {
+  blocksMealPlanning,
+  isHolidayEvent,
   addDays,
   addMonths,
   layoutDayEvents,
@@ -12,12 +15,10 @@ import {
   prettyDate,
   timeKey,
 } from "../domain/calendar";
-import { importIcs } from "../domain/calendar";
 import { byId } from "../data/suggestions";
 
 const timeLabel = (value) =>
   new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
@@ -74,7 +75,7 @@ export function Agenda({
                   {item.kind === "task"
                     ? "Task"
                     : item.allDay
-                      ? item.calendar || "Calendar"
+                      ? `${item.calendar || "Calendar"}${!blocksMealPlanning(item)?" · Does not block meals":""}`
                       : `${timeLabel(item.start)}–${timeLabel(item.end)}`}
                   {item.location ? ` · ${item.location}` : ""}
                 </small>
@@ -194,6 +195,8 @@ export function ComingUp({
 export function CalendarConnect({ state, onSave, onClose, date }) {
   const [status, setStatus] = useState(null),
     [busy, setBusy] = useState(false),
+    [gcalBusy, setGcalBusy] = useState(false),
+    [gcalConnected, setGcalConnected] = useState(false),
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   useEffect(() => {
@@ -206,10 +209,43 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
       .catch(() => {
         if (active) setStatus({ supported: false });
       });
-    return () => {
-      active = false;
-    };
+    fetch("/api/google-calendar/status")
+      .then(async (r) => { if (r.ok && active) setGcalConnected((await r.json()).connected); })
+      .catch(() => {});
+    return () => { active = false; };
   }, []);
+  async function connectGoogle() {
+    setGcalBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const r = await fetch("/api/google-calendar/auth-url");
+      if (!r.ok) throw new Error((await r.json()).detail || "Could not start Google sign-in.");
+      const { url } = await r.json();
+      const popup = window.open(url, "gcal-oauth", "width=520,height=640");
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error("Sign-in timed out.")), 120000);
+        const onMsg = (e) => {
+          if (e.data?.type === "gcal-connected") { clearTimeout(t); window.removeEventListener("message", onMsg); resolve(); }
+        };
+        window.addEventListener("message", onMsg);
+        const poll = setInterval(() => { if (popup?.closed) { clearInterval(poll); clearTimeout(t); window.removeEventListener("message", onMsg); resolve(); } }, 500);
+      });
+      setMessage("Loading Google Calendar events…");
+      const from = `${addDays(date, -35)}T00:00:00Z`, to = `${addDays(date, 55)}T00:00:00Z`;
+      const ev = await fetch(`/api/google-calendar/events?from_=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+      const evData = await ev.json();
+      if (!ev.ok) throw new Error(evData.detail || "Could not fetch events.");
+      await onSave({ type: "importCalendar", source: "ics", provider: "google", events: evData.events.map((e) => ({ ...e, kind: eventKind(e.title) })), range: { from, to } });
+      setGcalConnected(true);
+      setMessage(`${evData.events.length} events loaded from Google Calendar.`);
+    } catch (err) {
+      setError(err.message);
+      setMessage("");
+    } finally {
+      setGcalBusy(false);
+    }
+  }
   async function connect() {
     setBusy(true);
     setError("");
@@ -248,22 +284,6 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
       setBusy(false);
     }
   }
-  async function importFile(file) {
-    if (!file) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = importIcs(await file.text());
-      await onSave({ type: "importCalendar", source: "ics", ...result });
-      setMessage(
-        `${result.events.length} events imported.${result.warnings.length ? ` ${result.warnings.length} items need review.` : ""}`,
-      );
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
   return (
     <Modal title="Connect your calendar" onClose={onClose}>
       <div className="connection-choice">
@@ -271,15 +291,15 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
           <Icon name="calendar" size={28} />
         </span>
         <div>
-          <h3>Apple Calendar on this Mac</h3>
+          <h3>Integrate Calendar</h3>
           <p>
-            Show your events and protect busy time when choosing meals. No
+            Load events from calendars connected to Apple Calendar, or connect Google Calendar. Connected calendars refresh every five minutes while Daywell is open and when you return. No
             calendar events are changed.
           </p>
         </div>
       </div>
       <p className="fine-print">
-        Apple asks for “full access” to read events. Daywell’s local bridge only
+        Apple/Google asks for “full access” to read events. Daywell’s local bridge only
         reads; it has no create, edit or delete endpoint. Your events stay on
         this Mac and in this browser.
       </p>
@@ -296,27 +316,17 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
       </button>
       {status?.supported === false && (
         <p className="error">
-          Start the local Daywell server on your Mac to use Apple Calendar. You
-          can also import an .ics export.
+          Start the local Daywell server on your Mac to use Apple Calendar.
         </p>
       )}
-      <div className="import-divider">
-        <span>or import an export</span>
-      </div>
-      <label className="file-drop">
-        Choose an iCalendar (.ics) file
-        <input
-          aria-label="Import iCalendar file"
-          type="file"
-          accept=".ics,text/calendar"
-          disabled={busy}
-          onChange={(e) => importFile(e.target.files?.[0])}
-        />
-      </label>
-      <p className="fine-print">
-        Calendar → File → Export → Export. File imports are snapshots; refresh
-        by importing again. Recurring events and time zones are supported.
-      </p>
+      <button
+        className="secondary wide-button"
+        disabled={gcalBusy}
+        onClick={connectGoogle}
+        style={{ marginTop: 8 }}
+      >
+        {gcalBusy ? "Connecting…" : gcalConnected ? "Refresh Google Calendar" : "Connect Google Calendar"}
+      </button>
       {message && (
         <p className="success" role="status">
           {message}
@@ -364,7 +374,7 @@ export function EventDialog({
     [end, setEnd] = useState(event ? timeKey(event.end) : "16:00"),
     [kind, setKind] = useState(event?.kind ?? "event"),
     [location, setLocation] = useState(event?.location ?? ""),
-    [busy, setBusy] = useState(event?.busy ?? true),
+    [busy, setBusy] = useState(event ? blocksMealPlanning(event) : true),
     [error, setError] = useState("");
   if (event?.plan)
     return (
@@ -375,8 +385,7 @@ export function EventDialog({
           {timeLabel(event.end)}
         </p>
         <p className="muted">
-          One portion · {event.plan.duration} minutes, including eating, travel
-          and buffer.
+          One portion · {event.plan.duration} minutes, including prep, cooking and eating.
         </p>
         <div className="dialog-actions">
           <button className="primary" onClick={() => onRevise(event.plan)}>
@@ -420,9 +429,12 @@ export function EventDialog({
             {event.source === "apple" ? "Apple Calendar" : "iCalendar file"}
           </p>
         </div>
-        <p className="muted">
-          Edit this event in its source calendar, then refresh Daywell.
-        </p>
+        {isHolidayEvent(event) && <p className="success">Informational holiday · does not block meals unless you choose to mark it busy.</p>}
+        <label className="check-label"><input type="checkbox" checked={busy} onChange={async e=>{const next=e.target.checked;try{await onSave({type:"setEventMealAvailability",id:event.id,busy:next});setBusy(next);setError("");}catch(err){setError(err.message);}}}/>Block meal planning during this event</label>
+        <p className="fine-print">This setting only affects Daywell. The original calendar event stays unchanged.</p>
+        <button className="text-button" onClick={async()=>{try{await onSave({type:"setEventMealAvailability",id:event.id,busy:null});setBusy(blocksMealPlanning({...event,mealBusyOverride:undefined}));setError("");}catch(err){setError(err.message);}}}>Use automatic setting</button>
+        {error && <p className="error" role="alert">{error}</p>}
+        <p className="muted">Edit the event’s title and times in its source calendar.</p>
       </Modal>
     );
   return (
@@ -557,6 +569,7 @@ export function EventDialog({
 }
 
 export function PlanCalendar({
+  onAddRange,
   items,
   date,
   onDate,
@@ -567,6 +580,10 @@ export function PlanCalendar({
   connected,
 }) {
   const [view, setView] = useState("week");
+  const [selection,setSelection] = useState(null);
+  const dragRef = useRef(null);
+  const dragPoint = e => 420+(e.clientY-e.currentTarget.getBoundingClientRect().top)/52*60;
+
   const weekRef = useRef(null);
   useEffect(() => {
     const reveal = () => {
@@ -734,10 +751,15 @@ export function PlanCalendar({
                     className={`week-day ${day === date ? "active" : ""}`}
                     key={day}
                     onDoubleClick={() => onAdd(day)}
+                    onPointerDown={e=>{if(e.button!==0||e.target.closest('button'))return;e.currentTarget.setPointerCapture(e.pointerId);dragRef.current={day,anchor:dragPoint(e)};setSelection({day,...dragWindow(dragPoint(e),dragPoint(e),420,1320)});}}
+                    onPointerMove={e=>{if(dragRef.current)setSelection({day,...dragWindow(dragRef.current.anchor,dragPoint(e),420,1320)});}}
+                    onPointerUp={e=>{if(!dragRef.current)return;const range=dragWindow(dragRef.current.anchor,dragPoint(e),420,1320);dragRef.current=null;setSelection(null);onDate(day);onAddRange?.(day,range);}}
+                    onPointerCancel={()=>{dragRef.current=null;setSelection(null);}}
                   >
                     {Array.from({ length: 15 }, (_, i) => (
                       <div className="hour-line" key={i} />
                     ))}
+                    {selection?.day===day && <div className="calendar-drag-range" style={{top:(Number(selection.start.slice(0,2))*60+Number(selection.start.slice(3))-420)/60*52,height:selection.available/60*52}}>{selection.start}–{selection.end}</div>}
                     {layoutDayEvents(items, day).map(
                       ({
                         event: e,
@@ -797,7 +819,7 @@ export function PlanCalendar({
           Tasks
         </div>
         <p className="fine-print calendar-local-note">
-          Imported events are read-only. Meals and activities you add here stay
+          Drag an empty period to add an activity. Imported events are read-only. Meals and activities you add here stay
           in Daywell. Week shows 7 AM–10 PM; the day list includes all times.
         </p>
       </section>

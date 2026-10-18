@@ -82,6 +82,15 @@ export function eventKind(title = "") {
   if (/lunch|dinner|breakfast|meal/i.test(title)) return "meal";
   return "event";
 }
+// Informational holidays stay visible without consuming the entire meal day.
+const FESTIVALS = new Set(["重阳节","重陽節","春节","春節","元宵节","元宵節","清明节","清明節","端午节","端午節","中秋节","中秋節","七夕节","七夕節","冬至","除夕"]);
+export function isHolidayEvent(event) {
+  return event?.allDay === true && (event.isHoliday === true || FESTIVALS.has(event.title?.trim()) || /holidays|节假日|節假日|^节日$|^節日$/i.test(event.calendar ?? ""));
+}
+export function blocksMealPlanning(event) {
+  if (typeof event?.mealBusyOverride === "boolean") return event.mealBusyOverride;
+  return event?.busy === true && !isHolidayEvent(event);
+}
 export function validateEvent(event) {
   if (
     typeof event.id !== "string" ||
@@ -136,7 +145,7 @@ export function scheduledItems(state, meals) {
     readOnly: false,
     plan,
   }));
-  return [...s.events, ...plans].sort(
+  return [...s.events.map(e=>({...e,busy:blocksMealPlanning(e)})), ...plans].sort(
     (a, b) => Date.parse(a.start) - Date.parse(b.start),
   );
 }
@@ -150,7 +159,7 @@ export function eventsForDay(events, date) {
 export function comingUp(events, now = new Date()) {
   return (
     events.find((e) => !e.completed && Date.parse(e.end) > +now && !e.allDay) ??
-    events.find((e) => !e.completed && Date.parse(e.end) > +now) ??
+    events.find((e) => !e.completed && !isHolidayEvent(e) && Date.parse(e.end) > +now) ??
     null
   );
 }
@@ -175,7 +184,7 @@ export function calendarConflicts(state, duration) {
     }));
   return [...(state.events ?? []), ...plans].filter(
     (e) =>
-      e.busy &&
+      blocksMealPlanning(e) &&
       !e.completed &&
       e.kind !== "task" &&
       Date.parse(e.start) < end &&
@@ -218,6 +227,18 @@ export function layoutDayEvents(events, date) {
   flush();
   return result;
 }
+/** True while the selected dated window has not ended, including future dates. */
+export function mealWindowStillOpen(context, now = new Date()) {
+  if (!context) return false;
+  if (!Number.isFinite(context.available) || context.available <= 0) return false;
+  let start;
+  try {
+    start = Date.parse(localInstant(context.date, context.start));
+  } catch {
+    return false;
+  }
+  return Number.isFinite(start) && now.getTime() < start + context.available * 60000;
+}
 export function nextMealWindow(events, date, now = new Date(), desired = 60) {
   const dayStart = Date.parse(localInstant(date, "08:00")),
     dayEnd = Date.parse(localInstant(date, "23:59"));
@@ -226,7 +247,7 @@ export function nextMealWindow(events, date, now = new Date(), desired = 60) {
     dayKey(now) === date ? Math.ceil(+now / 300000) * 300000 : dayStart,
   );
   const busy = eventsForDay(events, date)
-    .filter((e) => e.busy && !e.completed && e.kind !== "task")
+    .filter((e) => blocksMealPlanning(e) && !e.completed && e.kind !== "task")
     .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
   for (const item of [
     ...busy,

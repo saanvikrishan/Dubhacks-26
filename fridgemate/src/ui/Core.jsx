@@ -1,5 +1,9 @@
+import {MealWindowPicker} from "./MealWindowPicker.jsx";
+import {contextForWindow} from "../domain/mealWindow.js";
+import { knownPresentAllergens, hasAllergenAbsenceCoverage } from "../domain/allergens.js";
 import { useEffect, useRef, useState } from "react";
-import { catalog, pantryItems } from "../data/catalog";
+import { EQUIPMENT } from "../domain/generatedMeals";
+import { catalog } from "../data/catalog";
 import { byId } from "../data/suggestions";
 import { capabilities, config } from "../domain/config";
 import { clockTime, evaluate, minutes, timeParts } from "../domain/engine";
@@ -8,11 +12,17 @@ import {
   goalStatus,
   nutrientInfo,
   portionNutrition,
+  usdaConfidenceExplain,
 } from "../domain/nutrition";
+import {
+  mealSubstitutions,
+  pantryCovers,
+  substitutionLine,
+} from "../domain/substitutions";
 import { money, num, niceTime } from "./format";
 import { today } from "../domain/state";
 
-import { interpretFoodRequest } from "../adapters/assistant";
+import { interpretFoodRequest, replyFromPatch } from "../adapters/assistant";
 
 const flags = capabilities();
 const modeName = (mode) => (mode === "cook" ? "Cook at home" : "Eat out");
@@ -151,22 +161,37 @@ function MealArt({ meal }) {
     </div>
   );
 }
-function Modal({ title, onClose, children, wide = false }) {
+function Modal({
+  title,
+  onClose,
+  children,
+  wide = false,
+  className = "",
+  leading = null,
+  subtitle = "",
+}) {
   const ref = useRef(null);
   useEffect(() => {
     const el = ref.current;
     el.showModal();
     return () => el.close();
   }, []);
+  const label = typeof title === "string" ? title : "Dialog";
   return (
     <dialog
       ref={ref}
-      className={wide ? "wide" : ""}
+      className={[wide ? "wide" : "", className].filter(Boolean).join(" ")}
       onCancel={onClose}
-      aria-label={title}
+      aria-label={label}
     >
       <div className="dialog-header">
-        <h2>{title}</h2>
+        <div className="dialog-heading">
+          {leading}
+          <div>
+            <h2>{title}</h2>
+            {subtitle ? <p className="dialog-subtitle">{subtitle}</p> : null}
+          </div>
+        </div>
         <button
           className="icon-button"
           aria-label="Close dialog"
@@ -209,95 +234,24 @@ function Confirm({ title, onClose, onConfirm, button, children }) {
     </Modal>
   );
 }
-function ContextFields({ value, onChange }) {
-  // Helper to ensure time is in 24-hour HH:MM format
-  const normalizeTime = (timeStr) => {
-    if (!timeStr) return timeStr;
-    // If already in HH:MM format, return as-is
-    if (/^\d{2}:\d{2}$/.test(timeStr)) return timeStr;
-    // If has AM/PM, convert to 24-hour
-    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-    if (match) {
-      let hours = parseInt(match[1]);
-      const minutes = match[2];
-      const period = match[3].toUpperCase();
-      if (period === 'PM' && hours !== 12) hours += 12;
-      if (period === 'AM' && hours === 12) hours = 0;
-      return `${hours.toString().padStart(2, '0')}:${minutes}`;
-    }
-    return timeStr;
+function ContextFields({ value, onChange, state }) {
+  const end = value.available === "" ? value.commitmentTime : clockTime(Math.min(1439, minutes(value.start) + Number(value.available)));
+  const range = (date, start, finish) => {
+    try { onChange(contextForWindow(value, date, start, finish)); }
+    catch { onChange({...value,date,start,available:"",commitmentTime:finish}); }
   };
-
-  const field = (key, label, type = "number", min = 0, max = 240) => (
-    <label>
-      {label}
-      <input
-        type={type}
-        value={value[key] ?? ""}
-        min={min}
-        max={max}
-        required={key !== "service"}
-        onChange={(e) => {
-          let newValue = type === "number"
-            ? e.target.value === "" && key === "service"
-              ? null
-              : Number(e.target.value)
-            : e.target.value;
-          
-          // Normalize time values to 24-hour format
-          if (type === "time" && newValue) {
-            newValue = normalizeTime(newValue);
-          }
-          
-          const updated = { ...value, [key]: newValue };
-          
-          // Auto-adjust available window when start or commitment time changes
-          if ((key === "start" || key === "commitmentTime") && updated.start && updated.commitmentTime) {
-            const normalizedStart = normalizeTime(updated.start);
-            const normalizedCommitment = normalizeTime(updated.commitmentTime);
-            if (normalizedStart && normalizedCommitment) {
-              const startMinutes = parseInt(normalizedStart.split(':')[0]) * 60 + parseInt(normalizedStart.split(':')[1]);
-              const commitmentMinutes = parseInt(normalizedCommitment.split(':')[0]) * 60 + parseInt(normalizedCommitment.split(':')[1]);
-              const calculatedWindow = commitmentMinutes - startMinutes;
-              if (calculatedWindow > 0) {
-                updated.available = calculatedWindow;
-                updated.start = normalizedStart;
-                updated.commitmentTime = normalizedCommitment;
-              }
-            }
-          }
-          
-          onChange(updated);
-        }}
-      />
-    </label>
-  );
-  return (
-    <>
-      <div className="form-grid">
-        {field("date", "Meal date", "date")}
-        {field("start", "Meal start", "time")}
-        {field("available", "Available window (minutes)", "number", 1, 1440)}
-        {field("commitmentTime", "Next commitment at", "time")}
-        {field("commitment", "Next commitment", "text")}
-        {field("location", "Location / area", "text")}
-      </div>
-      <details className="allowances">
-        <summary>Meal time allowances</summary>
-        <p className="muted">
-          Full activity includes these allowances. Travel and service are your
-          assumptions, not live estimates.
-        </p>
-        <div className="form-grid">
-          {field("eating", "Eating (min)")}
-          {field("cleanup", "Cooking cleanup (min)")}
-          {field("onward", "Onward travel (min)")}
-          {field("buffer", "Buffer (min)")}
-          {field("service", "Eat-out service (min)")}
-        </div>
-      </details>
-    </>
-  );
+  const number = (key,label,min=0,max=240) => <label>{label}<input type="number" min={min} max={max} required={key!=="service"} value={value[key]??""} onChange={e=>onChange({...value,[key]:e.target.value===""?(key==="service"?null:""):Number(e.target.value)})}/></label>;
+  return <>
+    <div className="form-grid">
+      <label>Meal date<input type="date" required value={value.date} onChange={e=>onChange({...value,date:e.target.value})}/></label>
+      <label>Starts<input type="time" required value={value.start} onChange={e=>{const duration=Number(value.available)||60;range(value.date,e.target.value,clockTime(Math.min(1439,minutes(e.target.value)+duration)));}}/></label>
+      <label>Ends<input type="time" required value={end==="Unknown"?value.commitmentTime:end} onChange={e=>range(value.date,value.start,e.target.value)}/></label>
+      {number("available","Duration (minutes)",1,1440)}
+    </div>
+    <MealWindowPicker state={state} value={value} onChange={onChange}/>
+    <details className="allowances"><summary>Location & next commitment</summary><div className="form-grid"><label>Location / area<input value={value.location??""} onChange={e=>onChange({...value,location:e.target.value})}/></label><label>Next commitment<input value={value.commitment??""} onChange={e=>onChange({...value,commitment:e.target.value})}/></label><label>Next commitment at<input type="time" required value={value.commitmentTime} onChange={e=>onChange({...value,commitmentTime:e.target.value})}/></label></div></details>
+    <details className="allowances"><summary>Meal time allowances</summary><div className="form-grid">{number("eating","Eating (min)")}{number("cleanup","Cleanup (min)")}{number("onward","Onward travel (min)")}{number("buffer","Buffer (min)")}{number("service","Dining service (min)")}</div></details>
+  </>;
 }
 function Setup({ state, onSave, onClose, timeOnly = false }) {
   const [profile, setProfile] = useState(structuredClone(state.profile)),
@@ -342,7 +296,7 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
       >
         <p className="muted">
           {timeOnly
-            ? "Update your window. Your saved meal stays until you approve a replacement."
+            ? "Choose today, tomorrow or any date. Drag a meal period; your saved meals stay in place."
             : "A few preferences, a little context. Sample values are editable; all catalog food remains demo data."}
         </p>
         {!timeOnly && (
@@ -428,7 +382,7 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
             <fieldset>
               <legend>Available equipment</legend>
               <div className="checks">
-                {["stove", "pan", "pot"].map((item) => (
+                {EQUIPMENT.map((item) => (
                   <label key={item}>
                     <input
                       type="checkbox"
@@ -445,7 +399,7 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
         {flags.manualSchedule.available && (
           <>
             <h3>Your meal window</h3>
-            <ContextFields value={context} onChange={setContext} />
+            <ContextFields value={context} onChange={setContext} state={state} />
           </>
         )}
         {!timeOnly && flags.nutritionGoals.available && (
@@ -462,13 +416,26 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                     value={goal.nutrient}
                     onChange={(e) => editGoal(i, "nutrient", e.target.value)}
                   >
-                    {Object.entries(nutrientInfo).map(
-                      ([key, [label, unit]]) => (
-                        <option key={key} value={key}>
-                          {label} ({unit})
-                        </option>
-                      ),
-                    )}
+                    <optgroup label="Macronutrients &amp; Energy">
+                      {["energy_kcal","protein_g","carbohydrate_g","fiber_g","sugar_g","added_sugar_g"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Lipids (Fats)">
+                      {["fat_g","saturated_fat_g","trans_fat_g","mono_fat_g","poly_fat_g","cholesterol_mg"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Vitamins">
+                      {["vitamin_a_mcg","vitamin_c_mg","vitamin_d_mcg","vitamin_e_mg","vitamin_k_mcg","thiamin_mg","riboflavin_mg","niacin_mg","pantothenic_mg","vitamin_b6_mg","folate_mcg","vitamin_b12_mcg","choline_mg"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Minerals">
+                      {["calcium_mg","iron_mg","magnesium_mg","phosphorus_mg","potassium_mg","sodium_mg","zinc_mg","copper_mg","manganese_mg","selenium_mcg"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
                   </select>
                 </label>
                 <label>
@@ -572,8 +539,8 @@ function NutritionTable({ meal, servings = 1 }) {
         ))}
       </div>
       <p className="fine-print">
-        Illustrative demo nutrition · {num(servings)} serving
-        {servings === 1 ? "" : "s"} · {num(meal.portionGrams * servings)} g.{" "}
+        {meal.nutrition.kind==='illustrative_demo'?'Illustrative demo nutrition':meal.nutrition.kind==='unknown'?'Nutrition unavailable':'Ingredient-based nutrition estimate'} · {num(servings)} serving
+        {servings === 1 ? "" : "s"} · {meal.portionGrams == null ? 'Final portion weight unknown' : `${num(meal.portionGrams * servings)} g`}.{" "}
         {meal.nutrition.preparation}
       </p>
     </>
@@ -585,20 +552,39 @@ function Details({ meal, state, onClose, onChoose, onLog }) {
     <Modal title={meal.name} onClose={onClose} wide>
       <p className="muted">
         {modeName(meal.mode)} · {money(meal.cost)} estimated ·{" "}
-        {meal.portionLabel} ({meal.portionGrams} g)
+        {meal.portionLabel}{meal.portionGrams==null?'':` (${meal.portionGrams} g)`}
       </p>
       {flags.nutritionDetails.available && (
         <>
           <h3>What’s in this portion</h3>
           <NutritionTable meal={meal} />
-          <details className="allowances">
+          <details className="allowances" open={meal.nutrition?.kind === "usda_estimated"}>
             <summary>Nutrition source & basis</summary>
             <p>{meal.nutrition.source}</p>
-            <p>
-              ID: {meal.id} · Basis: {meal.nutrition.basis} · Fixture checked:{" "}
-              {meal.nutrition.checkedAt}. No external source verifies these
-              numbers.
-            </p>
+            {meal.nutrition?.kind === "usda_estimated" ? (
+              <>
+                <p>
+                  <strong>
+                    {(meal.nutrition.confidence || "medium").replace(/^./, (c) =>
+                      c.toUpperCase(),
+                    )}{" "}
+                    confidence:
+                  </strong>{" "}
+                  {usdaConfidenceExplain(meal.nutrition)}
+                </p>
+                <p>
+                  High ≈ most ingredients matched · Medium ≈ about half · Low ≈
+                  only a few. Unmatched ingredients are left out of the totals.
+                  Macros are summed from USDA matches and scaled per serving.
+                </p>
+              </>
+            ) : (
+              <p>
+                ID: {meal.id} · Basis: {meal.nutrition.basis} · Checked:{" "}
+                {meal.nutrition.checkedAt}. No external source verifies these
+                numbers.
+              </p>
+            )}
           </details>
         </>
       )}
@@ -627,12 +613,27 @@ function Details({ meal, state, onClose, onChoose, onLog }) {
               <li key={item.name}>
                 <span>{item.name}</span>
                 <span>
-                  {item.grams} g needed · {state.pantry[item.name] ?? 0} g on
-                  hand
+                  {item.grams} g needed ·{" "}
+                  {pantryCovers(item.name, state.pantry)
+                    ? "on hand"
+                    : `${state.pantry[item.name] ?? 0} g on hand`}
                 </span>
               </li>
             ))}
           </ul>
+          {mealSubstitutions(meal, state.pantry).length > 0 && (
+            <>
+              <h3>Alternatives for what you don’t have</h3>
+              <ul className="substitution-list">
+                {mealSubstitutions(meal, state.pantry).map((s) => (
+                  <li key={`${s.missing}-${s.useInstead || "omit"}`}>
+                    <strong>{substitutionLine(s)}</strong>
+                    {s.note ? <span className="muted"> — {s.note}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           <h3>Let’s make it</h3>
           <ol className="recipe">
             {meal.steps.map((step) => (
@@ -656,9 +657,8 @@ function Details({ meal, state, onClose, onChoose, onLog }) {
       )}
       <p className="fine-print">
         Allergens:{" "}
-        {meal.allergens === null
-          ? "Unknown"
-          : meal.allergens.join(", ") || "None listed"}
+        {knownPresentAllergens(meal).join(", ") || "None confirmed"}
+        {!hasAllergenAbsenceCoverage(meal) && "; other allergens and cross-contact remain unknown"}
         . Demo information does not verify real allergen safety.
       </p>
       {!result.feasible && (
@@ -787,7 +787,7 @@ function Card({
           <p className="card-footnote">
             {selected
               ? `Planned for ${state.plan.date}, ${niceTime(state.plan.start)}–${niceTime(clockTime(minutes(state.plan.start) + state.plan.duration))}.`
-              : `Fits ${niceTime(state.context.start)}–${niceTime(clockTime(minutes(state.context.start) + result.duration))}, including buffer.`}{" "}
+              : `Fits ${niceTime(state.context.start)}–${niceTime(clockTime(minutes(state.context.start) + result.duration))}.`}{" "}
             Nutrition is illustrative.
           </p>
         )}
@@ -795,10 +795,47 @@ function Card({
     </article>
   );
 }
+function pantryEntries(pantry) {
+  return Object.entries(pantry || {})
+    .filter(([, grams]) => Number(grams) > 0)
+    .map(([name, grams]) => ({ name, grams: Number(grams) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function Kitchen({ state, onSave }) {
-  const [pantry, setPantry] = useState({ ...state.pantry }),
+  const [items, setItems] = useState(() => pantryEntries(state.pantry)),
+    [draft, setDraft] = useState(""),
+    [grams, setGrams] = useState("500"),
     [error, setError] = useState(""),
     [saved, setSaved] = useState(false);
+
+  function addItem() {
+    const name = draft.trim().replace(/\s+/g, " ").slice(0, 60);
+    if (!name) return;
+    const amount = Number(grams);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) {
+      setError("Enter a quantity above 0 g and up to 100000 g.");
+      return;
+    }
+    const key = name.toLowerCase();
+    setItems((list) => {
+      const existing = list.find((item) => item.name.toLowerCase() === key);
+      if (existing)
+        return list.map((item) =>
+          item.name.toLowerCase() === key
+            ? { ...item, grams: Math.max(item.grams, amount) }
+            : item,
+        );
+      return [...list, { name, grams: amount }].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+    });
+    setDraft("");
+    setGrams("500");
+    setError("");
+    setSaved(false);
+  }
+
   return (
     <section className="panel kitchen-panel">
       <div className="section-heading">
@@ -809,13 +846,105 @@ function Kitchen({ state, onSave }) {
         <Icon name="kitchen" size={30} />
       </div>
       <p className="muted">
-        Confirmed edible quantities in grams. Rice and chickpeas are already
-        cooked; pasta is dry. Sample pantry values are editable. Choosing a meal
-        leaves inventory as entered.
+        Add what you actually have. Quantities are in grams—rice and chickpeas
+        as cooked, pasta as dry. Choosing a meal leaves inventory as entered.
       </p>
       <form
-        onSubmit={async (e) => {
+        className="kitchen-add"
+        onSubmit={(e) => {
           e.preventDefault();
+          addItem();
+        }}
+      >
+        <label>
+          Ingredient
+          <input
+            type="text"
+            value={draft}
+            placeholder="e.g. spinach, chicken, tortillas"
+            aria-label="Ingredient name"
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setError("");
+            }}
+          />
+        </label>
+        <label>
+          Amount
+          <span className="input-unit">
+            <input
+              type="number"
+              min="1"
+              max="100000"
+              step="1"
+              value={grams}
+              aria-label="Amount in grams"
+              onChange={(e) => {
+                setGrams(e.target.value);
+                setError("");
+              }}
+            />
+            <span>g</span>
+          </span>
+        </label>
+        <button type="submit" className="secondary" disabled={!draft.trim()}>
+          Add
+        </button>
+      </form>
+      <div className="kitchen-list" role="list" aria-label="Groceries on hand">
+        {items.map((item) => (
+          <div className="kitchen-row" role="listitem" key={item.name}>
+            <span className="kitchen-name">{item.name}</span>
+            <span className="input-unit">
+              <input
+                type="number"
+                min="1"
+                max="100000"
+                step="1"
+                value={item.grams}
+                aria-label={`${item.name} grams`}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setItems((list) =>
+                    list.map((row) =>
+                      row.name === item.name
+                        ? { ...row, grams: Number.isFinite(next) ? next : 0 }
+                        : row,
+                    ),
+                  );
+                  setSaved(false);
+                }}
+              />
+              <span>g</span>
+            </span>
+            <button
+              type="button"
+              className="text-button"
+              aria-label={`Remove ${item.name}`}
+              onClick={() => {
+                setItems((list) => list.filter((row) => row.name !== item.name));
+                setSaved(false);
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+        {!items.length && (
+          <p className="kitchen-empty">
+            Nothing listed yet—type an ingredient above to start.
+          </p>
+        )}
+      </div>
+      <button
+        type="button"
+        className="primary"
+        onClick={async () => {
+          const pantry = Object.fromEntries(
+            items
+              .filter((item) => item.name && item.grams > 0)
+              .map((item) => [item.name, item.grams]),
+          );
           try {
             await onSave({ type: "updatePantry", pantry });
             setSaved(true);
@@ -825,41 +954,17 @@ function Kitchen({ state, onSave }) {
           }
         }}
       >
-        <div className="pantry-grid">
-          {pantryItems.map((item) => (
-            <label key={item}>
-              {item}
-              <span className="input-unit">
-                <input
-                  type="number"
-                  min="0"
-                  max="100000"
-                  step="1"
-                  value={pantry[item] ?? 0}
-                  required
-                  onChange={(e) => {
-                    setPantry({ ...pantry, [item]: Number(e.target.value) });
-                    setSaved(false);
-                  }}
-                />
-                <span>g</span>
-              </span>
-            </label>
-          ))}
-        </div>
-        <button type="submit" className="primary">
-          Save ingredients
-          <Icon name="check" size={17} />
-        </button>
-        {saved && (
-          <p role="status">Ingredients saved. Meal options refreshed.</p>
-        )}
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-      </form>
+        Save ingredients
+        <Icon name="check" size={17} />
+      </button>
+      {saved && (
+        <p role="status">Ingredients saved. Meal options refreshed.</p>
+      )}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </section>
   );
 }
@@ -991,79 +1096,235 @@ function Intake({ state, onEdit, onRemove }) {
     </section>
   );
 }
+const ASSISTANT_PROMPTS = [
+  "Compare meals for me",
+  "I have 45 minutes",
+  "What’s easy with my groceries?",
+  "Something lighter tonight",
+];
+
 function Assistant({ state, onAction, onClose }) {
   const [text, setText] = useState(""),
     [messages, setMessages] = useState([
       {
         message:
-          "A little help with your next meal. Try “compare meals” or “I have 45 minutes”.",
+          "Hi — I’m your food copilot. Ask in plain language, or tap a prompt below to start.",
       },
     ]),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  const listRef = useRef(null);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, busy]);
+
+  async function sendPrompt(raw) {
+    const sent = raw.trim();
+    if (!sent || busy) return;
+    let response;
+    try {
+      response = interpretFoodRequest(sent, state, catalog);
+    } catch (err) {
+      setError(err.message);
+      return;
+    }
+    if (!response.unrecognized) {
+      setMessages((prev) => [...prev, { user: true, message: sent }, response]);
+      setText("");
+      setError("");
+      return;
+    }
+    const history = messages
+      .filter(
+        (item) =>
+          !item.pending &&
+          typeof item.message === "string" &&
+          item.message.trim(),
+      )
+      .slice(-4)
+      .map((item) => ({
+        role: item.user ? "user" : "assistant",
+        text: item.message.slice(0, 500),
+      }));
+    setBusy(true);
+    setMessages((prev) => [
+      ...prev,
+      { user: true, message: sent },
+      { message: "Thinking…", pending: true },
+    ]);
+    setText("");
+    setError("");
+    try {
+      const res = await fetch("/api/recipes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: sent, memories: [], history }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail =
+          typeof data.detail === "string"
+            ? data.detail
+            : Array.isArray(data.detail)
+              ? data.detail.map((item) => item.msg || item).join(" ")
+              : data.error || "Could not interpret that request.";
+        setMessages((prev) => prev.filter((item) => !item.pending));
+        setError(detail);
+        return;
+      }
+      if (data.intent === "conversation") {
+        const message =
+          typeof data.message === "string" && data.message.trim()
+            ? data.message.trim()
+            : "Tell me what you're looking for — ingredients, time, or budget — and I'll find something.";
+        setMessages((prev) => [
+          ...prev.filter((item) => !item.pending),
+          { message },
+        ]);
+        return;
+      }
+      const reply = replyFromPatch(data, state, catalog);
+      setMessages((prev) => [...prev.filter((item) => !item.pending), reply]);
+      const summary = reply.message;
+      if (typeof summary === "string" && summary) {
+        try {
+          const phrased = await fetch("/api/recipes/phrase", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ summary }),
+            signal: AbortSignal.timeout(25000),
+          });
+          const phraseData = await phrased.json().catch(() => ({}));
+          const phrasedText =
+            phrased.ok && typeof phraseData.text === "string"
+              ? phraseData.text.trim()
+              : "";
+          if (phrasedText)
+            setMessages((prev) =>
+              prev.map((item) =>
+                item === reply ? { ...item, message: phrasedText } : item,
+              ),
+            );
+        } catch {
+          // Keep the templated reply already on screen.
+        }
+      }
+    } catch (err) {
+      setMessages((prev) => prev.filter((item) => !item.pending));
+      setError(err.message || "Could not interpret that request.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <Modal title="Your food assistant" onClose={onClose}>
-      <p className="fine-print">
-        Simple local commands · AI and Photon are not connected.
-      </p>
-      <div className="chat-messages" aria-live="polite">
+    <Modal
+      title="Daywell AI"
+      subtitle="Food copilot · live"
+      className="assistant-dialog"
+      onClose={onClose}
+      leading={
+        <span className="assistant-orb" aria-hidden="true">
+          <Icon name="spark" size={18} />
+        </span>
+      }
+    >
+      <div className="assistant-status">
+        <span className="assistant-pulse" aria-hidden="true" />
+        <span>Listening for meal help</span>
+      </div>
+      <div className="chat-messages" aria-live="polite" ref={listRef}>
         {messages.map((msg, i) => (
           <div
-            className={msg.user ? "chat-bubble user" : "chat-bubble"}
+            className={
+              msg.user
+                ? "chat-row user"
+                : msg.pending
+                  ? "chat-row pending"
+                  : "chat-row"
+            }
             key={i}
           >
-            {msg.message}
-            {msg.proposal && (
-              <button
-                className="secondary"
-                disabled={msg.applied}
-                onClick={() => {
-                  try {
-                    onAction(msg.proposal);
-                    setMessages((prev) =>
-                      prev.map((m, j) =>
-                        j === i ? { ...m, applied: true } : m,
-                      ),
-                    );
-                    setError("");
-                  } catch (err) {
-                    setError(err.message);
-                  }
-                }}
-              >
-                {msg.applied ? "Applied" : "Apply this change"}
-              </button>
+            {!msg.user && (
+              <span className="chat-avatar" aria-hidden="true">
+                <Icon name="spark" size={14} />
+              </span>
             )}
+            <div className={msg.user ? "chat-bubble user" : "chat-bubble"}>
+              {msg.pending ? (
+                <span className="chat-typing" aria-label="Thinking">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              ) : (
+                msg.message
+              )}
+              {msg.proposal && (
+                <button
+                  className="assistant-apply"
+                  disabled={msg.applied}
+                  onClick={() => {
+                    try {
+                      onAction(msg.proposal);
+                      setMessages((prev) =>
+                        prev.map((m, j) =>
+                          j === i ? { ...m, applied: true } : m,
+                        ),
+                      );
+                      setError("");
+                    } catch (err) {
+                      setError(err.message);
+                    }
+                  }}
+                >
+                  {msg.applied ? "Applied" : "Apply this change"}
+                </button>
+              )}
+            </div>
           </div>
         ))}
       </div>
+      {messages.length < 3 && (
+        <div className="assistant-prompts" role="group" aria-label="Try asking">
+          {ASSISTANT_PROMPTS.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              className="assistant-chip"
+              disabled={busy}
+              onClick={() => sendPrompt(prompt)}
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+      )}
       <form
-        className="chat-form"
+        className="chat-form assistant-composer"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!text.trim()) return;
-          try {
-            const response = interpretFoodRequest(text, state, catalog);
-            setMessages([...messages, { user: true, message: text }, response]);
-            setText("");
-            setError("");
-          } catch (err) {
-            setError(err.message);
-          }
+          sendPrompt(text);
         }}
       >
         <label className="sr-only" htmlFor="chat-input">
-          Food request
+          Ask Daywell AI
         </label>
         <input
           id="chat-input"
           value={text}
+          disabled={busy}
           onChange={(e) => setText(e.target.value)}
-          placeholder="What would help with your meal?"
+          placeholder="Ask anything about meals…"
+          autoComplete="off"
         />
         <button
-          className="primary"
+          className="primary assistant-send"
           type="submit"
-          aria-label="Send food request"
+          disabled={busy || !text.trim()}
+          aria-label="Send"
         >
           <Icon name="arrow" />
         </button>
@@ -1096,7 +1357,7 @@ function Log({ data, onClose, onSave, onLogged }) {
               servings,
               date,
             });
-            onLogged();
+            onLogged(data.meal);
             onClose();
           } catch (err) {
             setError(err.message);
@@ -1105,7 +1366,7 @@ function Log({ data, onClose, onSave, onLogged }) {
       >
         <h3>{data.meal.name}</h3>
         <p className="muted">
-          One serving = {data.meal.portionLabel} ({data.meal.portionGrams} g).
+          One serving = {data.meal.portionLabel}{data.meal.portionGrams==null?"":` (${data.meal.portionGrams} g)`}.
           Confirm the amount you actually ate.
         </p>
         <div className="form-grid">
@@ -1154,6 +1415,52 @@ function Log({ data, onClose, onSave, onLogged }) {
   );
 }
 
+function UsedUpDialog({ meal, ingredients, onDone, onClose }) {
+  const [checked, setChecked] = useState(new Set());
+  function toggle(key) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+  return (
+    <Modal title="Did you use anything up?" onClose={onClose}>
+      <p className="muted">
+        You just made <strong>{meal.name}</strong>. Tap any ingredient you ran
+        out of so we can remove it from your pantry.
+      </p>
+      <div className="used-up-list">
+        {ingredients.map(({ display }) => (
+          <label key={display} className="used-up-item">
+            <input
+              type="checkbox"
+              checked={checked.has(display)}
+              onChange={() => toggle(display)}
+            />
+            <span>{display}</span>
+          </label>
+        ))}
+      </div>
+      <p className="fine-print">
+        Leave everything unchecked if you still have leftovers.
+      </p>
+      <div className="dialog-actions">
+        <button
+          className="primary"
+          onClick={() => onDone([...checked])}
+        >
+          {checked.size ? `Remove ${checked.size} item${checked.size > 1 ? "s" : ""}` : "Nothing ran out"}
+          <Icon name="check" />
+        </button>
+        <button className="secondary" onClick={onClose}>
+          Skip
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 export {
   Icon,
   Modal,
@@ -1166,4 +1473,5 @@ export {
   Log,
   Card,
   MealArt,
+  UsedUpDialog,
 };

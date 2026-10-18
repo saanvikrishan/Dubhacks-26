@@ -16,7 +16,7 @@ import {
   sourcedUwItems,
 } from "../src/data/sourcedCatalog.js";
 import { portionNutrition } from "../src/domain/nutrition.js";
-import { createDemoState } from "../src/domain/state.js";
+import { createDemoState as blankDemoState, testPantry } from "../src/domain/state.js";
 import { evaluate } from "../src/domain/engine.js";
 import { previewFoodIntent } from "../src/domain/intent.js";
 import { createUsdaClient } from "../server/usda-client.js";
@@ -360,3 +360,5 @@ test("USDA client: missing keys, API failures, bad IDs and redirects never leak 
     /invalid_response/,
   );
 });
+
+function createDemoState() { const s = blankDemoState(); s.pantry = {...testPantry}; s.context.onward=5; s.context.buffer=10; return s; }

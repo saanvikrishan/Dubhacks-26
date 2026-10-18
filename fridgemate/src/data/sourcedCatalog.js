@@ -180,3 +180,6 @@ export function buildSourcedCatalog({ cookCostQuotes = {} } = {}) {
     ...structuredClone(sourcedUwItems),
   ];
 }
+
+// Expanded UW dining catalog is separate from the existing Cook and legacy preview records.
+export { buildUwDiningCatalog } from "../domain/uwDining.js";

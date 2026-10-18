@@ -5,7 +5,7 @@ import {
   createGeminiIntentAdapter,
   createIntentHttpTransport,
 } from "../src/adapters/geminiIntent.js";
-import { createDemoState, transition } from "../src/domain/state.js";
+import { createDemoState as blankDemoState, testPantry, transition } from "../src/domain/state.js";
 import { catalog } from "../src/data/catalog.js";
 import { config } from "../src/domain/config.js";
 
@@ -247,3 +247,5 @@ test("intent HTTP transport: same-origin text-only contract and safe failure han
     /unavailable/,
   );
 });
+
+function createDemoState() { const s = blankDemoState(); s.pantry = {...testPantry}; s.context.onward=5; s.context.buffer=10; return s; }
