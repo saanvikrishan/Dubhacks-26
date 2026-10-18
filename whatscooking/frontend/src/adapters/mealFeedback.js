@@ -1,15 +1,16 @@
 import {CUISINES,TASTES,cuisineOf,preferenceFit} from '../domain/preferences.js';
 import {mealsFor} from '../domain/generatedMeals.js';
 import {byId} from '../data/suggestions.js';
+import {storageKeys, readStored} from '../domain/branding.js';
 
-const USER_KEY='daywell-user-id';
-const SENT_KEY='daywell-feedback-sent';
+const USER_KEY=storageKeys.user;
+const SENT_KEY=storageKeys.feedback;
 const browserStorage=()=>{try{return globalThis.localStorage??null;}catch{return null;}};
 
 /** Anonymous per-browser id. It scopes Backboard memory but is not an authenticated identity. */
 export function getUserId(storage=browserStorage()) {
   try {
-    const saved=storage?.getItem(USER_KEY);
+    const saved=readStored(storage, USER_KEY);
     if(saved && /^[0-9a-f-]{36}$/.test(saved)) return saved;
     const id=crypto.randomUUID();
     storage?.setItem(USER_KEY,id);
@@ -36,7 +37,7 @@ export async function recordMealFeedback(kind,meal,context={},{fetchImpl=globalT
   const event=feedbackEvent(kind,meal,context),user=getUserId(storage);
   if(!event || !user) return 'skipped';
   let sent=[];
-  try {sent=JSON.parse(storage?.getItem(SENT_KEY)??'[]');} catch { /* start a fresh list */ }
+  try {sent=JSON.parse(readStored(storage, SENT_KEY)??'[]');} catch { /* start a fresh list */ }
   if(!Array.isArray(sent)) sent=[];
   if(sent.includes(event.eventId)) return 'duplicate';
   try {
@@ -44,7 +45,7 @@ export async function recordMealFeedback(kind,meal,context={},{fetchImpl=globalT
     const result=await response.json();
     if(!response.ok || !['saved','duplicate'].includes(result.status)) return result.status??'unavailable';
     try {storage?.setItem(SENT_KEY,JSON.stringify([...sent,event.eventId].slice(-300)));} catch { /* dedupe is best effort */ }
-    globalThis.dispatchEvent?.(new CustomEvent('daywell-feedback-saved'));
+    globalThis.dispatchEvent?.(new CustomEvent('whatscooking.ai-feedback-saved'));
     return 'saved';
   } catch {return 'unavailable';}
 }

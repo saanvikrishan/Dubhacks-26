@@ -54,9 +54,10 @@ function generated(list,confirmed) {
 }
 
 test('null, empty and soy-present/peanut-unknown generated coverage cannot pass discovery or selection',()=>{
-  // Once the user confirms a recipe's allergens, it is covered; a listed excluded allergen still blocks it.
+  // New restrictions require a fresh review; an earlier confirmation cannot cover newly added allergies.
   const ok=generated(['soy'],true);ok.profile.exclusions=['peanut'];
-  assert.equal(evaluate(ok.generatedMeals[0],ok).feasible,true);
+  assert.equal(evaluate(ok.generatedMeals[0],ok).feasible,false);
+  assert.match(evaluate(ok.generatedMeals[0],ok).reasons.join(),/Allergen information is unknown/);
   const peanut=generated(['peanut'],true);peanut.profile.exclusions=['peanut'];
   assert.match(evaluate(peanut.generatedMeals[0],peanut).reasons.join(),/Contains excluded peanut/);
   for(const confirmed of [false]) for(const list of [[],['soy']]) {

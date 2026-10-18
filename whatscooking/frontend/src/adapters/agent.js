@@ -5,6 +5,7 @@ import {addDays, blocksMealPlanning, dayKey, eventsForDay, localInstant, timeKey
 import {contextForWindow} from '../domain/mealWindow.js';
 import {NO_COMMITMENT, openEnded} from '../domain/engine.js';
 import {getUserId} from './mealFeedback.js';
+import {storageKeys, readStored} from '../domain/branding.js';
 
 /**
  * The assistant agent's browser side. The backend returns tool calls; here each one becomes the same
@@ -14,7 +15,7 @@ import {getUserId} from './mealFeedback.js';
 
 const WEEKDAY = {Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6};
 const SCREENS = {today: 'Today', meal_plan: 'My Meal Plan', lets_eat: "Let's eat", grocery_list: 'Grocery list'};
-const NOTES_KEY = 'whatscooking.sidebar-notes.v1';
+const NOTES_KEY = storageKeys.notes;
 const uid = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
 const clock = (iso) => timeKey(iso);
 const lower = (s) => String(s).trim().toLowerCase();
@@ -24,7 +25,7 @@ const and = (list) => list.join(', ');
 const GOAL_WORDS = {muscle: 'build muscle', lean: 'lose weight', healthy: 'eat healthier', energy: 'fuel workouts', budget: 'save money', easy: 'just feed me'};
 // How each preference change reads in the chat's list of what changed.
 const PREFERENCE_WORDS = {
-  diet: (v) => `diet set to ${v}`, goal: (v) => `goal: ${GOAL_WORDS[v] ?? v}`, favorite_food: (v) => `favorite food: ${v}`, budget: (v) => `budget $${v} per meal`,
+  diet: (v) => `diet set to ${v}`, goal: (v) => `goal: ${GOAL_WORDS[v] ?? v}`, favorite_food: (v) => `favorite food: ${v}`, budget: (v) => v === null ? "no budget limit" : `budget $${v} per meal`,
   cooking: (v) => (v ? 'can cook' : 'no kitchen'),
   allergies_add: (v) => `added ${and(v)} allerg${v.length > 1 ? 'ies' : 'y'}`, allergies_remove: (v) => `removed ${and(v)} allerg${v.length > 1 ? 'ies' : 'y'}`,
   cuisines_add: (v) => `likes ${and(v)} food`, cuisines_remove: (v) => `no longer prefers ${and(v)} food`,
@@ -248,18 +249,18 @@ export function planTurn(state, toolCalls) {
 /** Notes live in the existing per-day notes store; returns the previous text for Undo. */
 export function writeNote(date, text, storage = globalThis.localStorage) {
   let map = {};
-  try {map = JSON.parse(storage?.getItem(NOTES_KEY) || '{}') || {};} catch { /* start fresh */ }
+  try {map = JSON.parse(readStored(storage, NOTES_KEY) || '{}') || {};} catch { /* start fresh */ }
   const before = map[date] ?? '';
   map[date] = before ? `${before}\n${text}` : text;
   try {storage?.setItem(NOTES_KEY, JSON.stringify(map));} catch { /* storage unavailable */ }
-  globalThis.dispatchEvent?.(new CustomEvent('daywell-notes-changed', {detail: {date}}));
+  globalThis.dispatchEvent?.(new CustomEvent('whatscooking.ai-notes-changed', {detail: {date}}));
   return before;
 }
 
 export function restoreNote(date, text, storage = globalThis.localStorage) {
   let map = {};
-  try {map = JSON.parse(storage?.getItem(NOTES_KEY) || '{}') || {};} catch { /* start fresh */ }
+  try {map = JSON.parse(readStored(storage, NOTES_KEY) || '{}') || {};} catch { /* start fresh */ }
   if (text) map[date] = text; else delete map[date];
   try {storage?.setItem(NOTES_KEY, JSON.stringify(map));} catch { /* storage unavailable */ }
-  globalThis.dispatchEvent?.(new CustomEvent('daywell-notes-changed', {detail: {date}}));
+  globalThis.dispatchEvent?.(new CustomEvent('whatscooking.ai-notes-changed', {detail: {date}}));
 }

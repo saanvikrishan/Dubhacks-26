@@ -1,13 +1,14 @@
 import {foodPreferences} from "../domain/preferences.js";
 import { createDemoState, validateState } from "../domain/state.js";
+import {storageKeys, readStored, removeStored} from '../domain/branding.js';
 
-export const STORAGE_KEY = "daywell.local-demo.v1";
+export const STORAGE_KEY = storageKeys.state;
 const BACKEND_URL = "/api";
 
 // Backend-connected storage adapter with localStorage fallback
 export const storageAdapter = {
   load(storage) {
-    const raw = storage.getItem(STORAGE_KEY);
+    const raw = readStored(storage, STORAGE_KEY);
     if (!raw) {
       return { state: createDemoState(), error: null };
     }
@@ -40,14 +41,14 @@ export const storageAdapter = {
     
     
     let previousProfile;
-    try {previousProfile=JSON.parse(storage.getItem(STORAGE_KEY))?.profile;} catch { /* Preserve local saving if old data was malformed. */ }
+    try {previousProfile=JSON.parse(readStored(storage, STORAGE_KEY))?.profile;} catch { /* Preserve local saving if old data was malformed. */ }
     storage.setItem(STORAGE_KEY, JSON.stringify(validatedState));
     if (typeof window !== "undefined" && JSON.stringify(foodPreferences(previousProfile))!==JSON.stringify(foodPreferences(validatedState.profile))) void mirrorToBackboard(validatedState.profile);
     return true;
   },
 
   reset(storage) {
-    storage.removeItem(STORAGE_KEY);
+    removeStored(storage, STORAGE_KEY);
     // Note: Backend memories are preserved. To clear backend, implement a DELETE endpoint
     return createDemoState();
   },
@@ -79,9 +80,9 @@ async function mirrorToBackboard(profile) {
       signal: AbortSignal.timeout(10000),
     });
     const result=await response.json();
-    window.dispatchEvent(new CustomEvent('daywell-preferences-synced',{detail:{status:response.ok&&result.status!=='local_only'?'saved':'local_only'}}));
+    window.dispatchEvent(new CustomEvent('whatscooking.ai-preferences-synced',{detail:{status:response.ok&&result.status!=='local_only'?'saved':'local_only'}}));
   } catch {
-    window.dispatchEvent(new CustomEvent('daywell-preferences-synced',{detail:{status:'local_only'}}));
+    window.dispatchEvent(new CustomEvent('whatscooking.ai-preferences-synced',{detail:{status:'local_only'}}));
     // The local save already succeeded. A failed mirror does not roll it back.
   }
 }

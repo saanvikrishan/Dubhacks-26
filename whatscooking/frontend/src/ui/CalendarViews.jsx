@@ -16,6 +16,7 @@ import {
   timeKey,
 } from "../domain/calendar";
 import { byId } from "../data/suggestions";
+import {storageKeys, readStored} from '../domain/branding.js';
 
 const timeLabel = (value) =>
   new Intl.DateTimeFormat("en-US", {
@@ -31,11 +32,11 @@ const activityIcon = (kind) =>
     event: "calendar",
   })[kind] || "calendar";
 
-const NOTES_KEY = "whatscooking.sidebar-notes.v1";
+const NOTES_KEY = storageKeys.notes;
 
 function loadNotesMap() {
   try {
-    return JSON.parse(window.localStorage.getItem(NOTES_KEY) || "{}") || {};
+    return JSON.parse(readStored(window.localStorage, NOTES_KEY) || "{}") || {};
   } catch {
     return {};
   }
@@ -63,8 +64,8 @@ function SidebarNotesForDate({ date }) {
   // The assistant can add notes too; show them right away.
   useEffect(() => {
     const reload = () => setText(loadNotesMap()[key] || "");
-    window.addEventListener("daywell-notes-changed", reload);
-    return () => window.removeEventListener("daywell-notes-changed", reload);
+    window.addEventListener("whatscooking.ai-notes-changed", reload);
+    return () => window.removeEventListener("whatscooking.ai-notes-changed", reload);
   }, [key]);
 
   useEffect(() => {
@@ -228,7 +229,7 @@ export function ComingUp({
               <Icon name="arrow" size={16} />
             </button>
             <span>
-              {event.source === "daywell"
+              {event.source === "whatscooking.ai"
                 ? "Planned in WhatsCooking.ai"
                 : event.source === "apple"
                   ? "Apple Calendar"
@@ -364,7 +365,7 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
         <div>
           <h3>Integrate Calendar</h3>
           <p>
-              Load events from calendars connected to Apple Calendar, or connect Google Calendar. Connected calendars refresh every five minutes while WhatsCooking is open and when you return. No
+            Load events from calendars connected to Apple Calendar, or connect Google Calendar. Connected calendars refresh every five minutes while WhatsCooking.ai is open and when you return. No
             calendar events are changed.
           </p>
         </div>
@@ -509,7 +510,7 @@ export function EventDialog({
         </div>
         {isHolidayEvent(event) && <p className="success">Informational holiday · does not block meals unless you choose to mark it busy.</p>}
         <label className="check-label"><input type="checkbox" checked={busy} onChange={async e=>{const next=e.target.checked;try{await onSave({type:"setEventMealAvailability",id:event.id,busy:next});setBusy(next);setError("");}catch(err){setError(err.message);}}}/>Block meal planning during this event</label>
-        <p className="fine-print">This setting only affects WhatsCooking. The original calendar event stays unchanged.</p>
+        <p className="fine-print">This setting only affects WhatsCooking.ai. The original calendar event stays unchanged.</p>
         <button className="text-button" onClick={async()=>{try{await onSave({type:"setEventMealAvailability",id:event.id,busy:null});setBusy(blocksMealPlanning({...event,mealBusyOverride:undefined}));setError("");}catch(err){setError(err.message);}}}>Use automatic setting</button>
         {error && <p className="error" role="alert">{error}</p>}
         <p className="muted">Edit the event’s title and times in its source calendar.</p>
@@ -885,7 +886,7 @@ export function PlanCalendar({
         </div>
         <p className="fine-print calendar-local-note">
           Drag an empty period to add an activity. Imported events are read-only. Meals and activities you add here stay
-          in WhatsCooking. Week shows 7 AM–10 PM; the day list includes all times.
+          in WhatsCooking.ai. Week shows 7 AM–10 PM; the day list includes all times.
         </p>
       </section>
       <div className="calendar-right">

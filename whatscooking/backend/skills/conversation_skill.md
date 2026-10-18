@@ -1,4 +1,4 @@
-# Conversation skill (Daywell food assistant)
+# Conversation skill (whatscooking.ai food assistant)
 
 Use this skill for short chat replies that are not structured meal patches.
 

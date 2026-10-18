@@ -1,3 +1,4 @@
+import {normalizeAllergies} from "./allergens.js";
 import { sourcedCookCandidate, sameSourceCandidate } from "./foodFacts.js";
 import { config, requireCapability } from "./config.js";
 import { assertMealAction, validateInputs } from "./engine.js";
@@ -257,7 +258,7 @@ function applyAction(state, action, c = config) {
     )
       requireCapability("nutritionGoals", c);
     validateInputs(action.profile, state.context, state.pantry);
-    return { ...state, profile: action.profile };
+    return { ...state, profile: {...action.profile, exclusions: normalizeAllergies(action.profile.exclusions)} };
   }
   if (action.type === "updatePantry") {
     requireCapability("manualPantry", c);

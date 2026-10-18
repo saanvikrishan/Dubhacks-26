@@ -1,7 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {Icon, Modal} from './Core';
 import {CUISINES, GOALS, withGoal} from '../domain/preferences';
-import {ALLERGENS} from '../domain/generatedMeals';
+import {AllergyPicker} from './AllergyPicker';
 import {askAgent, planTurn} from '../adapters/agent';
 import {listen, transcribe, voiceSupported} from '../adapters/voice';
 
@@ -79,16 +79,17 @@ export function Onboarding({state, agent, onSave, onClose}) {
     <h3 style={section}>What’s your main goal?</h3>
     <div style={row}>{Object.entries(GOALS).map(([key, g]) => <Chip key={key} on={goal === key} onClick={() => setGoal(goal === key ? '' : key)}>{g.label}</Chip>)}</div>
     <h3 style={section}>How do you eat?</h3>
-    <div style={row}>{DIETS.map(([key, label]) => <Chip key={key} on={p.diet === key} onClick={() => setP({...p, diet: key})}>{label}</Chip>)}</div>
+    <div style={row}>{DIETS.map(([key, label]) => <Chip key={key} on={p.diet === key} onClick={() => setP({...p, diet: p.diet === key ? 'anything' : key})}>{label}</Chip>)}</div>
     <h3 style={section}>Any allergies?</h3>
-    <div style={row}>{ALLERGENS.map((a) => <Chip key={a} on={p.exclusions.includes(a)} onClick={() => toggle('exclusions', a)}>{a}</Chip>)}</div>
+    <AllergyPicker value={p.exclusions} onChange={exclusions => setP({...p, exclusions})}/>
     <h3 style={section}>Food you love</h3>
     <div style={row}>{CUISINES.map((c) => <Chip key={c} on={(p.cuisines ?? []).includes(c)} onClick={() => toggle('cuisines', c)}>{c}</Chip>)}</div>
     <h3 style={section}>Kitchen and budget</h3>
     <div style={row}>
       <Chip on={p.cooking} onClick={() => setP({...p, cooking: true})}>I can cook</Chip>
       <Chip on={!p.cooking} onClick={() => setP({...p, cooking: false})}>No kitchen</Chip>
-      {BUDGETS.map((b) => <Chip key={b} on={p.budget === b} onClick={() => setP({...p, budget: b})}>${b} a meal</Chip>)}
+      <Chip on={p.budget === null} onClick={() => setP({...p, budget: null})}>No budget limit</Chip>
+      {BUDGETS.map((b) => <Chip key={b} on={p.budget === b} onClick={() => setP({...p, budget: p.budget === b ? null : b})}>${b} a meal</Chip>)}
     </div>
     {error && <p role="alert" className="error">{error}</p>}
     <div className="dialog-actions sticky-actions">

@@ -532,7 +532,7 @@ export default function App() {
               <Icon name="spark" size={22} />
             </span>
             <span className="brand-word">
-              WhatsCooking<span className="brand-dot">.ai</span>
+              whatscooking<span className="brand-dot">.ai</span>
             </span>
           </a>
           <nav aria-label="Main navigation">

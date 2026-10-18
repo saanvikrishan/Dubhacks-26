@@ -39,6 +39,6 @@ const store=createFoodReferenceStore();
 export const refreshFoodReference=()=>store.refresh(true);
 export function useFoodReference(){
   const value=useSyncExternalStore(store.subscribe,store.getSnapshot);
-  useEffect(()=>{void store.refresh();void store.recall();const recalled=()=>{void store.recall(true);};window.addEventListener('daywell-preferences-synced',recalled);window.addEventListener('daywell-feedback-saved',recalled);const timer=setInterval(()=>{void store.refresh();},60000);return()=>{clearInterval(timer);window.removeEventListener('daywell-preferences-synced',recalled);window.removeEventListener('daywell-feedback-saved',recalled);};},[]);
+  useEffect(()=>{void store.refresh();void store.recall();const recalled=()=>{void store.recall(true);};window.addEventListener('whatscooking.ai-preferences-synced',recalled);window.addEventListener('whatscooking.ai-feedback-saved',recalled);const timer=setInterval(()=>{void store.refresh();},60000);return()=>{clearInterval(timer);window.removeEventListener('whatscooking.ai-preferences-synced',recalled);window.removeEventListener('whatscooking.ai-feedback-saved',recalled);};},[]);
   return value;
 }

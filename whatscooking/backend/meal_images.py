@@ -9,6 +9,7 @@ common dishes are warmed in the background (ordered by Backboard-learned prefere
 shared Backboard photo index lets any recipe find an existing photo of the same dish.
 """
 import asyncio
+from branding import LEGACY_PHOTO_NAMES, find_assistant
 import hashlib
 import io
 import json
@@ -170,7 +171,7 @@ COMMON = [MealImageRequest(name=n, dishType=d, ingredients=i, cuisine=c) for n, 
 
 class PhotoIndex:
     """Shared Backboard memory of verified photos: searchable by dish description, no personal data."""
-    NAME = 'Daywell dish photos'
+    NAME = 'whatscooking.ai dish photos'
 
     def __init__(self, backboard):
         self.backboard, self.ident, self.lock = backboard, None, asyncio.Lock()
@@ -185,13 +186,12 @@ class PhotoIndex:
             return self.ident
         async with self.lock:
             if not self.ident:
-                found = await asyncio.wait_for(self.backboard.list_assistants(name=self.NAME, limit=5), timeout=5)
-                match = [a for a in found or [] if getattr(a, 'name', None) == self.NAME]
-                if match:
-                    self.ident = str(match[0].assistant_id)
+                existing = await find_assistant(self.backboard, self.NAME, LEGACY_PHOTO_NAMES)
+                if existing:
+                    self.ident = existing
                 else:
                     created = await asyncio.wait_for(self.backboard.create_assistant(
-                        name=self.NAME, description='Index of verified Daywell meal photos'), timeout=10)
+                        name=self.NAME, description='Index of verified whatscooking.ai meal photos'), timeout=10)
                     self.ident = str(created.assistant_id)
         return self.ident
 

@@ -1,4 +1,4 @@
-# Phrase skill (Daywell reply rewriter)
+# Phrase skill (whatscooking.ai reply rewriter)
 
 Use this skill to rewrite a meal-assistant summary into natural speech.
 

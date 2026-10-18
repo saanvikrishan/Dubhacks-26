@@ -143,7 +143,7 @@ export function scheduledItems(state, meals) {
         Date.parse(localInstant(plan.date, plan.start)) + (plan.duration ?? 60) * 60000,
       ).toISOString(),
       kind: "meal",
-      source: plan.openSlot ? "daywell" : "daywell",
+      source: plan.openSlot ? "whatscooking.ai" : "whatscooking.ai",
       location: meal?.venue?.name ?? (plan.openSlot ? "" : "Cook at home"),
       busy: true,
       readOnly: false,

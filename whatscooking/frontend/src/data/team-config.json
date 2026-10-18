@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "product": {
-    "name": "WhatsCooking.ai",
+    "name": "whatscooking.ai",
     "tagline": "Meals that fit your fridge, calendar, and appetite.",
     "initialAudience": "Busy UW students",
     "initialLocation": "University of Washington, Seattle",
@@ -153,14 +153,14 @@
   },
   "permissions": {
     "defaultMode": "ask-before-external-write",
-    "calendarWriteScope": "daywell-created-meal-blocks-only",
+    "calendarWriteScope": "whatscooking.ai-created-meal-blocks-only",
     "notificationsRequireOptIn": true,
     "messagesToOtherPeople": "out-of-scope",
     "paymentsAndOrderPlacement": "out-of-scope"
   },
   "design": {
     "preferredConcept": "Food-focused adaptation of the team demo",
-    "referenceImage": "Daywell-UI-Reference.png",
+    "referenceImage": "whatscooking.ai-UI-Reference.png",
     "referenceRole": "Use the visual style and spacious composition; the food-first scope overrides the original feature set.",
     "style": "Calm cream background, sage/forest green, clear readable typography.",
     "primaryNavigation": [

@@ -18,7 +18,7 @@ dist-ssr
 .idea
 .DS_Store
 
-# Daywell local files
+# whatscooking.ai local files
 .calendar-bridge
 .env
 .env.*

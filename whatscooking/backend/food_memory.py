@@ -5,6 +5,7 @@ import time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from branding import BRAND, LEGACY_USER_PREFIX, find_assistant
 
 # ── Per-user meal feedback (chose / logged / skipped) ────────────────────────
 # Each anonymous user gets their own Backboard assistant, so memories are
@@ -50,13 +51,11 @@ async def user_assistant(client, user_id, create=False):
     async with _locks.setdefault(user_id, asyncio.Lock()):
         if user_id in _assistants:
             return _assistants[user_id]
-        name = f'Daywell user {user_id}'
-        found = await asyncio.wait_for(client.list_assistants(name=name, limit=5), timeout=5)
-        match = [a for a in found or [] if getattr(a, 'name', None) == name]
-        ident = str(match[0].assistant_id) if match else None
+        name = f'{BRAND} user {user_id}'
+        ident = await find_assistant(client, name, (f'{LEGACY_USER_PREFIX}{user_id}',))
         if not ident and create:
             created = await asyncio.wait_for(client.create_assistant(
-                name=name, description='Daywell meal choices for one anonymous user'), timeout=10)
+                name=name, description='whatscooking.ai meal choices for one anonymous user'), timeout=10)
             ident = str(created.assistant_id)
         if ident:
             _assistants[user_id] = ident

@@ -1,4 +1,4 @@
-import {dietConflict} from './allergens.js';
+import {dietConflict, excludedInIngredients, normalizeAllergies} from './allergens.js';
 import { byId as catalogById } from '../data/catalog.js';
 import { nutrientInfo } from './nutrition.js';
 import { CUISINES, TASTES } from './preferences.js';
@@ -57,9 +57,13 @@ export function normalizeGeneratedMeal(raw) {
 export function reviewGeneratedMeal(draft, review, profile) {
   validateGeneratedMeal(draft);
   if (draft.review?.confirmed) throw new Error('Confirmed recipes are preserved. Generate another version to change the recipe.');
-  if (review?.confirmed !== true || !numeric(review.cost,0,1000) || !Number.isInteger(review.prep) || !numeric(review.prep,0,240) || !Number.isInteger(review.cook) || !numeric(review.cook,0,240) || !strings(review.equipment,32) || review.equipment.some(e=>!EQUIPMENT.includes(e)))
+  if (review?.confirmed !== true || !(numeric(review.cost,0,1000) || (review.cost === null && profile.budget === null)) || !Number.isInteger(review.prep) || !numeric(review.prep,0,240) || !Number.isInteger(review.cook) || !numeric(review.cook,0,240) || !strings(review.equipment,32) || review.equipment.some(e=>!EQUIPMENT.includes(e)))
     throw new Error('Confirm a per-portion cost, preparation time, cooking time and required equipment.');
   if (!Array.isArray(review.allergens) || review.allergens.some(a=>!ALLERGENS.includes(a))) throw new Error('Choose supported allergens.');
+  const conflicts = excludedInIngredients(draft.ingredients, profile.exclusions);
+  if (conflicts.length) throw new Error(`Contains excluded ${conflicts.join(', ')}.`);
+  const clash = dietConflict(draft.ingredients, profile.diet);
+  if (clash) throw new Error(`Contains ${clash}, which conflicts with your diet.`);
   const sourced=enrichCookFacts(draft);
   const priced=Number.isFinite(sourced.cost) && review.cost===sourced.cost;
   draft={...draft,nutrition:sourced.nutrition,...(priced?{pricing:sourced.pricing}:{pricing:null})};
@@ -68,7 +72,7 @@ export function reviewGeneratedMeal(draft, review, profile) {
   const diets=dietsFromIngredients(draft.ingredients) ?? (review.dietConfirmed===true && profile.diet!=='anything' && !dietConflict(draft.ingredients,profile.diet) ? (profile.diet==='vegan'?['vegan','vegetarian']:[profile.diet]) : null);
   return {...structuredClone(draft),cost:review.cost,timing:{prep:review.prep,cook:review.cook,outbound:0},equipment:[...new Set(review.equipment)],diets,allergens:null,
     dietary:{knownPresent:listed,allergenAbsence:"not_established",crossContact:"unknown"},
-    review:{confirmed:true,checkedAt:new Date().toISOString(),source:'user_confirmed',diet:profile.diet,dietConfirmed:review.dietConfirmed===true,allergensConfirmed:review.allergensConfirmed===true},
+    review:{confirmed:true,checkedAt:new Date().toISOString(),source:'user_confirmed',diet:profile.diet,dietConfirmed:review.dietConfirmed===true,allergensConfirmed:review.allergensConfirmed===true,exclusionsChecked:normalizeAllergies(profile.exclusions)},
     provenance:{sourceType:'gemini_recipe_with_user_review',assumptions:['Input amounts and time are recipe planning estimates reviewed by the user.'],limitations:['A diet checkbox does not verify ingredients.','Empty or partial allergen lists record positive indicators only; absence remains unknown.','User confirmation does not independently certify nutrition or cross-contact safety.'],fields:{cost:priced?sourced.provenance.fields.cost:{status:'user_confirmed'},nutrition:sourced.provenance.fields.nutrition,diets:{status:diets?'ingredient_list':'unknown'},allergens:{status:listed.length?'user_listed_present':'unknown',knownPresent:listed,allergenAbsence:'not_established'}}}};
 }
 

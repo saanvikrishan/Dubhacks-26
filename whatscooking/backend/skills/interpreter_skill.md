@@ -1,4 +1,4 @@
-# Interpreter skill (Daywell meal-request classifier)
+# Interpreter skill (whatscooking.ai meal-request classifier)
 
 Use this skill to classify one user message and, when it is a meal request, translate it into a constraint patch for an existing catalog.
 

@@ -21,7 +21,7 @@ const ics = (...components) =>
   [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Daywell Kevin regression//EN",
+    "PRODID:-//whatscooking.ai Kevin regression//EN",
     ...components,
     "END:VCALENDAR",
   ].join("\r\n");

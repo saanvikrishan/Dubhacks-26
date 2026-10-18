@@ -1,5 +1,6 @@
 import {addDays, blocksMealPlanning, eventsForDay, localInstant, nextMealWindow, timeKey} from './calendar.js';
 import {resolveIngredientName} from './ingredientNames.js';
+import {storageKeys, readStored} from './branding.js';
 
 /**
  * Proactive suggestions, computed from the user's own data (no model calls, so they cost nothing).
@@ -63,9 +64,9 @@ export function computeNudges(state, {now = new Date(), today, meals = {}} = {})
   return out.slice(0, 3);
 }
 
-const DISMISSED_KEY = 'daywell-dismissed-nudges';
+const DISMISSED_KEY = storageKeys.dismissed;
 export function dismissedNudges(storage = globalThis.localStorage) {
-  try {return new Set(JSON.parse(storage?.getItem(DISMISSED_KEY) || '[]'));} catch {return new Set();}
+  try {return new Set(JSON.parse(readStored(storage, DISMISSED_KEY) || '[]'));} catch {return new Set();}
 }
 export function dismissNudge(id, storage = globalThis.localStorage) {
   const all = [...dismissedNudges(storage), id].slice(-200);

@@ -250,7 +250,7 @@ def substitution_skill_prompt(
         return None
 
     skill = load_skill("substitution_skill")
-    return f"""You are WhatsCooking's substitution skill.
+    return f"""You are WhatsCooking.ai's substitution skill.
 {skill}
 
 User HAS: {json.dumps(available)}

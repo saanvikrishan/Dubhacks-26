@@ -1,4 +1,5 @@
 import {foodPreferences} from "../domain/preferences.js";
+import {storageKeys, readStored} from '../domain/branding.js';
 import {getUserId} from './mealFeedback.js';
 import {minutes, openEnded} from '../domain/engine.js';
 import {normalizeGeneratedMeal} from '../domain/generatedMeals.js';
@@ -85,12 +86,12 @@ export async function prepareCook(state,{fetchImpl=globalThis.fetch}={}) {
   if(!names.length) return false;
   // At most once a day for the same pantry: recipes only, so a reload never repeats the cost.
   const today=new Date().toISOString().slice(0,10),mark=`${today}:${JSON.stringify(names.map(n=>[n,state.pantry[n]]))}`;
-  try {if(globalThis.localStorage?.getItem('daywell-pantry-prepared')===mark) return false;} catch { /* storage unavailable */ }
+  try {if(readStored(globalThis.localStorage, storageKeys.prepared)===mark) return false;} catch { /* storage unavailable */ }
   try {
     const response=await fetchImpl(`/api/food/preferences?user=${user}`,{signal:AbortSignal.timeout(8000)});
     const data=await response.json();
     if(!response.ok || (data.learned?.events??0)<3) return false;
   } catch {return false;}
-  try {globalThis.localStorage?.setItem('daywell-pantry-prepared',mark);} catch { /* storage unavailable */ }
+  try {globalThis.localStorage?.setItem(storageKeys.prepared,mark);} catch { /* storage unavailable */ }
   return prepareRecipeDrafts({state,ingredients:names,pantry:Object.fromEntries(names.map(n=>[n,state.pantry[n]]))},{fetchImpl});
 }

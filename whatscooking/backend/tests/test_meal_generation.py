@@ -53,7 +53,7 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as caught: await g.generate(client,RecipeRequest())
         self.assertEqual(caught.exception.status_code,503)
     def test_strict_request_and_draft_validation(self):
-        for data in [{'time':'30'},{'time':False},{'budget':float('nan')},{'budget':-1},{'exclusions':['unknown']},{'calendar':[]},{'pantry':{'rice':-1}},{'pantry':{'rice':'50'}}]:
+        for data in [{'time':'30'},{'time':False},{'budget':float('nan')},{'budget':-1},{'exclusions':['x'*61]},{'calendar':[]},{'pantry':{'rice':-1}},{'pantry':{'rice':'50'}}]:
             with self.assertRaises(ValidationError): RecipeRequest(**data)
         for data in [{**DRAFT,'cost':4.5},{**DRAFT,'review':{'confirmed':True}},{**DRAFT,'prep':-1},{**DRAFT,'ingredients':[{'name':'rice','grams':'100'}]},{**DRAFT,'equipment':['unlisted magic tool']}]:
             with self.assertRaises(ValidationError): RecipeResponse.model_validate({'recipes':[data]})

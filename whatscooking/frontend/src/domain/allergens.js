@@ -1,3 +1,21 @@
+export const STANDARD_ALLERGENS = ['soy','egg','milk','wheat','peanut','tree nut','sesame','fish','shellfish'];
+const ALIASES = {eggs:'egg', peanuts:'peanut', 'tree nuts':'tree nut', dairy:'milk', soya:'soy', soybeans:'soy'};
+export function normalizeAllergy(value) {
+  const name = String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return ALIASES[name] ?? name;
+}
+export function normalizeAllergies(values) { return [...new Set(values.map(normalizeAllergy).filter(Boolean))]; }
+export function validAllergies(values) {
+  return Array.isArray(values) && values.length <= 30 && values.every(v => typeof v === 'string' && v.trim() && v.length <= 60);
+}
+/** Custom names are literal ingredient terms, not regexes or proof of absence. */
+export function excludedInIngredients(ingredients, exclusions = []) {
+  const standard = allergensInIngredients(ingredients);
+  const text = names(ingredients);
+  return normalizeAllergies(exclusions).filter(a => STANDARD_ALLERGENS.includes(a) ? standard.includes(a) :
+    new RegExp(`(?:^|[^a-z0-9])${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:e?s)?(?:$|[^a-z0-9])`, 'i').test(text));
+}
+
 /** Positive indicators and absence coverage are different facts. */
 export function knownPresentAllergens(meal) {
   return [...new Set([
@@ -7,9 +25,11 @@ export function knownPresentAllergens(meal) {
   ])];
 }
 
-export function hasAllergenAbsenceCoverage(meal) {
+export function hasAllergenAbsenceCoverage(meal, exclusions = []) {
   // A recipe the user confirmed after its ingredients were checked for their allergens counts as covered.
-  if (meal.review?.confirmed === true && meal.review.allergensConfirmed === true) return true;
+  if (meal.review?.confirmed === true && meal.review.allergensConfirmed === true)
+    return exclusions.every(a => (meal.review.exclusionsChecked ?? STANDARD_ALLERGENS).includes(normalizeAllergy(a)));
+  if (exclusions.some(a => !STANDARD_ALLERGENS.includes(normalizeAllergy(a)))) return false;
   // Only the pre-existing illustrative demo catalog treats its list as complete.
   // No generated/sourced import currently supplies verified absence evidence.
   return Array.isArray(meal.allergens) && !meal.provenance && !meal.suggestion &&

@@ -54,7 +54,7 @@ final class CalendarDelegate: NSObject, NSApplicationDelegate {
     if command != "--events" {
       var result: [String:Any] = ["supported":true,"authorized":authorized,"authorization":status.rawValue,"permission":permission,"canRequest":status == .notDetermined,"needsSettings":status == .denied || status == .restricted]
       if command == "--connect" && !authorized {
-        result["error"] = status == .denied || status == .restricted ? "Calendar access is blocked in macOS. Open System Settings → Privacy & Security → Calendars and allow WhatsCooking Calendar (or the app running this local server), then retry. macOS does not repeat a previously denied prompt." : "Approve the macOS Calendar permission prompt, then retry."
+        result["error"] = status == .denied || status == .restricted ? "Calendar access is blocked in macOS. Open System Settings → Privacy & Security → Calendars and allow WhatsCooking.ai Calendar (or the app running this local server), then retry. macOS does not repeat a previously denied prompt." : "Approve the macOS Calendar permission prompt, then retry."
       }
       emit(result); return
     }

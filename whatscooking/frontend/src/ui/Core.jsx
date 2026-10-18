@@ -1,4 +1,6 @@
+import {AllergyPicker} from "./AllergyPicker";
 import {CUISINES,GOALS,TASTES,withGoal} from "../domain/preferences.js";
+import {storageKeys, readStored} from '../domain/branding.js';
 import {MealWindowPicker} from "./MealWindowPicker.jsx";
 import {contextForWindow} from "../domain/mealWindow.js";
 import { knownPresentAllergens, hasAllergenAbsenceCoverage } from "../domain/allergens.js";
@@ -372,16 +374,16 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                 </select>
               </label>
               <label>
-                Strict meal budget ($)
+                Meal budget ($, optional)
                 <input
                   type="number"
                   min="0"
                   max="1000"
                   step="0.01"
-                  required
-                  value={profile.budget}
+                  placeholder="No budget limit"
+                  value={profile.budget ?? ""}
                   onChange={(e) =>
-                    setProfile({ ...profile, budget: Number(e.target.value) })
+                    setProfile({ ...profile, budget: e.target.value === "" ? null : Number(e.target.value) })
                   }
                 />
               </label>
@@ -434,28 +436,7 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                 Unknown allergen data is excluded when a restriction is set.
                 Demo labels cannot establish real allergen safety.
               </p>
-              <div className="checks">
-                {[
-                  "soy",
-                  "egg",
-                  "milk",
-                  "wheat",
-                  "peanut",
-                  "tree nut",
-                  "sesame",
-                  "fish",
-                  "shellfish",
-                ].map((item) => (
-                  <label key={item}>
-                    <input
-                      type="checkbox"
-                      checked={profile.exclusions.includes(item)}
-                      onChange={() => toggle("exclusions", item)}
-                    />
-                    {item}
-                  </label>
-                ))}
-              </div>
+              <AllergyPicker value={profile.exclusions} onChange={exclusions => setProfile({...profile, exclusions})}/>
             </fieldset>
             <fieldset>
               <legend>Available equipment</legend>
@@ -811,7 +792,7 @@ function Card({
           {meal.mode === "cook"
             ? "Uses ingredients you have"
             : "Fits your sample meal window"}{" "}
-          · {money(state.profile.budget - meal.cost)} below your cap
+          {state.profile.budget !== null && Number.isFinite(meal.cost) ? `· ${money(state.profile.budget - meal.cost)} below your cap` : "· No budget limit"}
         </p>
         <div className="card-actions">
           {selected ? (
@@ -1264,7 +1245,7 @@ function Assistant({ state, onAction, onClose, agent }) {
     [level, setLevel] = useState(0),
     [voiceOut, setVoiceOut] = useState(() => {
       try {
-        return localStorage.getItem("daywell-voice-replies") !== "off";
+        return readStored(localStorage, storageKeys.voice) !== "off";
       } catch {
         return true;
       }
@@ -1286,7 +1267,7 @@ function Assistant({ state, onAction, onClose, agent }) {
     setVoiceOut(next);
     if (!next) stopSpeaking();
     try {
-      localStorage.setItem("daywell-voice-replies", next ? "on" : "off");
+      localStorage.setItem(storageKeys.voice, next ? "on" : "off");
     } catch {
       /* the choice just isn't remembered */
     }

@@ -92,7 +92,8 @@ test('priority and mood use the same engine for generated recipes, with unknown 
   assert.equal(discoverCookMeals([a,b],s,{sort:'cost'}).cards[0].meal.id,a.id);
   assert.equal(discoverCookMeals([a,b],s,{sort:'time'}).cards[0].meal.id,b.id);
   assert.equal(discoverCookMeals([b,a],s,{sort:'protein'}).cards[0].meal.id,a.id);
-  assert.equal(discoverCookMeals([a,b],s,{mood:'hungry'}).cards.length,0);
+  assert.equal(discoverCookMeals([a,b],s,{mood:'hungry'}).cards.length,2);
+  assert.equal(discoverCookMeals([a,b],s,{mood:'hungry'}).softened,true);
 });
 test('request cooking time excludes all overhead and unknown or invalid backend records fail closed',async()=>{
   const s=createDemoState();assert.equal(cookingMinutes(s),25);

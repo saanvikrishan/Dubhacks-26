@@ -1,4 +1,4 @@
-# Substitution skill (WhatsCooking cook agent)
+# Substitution skill (whatscooking.ai cook agent)
 
 Use this skill when annotating recipes with ingredient alternatives.
 

@@ -50,7 +50,7 @@ export interface Profile {
   diet: "anything" | "vegetarian" | "vegan";
   exclusions: string[];
   preferred: string;
-  budget: number;
+  budget: number | null;
   cooking: boolean;
   equipment: string[];
   goals: Goal[];
@@ -112,7 +112,7 @@ export interface CalendarActivity {
   start: string; // ISO instant; rendered in America/Los_Angeles
   end: string; // exclusive, including all-day events
   kind: "event" | "class" | "meal" | "workout" | "task";
-  source: "apple" | "ics" | "manual" | "daywell";
+  source: "apple" | "ics" | "manual" | "whatscooking.ai";
   allDay?: boolean;
   busy: boolean;
   readOnly: boolean;

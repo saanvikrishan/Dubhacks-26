@@ -1,4 +1,4 @@
-"""Daywell assistant agent: Gemini function calling over the app's own actions.
+"""WhatsCooking.ai assistant agent: Gemini function calling over the app's own actions.
 
 The model never changes data. It proposes tool calls; each is checked against a strict schema here,
 then returned to the browser, which applies them through the app's validated state machine
@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 import food_memory
+from allergy_rules import normalize_exclusions
 
 MODEL = os.getenv("GEMINI_AGENT_MODEL", "gemini-3.1-flash-lite")
 MAX_ROUNDS = 4
@@ -90,8 +91,9 @@ class UpdatePreferences(Args):
     """Change food preferences and constraints. Only include fields the user asked to change. goal is the
     user's main aim: muscle (build muscle), lean (lose weight), healthy, energy (fuel workouts), budget, easy."""
     diet: Literal["anything", "vegetarian", "vegan"] | None = None
-    allergies_add: list[ALLERGENS] = Field(default_factory=list)
-    allergies_remove: list[ALLERGENS] = Field(default_factory=list)
+    allergies_add: list[str] = Field(default_factory=list, max_length=30)
+    allergies_remove: list[str] = Field(default_factory=list, max_length=30)
+    allergies_valid = field_validator("allergies_add", "allergies_remove")(normalize_exclusions)
     cuisines_add: list[CUISINES] = Field(default_factory=list)
     cuisines_remove: list[CUISINES] = Field(default_factory=list)
     avoid_cuisines_add: list[CUISINES] = Field(default_factory=list)
@@ -102,7 +104,7 @@ class UpdatePreferences(Args):
     favorite_food: str | None = Field(None, max_length=160)
     dislikes_add: list[str] = Field(default_factory=list, max_length=10)
     dislikes_remove: list[str] = Field(default_factory=list, max_length=10)
-    budget: float | None = Field(None, ge=0, le=1000)
+    budget: float | None = Field(None, ge=0, le=1000, description="Explicit null clears the spending limit; omit to keep it unchanged")
     cooking: bool | None = Field(None, description="Whether the user can cook")
     equipment_add: list[EQUIPMENT] = Field(default_factory=list)
     equipment_remove: list[EQUIPMENT] = Field(default_factory=list)
@@ -229,10 +231,10 @@ def _schema(model):
     schema = model.model_json_schema()
     schema.pop("title", None)
     schema.pop("description", None)   # already the tool's description
-    for prop in schema.get("properties", {}).values():
+    for key, prop in schema.get("properties", {}).items():
         prop.pop("title", None)
         prop.pop("default", None)
-        if "anyOf" in prop:   # Optional[x] -> x (null is expressed by leaving the field out)
+        if "anyOf" in prop and not (model is UpdatePreferences and key == "budget"):   # Optional[x] -> x (null is expressed by leaving the field out)
             options = [o for o in prop.pop("anyOf") if o.get("type") != "null"]
             prop.update(options[0] if options else {})
         if prop.get("items", {}).get("$ref"):
@@ -256,7 +258,10 @@ def validate_call(name, args):
     if model is None:
         return None, f"Unknown tool {name}."
     try:
-        clean = model.model_validate(args or {}).model_dump(exclude_none=True)
+        validated = model.model_validate(args or {})
+        clean = validated.model_dump(exclude_none=True)
+        if model is UpdatePreferences and "budget" in validated.model_fields_set:
+            clean["budget"] = validated.budget
     except ValidationError as error:
         first = error.errors()[0]
         return None, f"{'.'.join(str(p) for p in first.get('loc', [])) or 'arguments'}: {first.get('msg', 'invalid')}"
@@ -282,7 +287,7 @@ class AgentRequest(BaseModel):
     now: str = Field(default="", max_length=40, description="Local date/time, e.g. 2026-10-18T12:05 Sunday")
 
 
-INSTRUCTIONS = """You are the WhatsCooking assistant inside a student meal-planning app. You act for the user by
+INSTRUCTIONS = """You are the WhatsCooking.ai assistant inside a student meal-planning app. You act for the user by
 calling tools; you may call several tools for one request. Act directly on clear requests; ask one short
 question only when something essential is missing or ambiguous (which event, which day). Use ids exactly as
 they appear in the snapshot; never invent ids. Dates are in the user's local time (see "now"). Explicit

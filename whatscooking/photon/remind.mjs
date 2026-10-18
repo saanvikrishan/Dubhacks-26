@@ -315,7 +315,7 @@ async function tick() {
     } else {
       // Open slot — nudge the user to pick something
       message =
-        `⏰ 5 minutes till your next meal! Check out your options in WhatsCooking.ai` +
+        `⏰ 5 minutes till your next meal! Check out your options in whatscooking.ai` +
         ` and pick something that fits your day. 🥗`;
     }
 

@@ -85,7 +85,7 @@ def run(offline=False, ocr=False):
             sources.append(pdfsource)
             ocr_file = DATA / (pdfsource["file"] + ".ocr.json")
             if ocr:
-                subprocess.run(["swift", "-module-cache-path", "/private/tmp/daywell-swift-modules", str(ROOT / "server/uw_ocr.swift"), str(DATA / pdfsource["file"]), str(ocr_file)], check=True)
+                subprocess.run(["swift", "-module-cache-path", "/private/tmp/whatscooking.ai-swift-modules", str(ROOT / "server/uw_ocr.swift"), str(DATA / pdfsource["file"]), str(ocr_file)], check=True)
             with pdfplumber.open(DATA / pdfsource["file"]) as pdf:
                 texts = [p.extract_text(layout=True) or "" for p in pdf.pages]
                 words = [p.extract_words() for p in pdf.pages]

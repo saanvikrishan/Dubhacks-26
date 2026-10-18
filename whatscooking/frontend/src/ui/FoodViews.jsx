@@ -1,6 +1,6 @@
 import { buildUwDiningCatalog, prepareUwDiningMeal, currentWalking } from "../domain/uwDining.js";
 import { sourcedCookCandidate, enrichCookFacts, recipeFingerprint } from "../domain/foodFacts.js";
-import { TASTES, preferenceFit } from "../domain/preferences.js";
+import { TASTES } from "../domain/preferences.js";
 import { useFoodReference, refreshFoodReference } from "../adapters/foodReference.js";
 import { useUwWalking } from "../adapters/uwWalking.js";
 import { UwDiningCatalog, UwMenuPreview, UwWalkingSummary } from "./UwDining.jsx";
@@ -248,7 +248,7 @@ export function CookStart({ state, onSuggested, onEatOut, onBrowseLocal, onUnava
       controller.current=new AbortController();
       const pantry=Object.fromEntries(ingredients.filter(name=>quantities[name]!==undefined && quantities[name]!=='' && Number(quantities[name])>=0).map(name=>[name,Number(quantities[name])]));
       const meals=await requestRecipeDrafts({state,ingredients,pantry,signal:AbortSignal.any([controller.current.signal,AbortSignal.timeout(60000)])});
-      if(!meals.length) throw new Error('No recipes came back for those groceries. Try again, add more, or browse local recipes.');
+      if(!meals.length) throw new Error('No generated recipes fit. Showing local recipes for review; try different groceries or a longer meal window.');
       await onSuggested(meals,ingredients,pantry);
     } catch (err) {
       if (err.name === "AbortError") return;
@@ -294,7 +294,7 @@ export function CookStart({ state, onSuggested, onEatOut, onBrowseLocal, onUnava
             Type what you have, or upload a fridge photo—we’ll spot ingredients,
             then suggest meals you can swipe through.
           </p>
-          <p className="fine-print">{openEnded(state.context) ? "Nothing on your calendar after this meal, so no time limit" : `${cookingMinutes(state)} min to cook before ${state.context.commitment || "your next event"} at ${state.context.commitmentTime}`} · ${state.profile.budget.toFixed(2)} portion budget.</p>
+          <p className="fine-print">{openEnded(state.context) ? "Nothing on your calendar after this meal, so no time limit" : `${cookingMinutes(state)} min to cook before ${state.context.commitment || "your next event"} at ${state.context.commitmentTime}`} · {state.profile.budget === null ? "No budget limit" : `${money(state.profile.budget)} portion budget`}.</p>
           <div className="dialog-actions"><button className="text-button" onClick={onWindow}>Adjust meal window</button><button className="text-button" onClick={onPreferences}>Diet, budget & equipment</button></div>
           <div className="cook-start-photo">
             <label className="cook-start-photo-button">
@@ -620,11 +620,7 @@ export function FoodDiscovery({
     const candidate=base.suggestion&&!base.review?.confirmed?enrichCookFacts(base,food.reference):sourcedCookCandidate(base,food.reference);
     unique.set(recipeFingerprint(candidate),candidate);
   }
-  const allRaw=discoverCookMeals([...unique.values()],state,{sort,mood,passed,preferences:food.preferences});
-  const all = flavorFilter === "any" ? allRaw : (() => {
-    const keep = r => preferenceFit(r.meal, {tastes:[flavorFilter]}).taste;
-    return {...allRaw, display: allRaw.display.filter(keep), cards: allRaw.cards.filter(keep)};
-  })();
+  const all=discoverCookMeals([...unique.values()],state,{sort,mood,flavor:flavorFilter,passed,preferences:food.preferences});
   const cookGate=usePhotoGate(mode==='cook'?all.display:[], mode==='cook'?[...unique.values()]:[]);
   const meals=cookGate.ordered;
   const uwMenu=buildUwDiningCatalog().filter(m=>m.dining.recordType==='menu').map(m=>prepareUwDiningMeal(m,state,walking.routes).meal);
@@ -749,6 +745,7 @@ export function FoodDiscovery({
             <button className="filter-link" onClick={onPreferences}>
               Diet, budget & goals
             </button>
+            {mode === "cook" && all.softened && <p role="status" className="fine-print">No exact mood or flavor matches. Showing other options with your dietary restrictions unchanged.</p>}
           </div>
         ) : (
           <div className="venue-filterbar">
@@ -1076,7 +1073,7 @@ export function FoodDiscovery({
           <dl>
             <div>
               <dt>Budget</dt>
-              <dd>{money(state.profile.budget)} per meal</dd>
+              <dd>{state.profile.budget === null ? "No budget limit" : `${money(state.profile.budget)} per meal`}</dd>
             </div>
             <div>
               <dt>Diet</dt>
@@ -1102,7 +1099,7 @@ export function FoodDiscovery({
           </button>
         </section>
         <details className="small-panel how-decisions">
-          <summary>How WhatsCooking chooses</summary>
+          <summary>How WhatsCooking.ai chooses</summary>
           <p>
             Cook cards use {catalog.filter((m) => m.mode === "cook").length} curated recipes
             and reviewed Gemini drafts made from your groceries.

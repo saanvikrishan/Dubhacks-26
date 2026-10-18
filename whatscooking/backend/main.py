@@ -27,18 +27,19 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 load_dotenv(ROOT.parent / ".env")
 
-import agent as daywell_agent
-import voice as daywell_voice
+import agent as whatscooking_agent
+import voice as whatscooking_voice
 import db as store
 import substitutions as swaps
 import usda
 from food_reference import food_reference
 from food_memory import MealFeedback, record_feedback, learned_preferences
+from branding import BRAND, LEGACY_DEMO_NAMES, configured_user_id, find_assistant
 
 
-app = FastAPI(title="WhatsCooking API")
+app = FastAPI(title="WhatsCooking.ai API")
 
-DEMO_USER_ID = os.getenv("DAYWELL_USER_ID", "demo").strip() or "demo"
+DEMO_USER_ID = configured_user_id()
 
 
 @app.on_event("startup")
@@ -89,7 +90,7 @@ client = genai.Client(api_key=api_key) if api_key else None
 backboard_key = (os.getenv("BACKBOARD_API_KEY") or "").strip()
 backboard_client = BackboardClient(api_key=backboard_key) if backboard_key else None
 _assistant_id = None
-DEMO_ASSISTANT_NAME = "WhatsCooking demo"
+DEMO_ASSISTANT_NAME = f"{BRAND} demo"
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg",
     "image/jpg",
@@ -262,7 +263,7 @@ class SavedMealRequest(BaseModel):
 @app.get("/")
 def home():
     return {
-        "message": "WhatsCooking API is running!",
+        "message": "WhatsCooking.ai API is running!",
         "gemini": bool(client),
         "backboard": bool(backboard_client),
         "database": store.SessionLocal is not None,
@@ -472,9 +473,9 @@ async def get_assistant_id():
         return _assistant_id
 
     try:
-        matches = await backboard_client.list_assistants(name=DEMO_ASSISTANT_NAME)
-        if matches:
-            _assistant_id = str(matches[0].assistant_id)
+        existing = await find_assistant(backboard_client, DEMO_ASSISTANT_NAME, LEGACY_DEMO_NAMES)
+        if existing:
+            _assistant_id = existing
             return _assistant_id
         created = await backboard_client.create_assistant(name=DEMO_ASSISTANT_NAME)
         _assistant_id = str(created.assistant_id)
@@ -977,7 +978,7 @@ def normalize_meal(raw: dict, index: int, fallback_ingredients: list[str]) -> di
             "basis": "per_serving",
             "yieldServings": 1,
             "kind": "gemini_suggestion",
-            "source": "Gemini via WhatsCooking API · estimates only.",
+            "source": "Gemini via WhatsCooking.ai API · estimates only.",
             "checkedAt": date.today().isoformat(),
             "preparation": note
             or "AI-estimated; confirm ingredients and allergens yourself.",
@@ -1209,7 +1210,7 @@ async def conversational_reply(user_text: str, history) -> str:
     if not client:
         return CONVO_FALLBACK
     skill = load_skill("conversation_skill")
-    prompt = f"""You are the food assistant for Daywell.
+    prompt = f"""You are the food assistant for WhatsCooking.ai.
 {skill}
 
 Recent conversation:
@@ -1247,7 +1248,7 @@ def interpreter_prompt(text: str, memories: list[str], names: set[str], history=
     memory_block = "\n".join(f"- {item}" for item in memories) or "None."
     ingredients = ", ".join(sorted(names))
     skill = load_skill("interpreter_skill")
-    return f"""You are Daywell's meal-request interpreter.
+    return f"""You are WhatsCooking.ai's meal-request interpreter.
 {skill}
 
 Catalog ingredient names, exact spelling: {ingredients}
@@ -1354,7 +1355,7 @@ async def phrase_reply(request: PhraseRequest):
             detail="GEMINI_API_KEY is missing from backend/.env or whatscooking/.env",
         )
     skill = load_skill("phrase_skill")
-    prompt = f"""You are Daywell's reply phrasing skill.
+    prompt = f"""You are WhatsCooking.ai's reply phrasing skill.
 {skill}
 
 Summary:
@@ -1463,7 +1464,7 @@ async def vision_ingredients(photo: UploadFile = File(...)):
         )
 
     skill = load_skill("vision_skill")
-    prompt = f"""You are WhatsCooking's fridge / pantry vision skill.
+    prompt = f"""You are WhatsCooking.ai's fridge / pantry vision skill.
 {skill}
 """
     image_part = types.Part.from_bytes(data=data, mime_type=content_type)
@@ -1693,7 +1694,7 @@ async def meal_reminder_message(request: MealReminderRequest):
             else "No specific preferences on file."
         )
         slot_hint = f" ({request.slot_label})" if request.slot_label else ""
-        prompt = f"""You are WhatsCooking, a supportive meal-planning assistant for college students.
+        prompt = f"""You are WhatsCooking.ai, a supportive meal-planning assistant for college students.
 The user is about to cook: {meal_name}{slot_hint}.
 Known preferences / goals:
 {pref_block}
@@ -1844,27 +1845,27 @@ async def warm_common_dishes():
 
 
 @app.post("/assistant/transcribe")
-async def assistant_transcribe(request: daywell_voice.TranscribeRequest):
+async def assistant_transcribe(request: whatscooking_voice.TranscribeRequest):
     """Speech to text for the assistant; the words then go to /assistant/agent like typed text."""
     enforce_rate_limit()
-    return await daywell_voice.transcribe(client, types, request)
+    return await whatscooking_voice.transcribe(client, types, request)
 
 
 @app.post("/assistant/speak")
-async def assistant_speak(request: daywell_voice.SpeakRequest):
+async def assistant_speak(request: whatscooking_voice.SpeakRequest):
     """Reads an assistant reply aloud in a natural Gemini voice (WAV)."""
     enforce_rate_limit()
-    audio = await daywell_voice.speak(client, types, request.text)
+    audio = await whatscooking_voice.speak(client, types, request.text)
     return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
 
 @app.post("/assistant/agent")
-async def assistant_agent(request: daywell_agent.AgentRequest):
+async def assistant_agent(request: whatscooking_agent.AgentRequest):
     """Chat that can change the app: returns validated tool calls; the browser applies them with Undo."""
     enforce_rate_limit()
     if blocked_user_text(request.message):
         reject_blocked_text()
-    return await daywell_agent.run(client, backboard_client, request, types)
+    return await whatscooking_agent.run(client, backboard_client, request, types)
 
 
 @app.post("/food/image/predraw")

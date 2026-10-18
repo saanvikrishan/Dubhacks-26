@@ -1,4 +1,4 @@
-# Recipe skill (WhatsCooking cook agent)
+# Recipe skill (whatscooking.ai cook agent)
 
 Use this skill when suggesting recipes from the user's grocery list.
 

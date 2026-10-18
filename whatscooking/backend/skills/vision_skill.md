@@ -1,4 +1,4 @@
-# Vision skill (WhatsCooking fridge / pantry scan)
+# Vision skill (whatscooking.ai fridge / pantry scan)
 
 Use this skill when reading a fridge or pantry photo for edible ingredients.
 

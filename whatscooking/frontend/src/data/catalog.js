@@ -15,7 +15,7 @@ const nutrition = (values, basis = "per_serving", yieldServings = 1) => ({
   yieldServings,
   kind: "illustrative_demo",
   source:
-    "Daywell self-authored demo fixture v1; not a nutrition database or verified menu.",
+    "WhatsCooking.ai self-authored demo fixture v1; not a nutrition database or verified menu.",
   checkedAt: "2026-10-17",
   preparation: "Cooked, edible weight; no unlisted toppings.",
 });

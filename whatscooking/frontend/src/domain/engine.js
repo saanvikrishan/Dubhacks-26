@@ -1,5 +1,5 @@
 import {comparePreferences,memoryProfile,preferenceFit,varied} from "./preferences.js";
-import { knownPresentAllergens, hasAllergenAbsenceCoverage } from "./allergens.js";
+import { knownPresentAllergens, hasAllergenAbsenceCoverage, excludedInIngredients, normalizeAllergies, validAllergies } from "./allergens.js";
 import { prepareUwDiningMeal } from "./uwDining.js";
 import { isGeneratedMeal, validateGeneratedMeal } from "./generatedMeals.js";
 import { byId as catalogById } from "../data/catalog.js";
@@ -77,20 +77,20 @@ export function evaluate(meal, state, c = config) {
     reasons.push("Dietary suitability is unknown for your restriction.");
   else if (p.diet !== "anything" && !meal.diets?.includes(p.diet))
     reasons.push(`Does not meet your ${p.diet} restriction.`);
-  const presentAllergens = knownPresentAllergens(meal);
-  const absenceKnown = hasAllergenAbsenceCoverage(meal);
+  const presentAllergens = normalizeAllergies([...knownPresentAllergens(meal), ...excludedInIngredients(meal.ingredients, p.exclusions)]);
+  const absenceKnown = hasAllergenAbsenceCoverage(meal, p.exclusions);
   if (!absenceKnown && p.exclusions.some(allergen => !presentAllergens.includes(allergen)))
     reasons.push("Allergen information is unknown for your exclusions.");
-  for (const allergen of p.exclusions)
+  for (const allergen of normalizeAllergies(p.exclusions))
     if (presentAllergens.includes(allergen))
       reasons.push(`Contains excluded ${allergen}.`);
   if (!absenceKnown)
     gaps.push("Allergen information is incomplete; suitability cannot be guaranteed.");
-  if (!Number.isFinite(meal.cost) || meal.cost < 0)
+  if (p.budget !== null && (!Number.isFinite(meal.cost) || meal.cost < 0))
     reasons.push(
       meal.pricing?.rows?.some(r=>r.status!=="priced") ? `Price unavailable for ${meal.pricing.rows.filter(r=>r.status!=="priced").map(r=>r.name).join(", ")}; the strict budget cannot be verified.` : "Cost is unknown or invalid, so the strict budget cannot be verified.",
     );
-  else if (meal.cost > p.budget)
+  else if (p.budget !== null && meal.cost > p.budget)
     reasons.push(
       `Costs $${meal.cost.toFixed(2)}, above your $${p.budget.toFixed(2)} cap.`,
     );
@@ -267,7 +267,7 @@ export function validateInputs(profile, context, pantry) {
     if (!Number.isFinite(value) || value < min || value > max)
       throw new Error(`${label} must be between ${min} and ${max}.`);
   };
-  numeric(profile.budget, "Budget", 0, 1000);
+  if (profile.budget !== null) numeric(profile.budget, "Budget", 0, 1000);
   for(const key of ["cuisines","tastes","avoidCuisines"]) if(profile[key]!==undefined && (!Array.isArray(profile[key])||profile[key].length>20||profile[key].some(v=>typeof v!=="string"||v.length>60))) throw new Error("Invalid food preferences.");
   if(profile.dislikes!==undefined&&(typeof profile.dislikes!=="string"||profile.dislikes.length>160)) throw new Error("Keep disliked foods under 160 characters.");
   if (!["anything", "vegetarian", "vegan"].includes(profile.diet))
@@ -286,25 +286,7 @@ export function validateInputs(profile, context, pantry) {
     throw new Error(
       "Use international format, starting with + and the country code.",
     );
-  if (
-    profile.exclusions.some(
-      (v) =>
-        ![
-          "soy",
-          "egg",
-          "milk",
-          "wheat",
-          "peanut",
-          "tree nut",
-          "sesame",
-          "fish",
-          "shellfish",
-        ].includes(v),
-    )
-  )
-    throw new Error(
-      "Unsupported exclusion. Add verified catalog coverage before extending exclusions.",
-    );
+  if (!validAllergies(profile.exclusions)) throw new Error("Use up to 30 allergy names, each at most 60 characters.");
   numeric(context.available, "Available time", 1, 1440);
   for (const key of [
     "available",

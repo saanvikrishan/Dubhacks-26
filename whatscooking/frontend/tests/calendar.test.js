@@ -279,7 +279,7 @@ test("overlap layout uses separate columns and resets after each cluster", () =>
 });
 
 const calendar = (body) =>
-  `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Daywell Tests//EN\r\n${body}\r\nEND:VCALENDAR`;
+  `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//whatscooking.ai Tests//EN\r\n${body}\r\nEND:VCALENDAR`;
 const range = { from: "2026-10-12T00:00:00Z", to: "2026-10-25T00:00:00Z" };
 test("iCalendar recurrence, EXDATE, moved exception and IANA time zone import correctly", () => {
   const text = calendar(

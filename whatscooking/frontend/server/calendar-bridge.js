@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
-const bundle = path.join(root, ".calendar-bridge/DaywellCalendar.app");
-const binary = path.join(bundle, "Contents/MacOS/DaywellCalendar");
+const bundle = path.join(root, ".calendar-bridge/whatscooking-ai-calendar.app");
+const binary = path.join(bundle, "Contents/MacOS/whatscooking-ai-calendar");
 let compiling;
 export async function ensureCalendarBridge() {
   if (process.platform !== "darwin")
     throw new Error(
-      "Apple Calendar connection is available on a Mac running the local WhatsCooking server. Import .ics on other systems.",
+      "Apple Calendar connection is available on a Mac running the local whatscooking.ai server. Import .ics on other systems.",
     );
   if (!compiling)
     compiling = (async () => {
@@ -62,7 +62,7 @@ export async function ensureCalendarBridge() {
           "--sign",
           "-",
           "--identifier",
-          "local.daywell.calendar-reader",
+          "ai.whatscooking.calendar-reader",
           bundle,
         ],
         { timeout: 10000 },
@@ -79,7 +79,7 @@ export async function readAppleCalendar(command, from, to) {
     command === "events"
       ? ["--events", from, to]
       : [command === "connect" ? "--connect" : "--status"];
-  const temporary=await mkdtemp(path.join(tmpdir(),"daywell-calendar-"));
+  const temporary=await mkdtemp(path.join(tmpdir(),"whatscooking.ai-calendar-"));
   const output=path.join(temporary,"result.json");
   try {
     // Launch Services gives the permission prompt the native app's identity and run loop.
@@ -92,7 +92,7 @@ export async function readAppleCalendar(command, from, to) {
 }
 export function calendarApi() {
   return {
-    name: "daywell-local-calendar",
+    name: "whatscooking.ai-local-calendar",
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         if (!req.url?.startsWith("/api/calendar/")) return next();
@@ -115,7 +115,7 @@ export function calendarApi() {
           req.headers["sec-fetch-site"] === "cross-site"
         )
           return fail(
-            "Calendar access is limited to this local Daywell origin.",
+            "Calendar access is limited to this local whatscooking.ai origin.",
             403,
           );
         const command = url.pathname.split("/").pop();

@@ -2,7 +2,7 @@ import {useState} from 'react';
 import {Modal} from './Core';
 import {ALLERGENS,EQUIPMENT} from '../domain/generatedMeals';
 import {enrichCookFacts} from '../domain/foodFacts';
-import {allergensInIngredients,dietConflict} from '../domain/allergens';
+import {allergensInIngredients,excludedInIngredients,dietConflict} from '../domain/allergens';
 import {transition} from '../domain/state';
 import {assertMealAction} from '../domain/engine';
 import {money} from './format';
@@ -20,7 +20,7 @@ export function RecipeReview({meal,state,onSave,onChoose,onClose}) {
   const facts=enrichCookFacts(meal);
   const estimate=Number.isFinite(facts.cost)?Math.round(facts.cost*100)/100:null;
   const found=allergensInIngredients(meal.ingredients);
-  const avoided=found.filter(a=>p.exclusions.includes(a));
+  const avoided=excludedInIngredients(meal.ingredients,p.exclusions);
   const clash=p.diet!=='anything'?dietConflict(meal.ingredients,p.diet):null;
   const newTools=meal.equipment.filter(e=>!p.equipment.includes(e));
   const listed=new Set([...(state.groceryList??[]),...Object.keys(state.pantry).filter(k=>state.pantry[k]>0)].map(n=>String(n).toLowerCase()));
@@ -51,7 +51,7 @@ export function RecipeReview({meal,state,onSave,onChoose,onClose}) {
   }
   const quick={cost:estimate??p.budget,prep:meal.timing.prep,cook:meal.timing.cook,equipment:meal.equipment,allergens:found};
 
-  return <Modal title={meal.name} subtitle={`${meal.timing.prep+meal.timing.cook} min · ${estimate!=null?`about ${money(estimate)} a portion`:`within your ${money(p.budget)} budget`}`} onClose={onClose} wide>
+  return <Modal title={meal.name} subtitle={`${meal.timing.prep+meal.timing.cook} min · ${estimate!=null?`about ${money(estimate)} a portion`:p.budget === null ? "Price unknown" : `within your ${money(p.budget)} budget`}`} onClose={onClose} wide>
     {!editing ? <>
       <p className="muted">{meal.ingredients.map(i=>`${i.name} ${i.grams} g`).join(' · ')}</p>
       <details><summary>Steps</summary><ol className="recipe">{meal.steps.map((s,i)=><li key={i}>{s}</li>)}</ol></details>
@@ -63,9 +63,9 @@ export function RecipeReview({meal,state,onSave,onChoose,onClose}) {
         <button className="text-button" onClick={()=>setEditing(true)}>Edit details</button>
         <button className="primary" disabled={saving||Boolean(blocked)} onClick={()=>addToPlan(quick)}>{saving?'Adding…':'Looks good — add to my plan'}</button>
       </div>
-    </> : <form className="recipe-review" onSubmit={e=>{e.preventDefault();addToPlan({cost:Number(cost),prep:Number(prep),cook:Number(cook),equipment,allergens});}}>
+    </> : <form className="recipe-review" onSubmit={e=>{e.preventDefault();addToPlan({cost:cost === null || cost === '' ? null : Number(cost),prep:Number(prep),cook:Number(cook),equipment,allergens});}}>
       <div className="pantry-grid">
-        <label>Cost of this portion ($)<input type="number" min="0" max="1000" step="0.01" required value={cost} onChange={e=>setCost(e.target.value)}/></label>
+        <label>Cost of this portion ($)<input type="number" min="0" max="1000" step="0.01" required={p.budget !== null} value={cost ?? ""} onChange={e=>setCost(e.target.value)}/></label>
         <label>Preparation (min)<input type="number" min="0" max="240" step="1" required value={prep} onChange={e=>setPrep(e.target.value)}/></label>
         <label>Cooking (min)<input type="number" min="0" max="240" step="1" required value={cook} onChange={e=>setCook(e.target.value)}/></label>
       </div>

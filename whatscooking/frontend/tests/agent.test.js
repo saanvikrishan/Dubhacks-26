@@ -131,11 +131,11 @@ test('notes are added to the existing per-day notes and can be put back', () => 
   assert.equal(writeNote(DAY, 'Buy rice', storage), '');
   const previous = writeNote(DAY, 'Call mom', storage);
   assert.equal(previous, 'Buy rice');
-  assert.equal(JSON.parse(storage.getItem('whatscooking.sidebar-notes.v1'))[DAY], 'Buy rice\nCall mom');
+  assert.equal(JSON.parse(storage.getItem('whatscooking.ai.sidebar-notes.v1'))[DAY], 'Buy rice\nCall mom');
   restoreNote(DAY, previous, storage);
-  assert.equal(JSON.parse(storage.getItem('whatscooking.sidebar-notes.v1'))[DAY], 'Buy rice');
+  assert.equal(JSON.parse(storage.getItem('whatscooking.ai.sidebar-notes.v1'))[DAY], 'Buy rice');
   restoreNote(DAY, '', storage);
-  assert.deepEqual(JSON.parse(storage.getItem('whatscooking.sidebar-notes.v1')), {});
+  assert.deepEqual(JSON.parse(storage.getItem('whatscooking.ai.sidebar-notes.v1')), {});
 });
 
 test('the snapshot is compact and gives the model the ids it may use', () => {
