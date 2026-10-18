@@ -925,6 +925,44 @@
   margin: 0 0 22px;
   max-width: 36em;
 }
+.cook-start-photo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 18px;
+}
+.cook-start-photo-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 16px;
+  border: 1px dashed #b7c9a8;
+  border-radius: 12px;
+  background: #f7faf1;
+  color: #3e6647;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cook-start-photo-button:hover {
+  background: #eef4e4;
+  border-style: solid;
+}
+.cook-start-photo-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.cook-start-photo-button:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.cook-start-photo-hint {
+  font-size: 11px;
+  color: #8a967c;
+}
 .cook-start-entry {
   display: flex;
   flex-direction: column;
