@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { catalog, byId, pantryItems } from "../data/catalog";
+import { catalog, pantryItems } from "../data/catalog";
+import { byId } from "../data/suggestions";
 import { capabilities, config } from "../domain/config";
 import { clockTime, evaluate, minutes, timeParts } from "../domain/engine";
 import {

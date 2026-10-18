@@ -17,9 +17,10 @@ import {
   EventDialog,
   PlanCalendar,
 } from "./ui/CalendarViews";
-import { FoodDiscovery, VenueDetails } from "./ui/FoodViews";
+import { CookStart, FoodDiscovery, VenueDetails } from "./ui/FoodViews";
 import { money, num, photoFor } from "./ui/format";
-import { byId } from "./data/catalog";
+import { pantryItems } from "./data/catalog";
+import { byId, rememberSuggestions } from "./data/suggestions";
 import { capabilities } from "./domain/config";
 import { clockTime, minutes } from "./domain/engine";
 import { dailyNutrition } from "./domain/nutrition";
@@ -43,6 +44,9 @@ export default function App() {
     [storageError, setStorageError] = useState(loaded.error);
   const [tab, setTab] = useState("Today"),
     [mode, setMode] = useState("cook"),
+    [cookPhase, setCookPhase] = useState("groceries"),
+    [geminiMeals, setGeminiMeals] = useState(null),
+    [groceryList, setGroceryList] = useState([]),
     [date, setDate] = useState(today());
   const [dialog, setDialog] = useState(null),
     [notice, setNotice] = useState(""),
@@ -110,7 +114,20 @@ export default function App() {
         "No free window of 35 minutes or more was found. Adjust the meal window in Food.",
       );
     setMode(nextMode);
+    if (nextMode === "cook") {
+      setGeminiMeals(null);
+      setGroceryList([]);
+      setCookPhase("groceries");
+    }
     setTab("Food");
+  }
+  function setFoodMode(nextMode) {
+    setMode(nextMode);
+    if (nextMode === "cook") {
+      setGeminiMeals(null);
+      setGroceryList([]);
+      setCookPhase("groceries");
+    }
   }
   function choose(meal) {
     const existing = state.mealPlans.find(
@@ -552,24 +569,59 @@ export default function App() {
             />
           </>
         )}
-        {tab === "Food" && (
-          <FoodDiscovery
-            key={`${mode}-${state.context.date}-${state.context.start}-${state.context.available}-${JSON.stringify(state.pantry)}-${state.events.length}`}
-            state={state}
-            mode={mode}
-            onMode={setMode}
-            onChoose={choose}
-            onVenue={(venue) => setDialog({ type: "venue", venue })}
-            onVenueDirections={(venue) => {
-              window.location.assign(directionsUrl(venue));
-            }}
-            onDetails={openDetails}
-            onKitchen={() => setDialog({ type: "kitchen" })}
-            onPreferences={() => setDialog({ type: "profile" })}
-            onWindow={() => setDialog({ type: "time" })}
-            onUndoPlan={() => safe({ type: "undo" })}
-          />
-        )}
+        {tab === "Food" &&
+          mode === "cook" &&
+          cookPhase === "groceries" && (
+            <CookStart
+              key={`cook-start-${JSON.stringify(state.pantry)}`}
+              state={state}
+              onSuggested={(meals, ingredients) => {
+                rememberSuggestions(meals);
+                setGeminiMeals(meals);
+                setGroceryList(ingredients || []);
+                if (ingredients?.length) {
+                  const pantry = { ...state.pantry };
+                  for (const item of pantryItems) {
+                    if (
+                      !ingredients.some(
+                        (g) => g.toLowerCase() === item.toLowerCase(),
+                      )
+                    )
+                      pantry[item] = pantry[item] ?? 0;
+                  }
+                  for (const name of ingredients)
+                    pantry[name] = Math.max(pantry[name] ?? 0, 500);
+                  safe({ type: "updatePantry", pantry });
+                }
+                setCookPhase("discover");
+              }}
+              onEatOut={() => setFoodMode("eatOut")}
+            />
+          )}
+        {tab === "Food" &&
+          !(mode === "cook" && cookPhase === "groceries") && (
+            <FoodDiscovery
+              key={`${mode}-${state.context.date}-${state.context.start}-${state.context.available}-${geminiMeals?.map((m) => m.id).join(",") || "catalog"}-${state.events.length}`}
+              state={state}
+              mode={mode}
+              onMode={setFoodMode}
+              onChoose={choose}
+              onVenue={(venue) => setDialog({ type: "venue", venue })}
+              onVenueDirections={(venue) => {
+                window.location.assign(directionsUrl(venue));
+              }}
+              onDetails={openDetails}
+              onKitchen={() => setDialog({ type: "kitchen" })}
+              onPreferences={() => setDialog({ type: "profile" })}
+              onWindow={() => setDialog({ type: "time" })}
+              onUndoPlan={() => safe({ type: "undo" })}
+              onChangeGroceries={() => {
+                setCookPhase("groceries");
+              }}
+              geminiMeals={mode === "cook" ? geminiMeals : null}
+              groceryList={groceryList}
+            />
+          )}
         <footer className="compact-footer">
           <span>Daywell · Your day, a little easier.</span>
           <button

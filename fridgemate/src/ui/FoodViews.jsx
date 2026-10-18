@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { Icon, Modal } from "./Core";
 import { money, num, photoFor } from "./format";
-import { catalog, byId } from "../data/catalog";
+import { catalog, pantryItems } from "../data/catalog";
+import { byId } from "../data/suggestions";
 import { config } from "../domain/config";
 import { recommend, clockTime, evaluate } from "../domain/engine";
 import { portionNutrition } from "../domain/nutrition";
@@ -15,6 +16,231 @@ import {
   uwDining,
   venueHours,
 } from "../data/uwDining";
+
+function matchPantryName(raw) {
+  const q = raw.trim().toLowerCase();
+  if (!q) return null;
+  return (
+    pantryItems.find((item) => item === q) ||
+    pantryItems.find((item) => item.includes(q) || q.includes(item)) ||
+    null
+  );
+}
+
+/** First step when Cook is chosen: free-form groceries → Gemini suggestions. */
+export function CookStart({ state, onSuggested, onEatOut }) {
+  const starter = Object.keys(state.pantry || {})
+    .filter((item) => (state.pantry[item] ?? 0) > 0)
+    .slice(0, 8);
+  const [items, setItems] = useState(starter),
+    [draft, setDraft] = useState(""),
+    [loading, setLoading] = useState(false),
+    [error, setError] = useState("");
+
+  function addParts(parts) {
+    const next = [...items];
+    for (const part of parts) {
+      const cleaned = part.trim().replace(/\s+/g, " ").slice(0, 60);
+      if (!cleaned) continue;
+      const catalogMatch = matchPantryName(cleaned);
+      const label = catalogMatch || cleaned;
+      if (
+        !next.some((item) => item.toLowerCase() === label.toLowerCase())
+      )
+        next.push(label);
+    }
+    setItems(next.slice(0, 30));
+  }
+
+  function addFromDraft() {
+    const parts = draft.split(/[,;\n]+/).filter((p) => p.trim());
+    if (!parts.length) return;
+    addParts(parts);
+    setDraft("");
+    setError("");
+  }
+
+  function removeItem(name) {
+    setItems((list) => list.filter((item) => item !== name));
+  }
+
+  async function requestSuggestions(ingredients) {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/recipes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ingredients,
+          diet: state.profile.diet || "anything",
+          time: state.context.available || 45,
+          exclusions: state.profile.exclusions || [],
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail =
+          typeof data.detail === "string"
+            ? data.detail
+            : Array.isArray(data.detail)
+              ? data.detail.map((d) => d.msg || d).join(" ")
+              : data.error || "Could not get meal suggestions.";
+        if (response.status === 429)
+          throw new Error(
+            detail ||
+              "Gemini quota exceeded. Try again later or use another API key.",
+          );
+        throw new Error(
+          detail.includes("ECONNREFUSED")
+            ? "Start the FastAPI backend on port 8000 (see fridgemate/backend)."
+            : detail,
+        );
+      }
+      const meals = data.meals || data.recipes || [];
+      if (!Array.isArray(meals) || !meals.length)
+        throw new Error("No meals came back. Try different ingredients.");
+      onSuggested(meals, ingredients);
+    } catch (err) {
+      const msg = err.message || "Could not get meal suggestions.";
+      setError(
+        /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+          ? "Start the FastAPI backend on port 8000 (cd fridgemate/backend && uvicorn main:app --reload --port 8000)."
+          : msg,
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="food-layout cook-start-layout">
+      <section className="cook-start" aria-label="Use your own groceries">
+        <div className="food-topbar">
+          <div className="food-mode">
+            <button aria-pressed={true} type="button">
+              <Icon name="leaf" size={18} />
+              Cook
+            </button>
+            <button
+              aria-pressed={false}
+              type="button"
+              onClick={onEatOut}
+              disabled={loading}
+            >
+              <Icon name="fork" size={18} />
+              Eat at school
+            </button>
+          </div>
+        </div>
+        <div className="cook-start-card">
+          <span className="cook-start-eyebrow">
+            <Icon name="kitchen" size={16} />
+            Your kitchen
+          </span>
+          <h2>Use your own groceries?</h2>
+          <p>
+            Add anything you have—Gemini will suggest meals you can swipe
+            through.
+          </p>
+          <label className="cook-start-entry">
+            <span>What do you have?</span>
+            <div className="cook-start-input-row">
+              <input
+                type="text"
+                value={draft}
+                placeholder="e.g. chicken, spinach, tortillas"
+                aria-label="Type groceries you have"
+                disabled={loading}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  setError("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addFromDraft();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="secondary"
+                onClick={addFromDraft}
+                disabled={loading || !draft.trim()}
+              >
+                Add
+              </button>
+            </div>
+          </label>
+          <div className="cook-start-chips" role="group" aria-label="Your groceries">
+            {items.map((item) => (
+              <button
+                key={item}
+                type="button"
+                className="cook-chip on"
+                onClick={() => removeItem(item)}
+                disabled={loading}
+                aria-label={`Remove ${item}`}
+                title="Tap to remove"
+              >
+                {item} ×
+              </button>
+            ))}
+            {!items.length && (
+              <span className="cook-start-empty">
+                No ingredients yet—type above or tap a quick add.
+              </span>
+            )}
+          </div>
+          <div className="cook-start-chips cook-start-suggestions" role="group" aria-label="Quick add">
+            {pantryItems.slice(0, 10).map((item) => (
+              <button
+                key={item}
+                type="button"
+                className="cook-chip"
+                disabled={
+                  loading ||
+                  items.some((x) => x.toLowerCase() === item.toLowerCase())
+                }
+                onClick={() => addParts([item])}
+              >
+                + {item}
+              </button>
+            ))}
+          </div>
+          {items.length > 0 && (
+            <p className="cook-start-count">
+              {items.length} ingredient{items.length === 1 ? "" : "s"}
+            </p>
+          )}
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+          <button
+            type="button"
+            className="primary cook-start-submit"
+            disabled={loading || !items.length}
+            onClick={() => requestSuggestions(items)}
+          >
+            {loading ? "Suggesting…" : "Suggest meals"}
+            {!loading && <Icon name="arrow" size={16} />}
+          </button>
+        </div>
+        <button
+          type="button"
+          className="cook-start-skip"
+          disabled={loading}
+          onClick={() => requestSuggestions([])}
+        >
+          {loading ? "Working…" : "Just suggest meals"}
+        </button>
+      </section>
+    </div>
+  );
+}
 
 export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
   const point = useRef(null),
@@ -135,30 +361,67 @@ export function FoodDiscovery({
   onPreferences,
   onWindow,
   onUndoPlan,
+  onChangeGroceries,
+  geminiMeals = null,
+  groceryList = [],
 }) {
   const [passed, setPassed] = useState([]),
     [mood, setMood] = useState("any"),
     [sort, setSort] = useState("catalog"),
     [openOnly, setOpenOnly] = useState(true);
+  const usingGemini = mode === "cook" && Array.isArray(geminiMeals);
   const all = recommend(
     catalog,
     state,
     { mode: "cook", sort, passed },
     { ...config, recommendation: { ...config.recommendation, maxCards: 100 } },
   );
-  const meals = all.cards.filter(
-    (r) =>
-      mood === "any" ||
-      (mood === "comfort"
-        ? !fresh.has(r.meal.id)
-        : mood === "quick"
-          ? r.meal.timing.prep + r.meal.timing.cook <= 10
-          : mood === "hungry"
-            ? r.meal.nutrition.values.energy_kcal >= 550
-            : mood === "fancy"
-              ? r.meal.timing.prep + r.meal.timing.cook >= 15
-              : false),
-  );
+  const geminiCards = usingGemini
+    ? geminiMeals
+        .filter((meal) => !passed.includes(meal.id))
+        .filter((meal) => {
+          if (mood === "any") return true;
+          if (mood === "comfort") return !fresh.has(meal.id);
+          if (mood === "quick")
+            return meal.timing.prep + meal.timing.cook <= 10;
+          if (mood === "hungry")
+            return (meal.nutrition.values.energy_kcal ?? 0) >= 550;
+          if (mood === "fancy")
+            return meal.timing.prep + meal.timing.cook >= 15;
+          return true;
+        })
+        .map((meal) => {
+          const result = evaluate(meal, state);
+          return {
+            ...result,
+            meal,
+            feasible: true,
+            duration:
+              result.duration ??
+              meal.timing.prep +
+                meal.timing.cook +
+                state.context.eating +
+                state.context.cleanup +
+                state.context.onward +
+                state.context.buffer,
+          };
+        })
+    : null;
+  const meals = usingGemini
+    ? geminiCards
+    : all.cards.filter(
+        (r) =>
+          mood === "any" ||
+          (mood === "comfort"
+            ? !fresh.has(r.meal.id)
+            : mood === "quick"
+              ? r.meal.timing.prep + r.meal.timing.cook <= 10
+              : mood === "hungry"
+                ? r.meal.nutrition.values.energy_kcal >= 550
+                : mood === "fancy"
+                  ? r.meal.timing.prep + r.meal.timing.cook >= 15
+                  : false),
+      );
   const venues = uwDining
     .filter(
       (v) =>
@@ -289,7 +552,9 @@ export function FoodDiscovery({
         <div className="deck-heading">
           <span>
             {mode === "cook"
-              ? `${meals.length} meals fit your constraints`
+              ? usingGemini
+                ? `${meals.length} Gemini ideas${groceryList.length ? ` · from your list` : ""}`
+                : `${meals.length} meals fit your groceries`
               : `${venues.length} UW locations`}
           </span>
           <span>← Pass · {mode === "cook" ? "Choose" : "Directions"} →</span>
@@ -315,7 +580,7 @@ export function FoodDiscovery({
               />
               <span className="cover-tag">
                 <Icon name="leaf" size={14} />
-                Cook with your groceries
+                {usingGemini ? "Gemini suggestion" : "Cook with your groceries"}
               </span>
               <span className="photo-label">AI illustration</span>
             </button>
@@ -333,7 +598,9 @@ export function FoodDiscovery({
               </div>
               <div className="fits-line">
                 <Icon name="check" size={16} />
-                Ingredients, equipment, budget and calendar checked
+                {usingGemini
+                  ? "AI idea from your ingredients · estimates only"
+                  : "Ingredients, equipment, budget and calendar checked"}
               </div>
               <div className="swipe-actions">
                 <button
@@ -490,9 +757,16 @@ export function FoodDiscovery({
           >
             ↶ Undo last pass
           </button>
+          {mode === "cook" && onChangeGroceries ? (
+            <button className="text-button" onClick={onChangeGroceries}>
+              Change groceries
+            </button>
+          ) : null}
           <span>
             {mode === "cook"
-              ? "Nutrition & costs are demo estimates"
+              ? usingGemini
+                ? "Gemini estimates · not verified nutrition"
+                : "Nutrition & costs are demo estimates"
               : "UW sources checked Oct 17 · hours can change"}
           </span>
         </div>
