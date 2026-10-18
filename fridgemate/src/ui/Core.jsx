@@ -210,6 +210,24 @@ function Confirm({ title, onClose, onConfirm, button, children }) {
   );
 }
 function ContextFields({ value, onChange }) {
+  // Helper to ensure time is in 24-hour HH:MM format
+  const normalizeTime = (timeStr) => {
+    if (!timeStr) return timeStr;
+    // If already in HH:MM format, return as-is
+    if (/^\d{2}:\d{2}$/.test(timeStr)) return timeStr;
+    // If has AM/PM, convert to 24-hour
+    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (match) {
+      let hours = parseInt(match[1]);
+      const minutes = match[2];
+      const period = match[3].toUpperCase();
+      if (period === 'PM' && hours !== 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
+      return `${hours.toString().padStart(2, '0')}:${minutes}`;
+    }
+    return timeStr;
+  };
+
   const field = (key, label, type = "number", min = 0, max = 240) => (
     <label>
       {label}
@@ -219,17 +237,38 @@ function ContextFields({ value, onChange }) {
         min={min}
         max={max}
         required={key !== "service"}
-        onChange={(e) =>
-          onChange({
-            ...value,
-            [key]:
-              type === "number"
-                ? e.target.value === "" && key === "service"
-                  ? null
-                  : Number(e.target.value)
-                : e.target.value,
-          })
-        }
+        onChange={(e) => {
+          let newValue = type === "number"
+            ? e.target.value === "" && key === "service"
+              ? null
+              : Number(e.target.value)
+            : e.target.value;
+          
+          // Normalize time values to 24-hour format
+          if (type === "time" && newValue) {
+            newValue = normalizeTime(newValue);
+          }
+          
+          const updated = { ...value, [key]: newValue };
+          
+          // Auto-adjust available window when start or commitment time changes
+          if ((key === "start" || key === "commitmentTime") && updated.start && updated.commitmentTime) {
+            const normalizedStart = normalizeTime(updated.start);
+            const normalizedCommitment = normalizeTime(updated.commitmentTime);
+            if (normalizedStart && normalizedCommitment) {
+              const startMinutes = parseInt(normalizedStart.split(':')[0]) * 60 + parseInt(normalizedStart.split(':')[1]);
+              const commitmentMinutes = parseInt(normalizedCommitment.split(':')[0]) * 60 + parseInt(normalizedCommitment.split(':')[1]);
+              const calculatedWindow = commitmentMinutes - startMinutes;
+              if (calculatedWindow > 0) {
+                updated.available = calculatedWindow;
+                updated.start = normalizedStart;
+                updated.commitmentTime = normalizedCommitment;
+              }
+            }
+          }
+          
+          onChange(updated);
+        }}
       />
     </label>
   );
@@ -285,10 +324,10 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
       wide
     >
       <form
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           try {
-            onSave(
+            await onSave(
               timeOnly
                 ? { type: "updateContext", context }
                 : flags.manualSchedule.available
@@ -775,10 +814,10 @@ function Kitchen({ state, onSave }) {
         leaves inventory as entered.
       </p>
       <form
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           try {
-            onSave({ type: "updatePantry", pantry });
+            await onSave({ type: "updatePantry", pantry });
             setSaved(true);
             setError("");
           } catch (err) {
@@ -1047,10 +1086,10 @@ function Log({ data, onClose, onSave, onLogged }) {
       onClose={onClose}
     >
       <form
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           try {
-            onSave({
+            await onSave({
               type: data.log ? "editLog" : "log",
               id: data.id,
               mealId: data.meal.id,

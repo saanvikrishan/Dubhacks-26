@@ -232,7 +232,7 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
         data = await read.json();
       if (!read.ok || !data.authorized)
         throw new Error(data.error || "Calendar read failed.");
-      onSave({
+      await onSave({
         type: "importCalendar",
         source: "apple",
         events: data.events.map((e) => ({ ...e, kind: eventKind(e.title) })),
@@ -254,7 +254,7 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
     setError("");
     try {
       const result = importIcs(await file.text());
-      onSave({ type: "importCalendar", source: "ics", ...result });
+      await onSave({ type: "importCalendar", source: "ics", ...result });
       setMessage(
         `${result.events.length} events imported.${result.warnings.length ? ` ${result.warnings.length} items need review.` : ""}`,
       );
@@ -331,8 +331,8 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
         <div className="dialog-actions">
           <button
             className="text-button"
-            onClick={() => {
-              onSave({ type: "disconnectCalendar" });
+            onClick={async () => {
+              await onSave({ type: "disconnectCalendar" });
               setMessage(
                 "Imported events removed from Daywell. Apple Calendar is unchanged.",
               );
@@ -431,10 +431,10 @@ export function EventDialog({
       onClose={onClose}
     >
       <form
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           try {
-            onSave({
+            await onSave({
               type: "saveEvent",
               event: {
                 id: event?.id ?? crypto.randomUUID(),
@@ -527,8 +527,8 @@ export function EventDialog({
             <button
               type="button"
               className="secondary"
-              onClick={() => {
-                onSave({ type: "toggleTask", id: event.id });
+              onClick={async () => {
+                await onSave({ type: "toggleTask", id: event.id });
                 onClose();
               }}
             >
@@ -539,8 +539,8 @@ export function EventDialog({
             <button
               type="button"
               className="text-button"
-              onClick={() => {
-                onSave({ type: "deleteEvent", id: event.id });
+              onClick={async () => {
+                await onSave({ type: "deleteEvent", id: event.id });
                 onClose();
               }}
             >

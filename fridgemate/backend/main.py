@@ -1,8 +1,11 @@
 import asyncio
 import json
 import os
+<<<<<<< Updated upstream
 import re
 from datetime import date
+=======
+>>>>>>> Stashed changes
 from pathlib import Path
 
 from backboard import BackboardClient
@@ -12,10 +15,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from pydantic import BaseModel, Field
 
+<<<<<<< Updated upstream
 ROOT = Path(__file__).resolve().parent
 # Prefer backend/.env, fall back to fridgemate/.env
 load_dotenv(ROOT / ".env")
 load_dotenv(ROOT.parent / ".env")
+=======
+# Load .env from the same directory as this file
+env_path = Path(__file__).parent / '.env'
+load_dotenv(dotenv_path=env_path)
+>>>>>>> Stashed changes
 
 app = FastAPI(title="FridgeMate API")
 
@@ -50,7 +59,12 @@ GEMINI_FALLBACKS = [
 api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
 client = genai.Client(api_key=api_key) if api_key else None
 
+<<<<<<< Updated upstream
 backboard_key = (os.getenv("BACKBOARD_API_KEY") or "").strip()
+=======
+backboard_key = os.getenv("BACKBOARD_API_KEY")
+print(f"[Startup] Backboard API key loaded: {backboard_key[:20] + '...' if backboard_key else 'MISSING'}")
+>>>>>>> Stashed changes
 backboard_client = BackboardClient(api_key=backboard_key) if backboard_key else None
 _assistant_id = None
 DEMO_ASSISTANT_NAME = "FridgeMate demo"
@@ -100,7 +114,9 @@ async def get_assistant_id():
         _assistant_id = str(created.assistant_id)
         return _assistant_id
     except Exception as e:
-        print("Backboard error:", str(e))
+        print(f"Backboard error (detailed): {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -114,45 +130,50 @@ def require_backboard_client():
 
 @app.post("/preferences")
 async def store_preference(request: PreferenceRequest):
-    require_backboard_client()
+    if backboard_client is None:
+        # Return success but don't actually store to Backboard
+        print("[Warning] Backboard client not available, preference not stored")
+        return {"status": "local_only", "message": "Saved locally only"}
+    
     assistant_id = await get_assistant_id()
     if not assistant_id:
-        raise HTTPException(
-            status_code=502,
-            detail="Preference storage failed. Check the backend terminal.",
-        )
+        print("[Warning] Could not get assistant ID, preference not stored")
+        return {"status": "local_only", "message": "Saved locally only"}
+    
     try:
-        return await backboard_client.add_memory(
+        result = await backboard_client.add_memory(
             assistant_id,
             request.content,
             metadata=request.metadata,
         )
+        print(f"[Success] Preference stored to Backboard")
+        return result
     except Exception as e:
-        print("Backboard error:", str(e))
-        raise HTTPException(
-            status_code=502,
-            detail="Preference storage failed. Check the backend terminal.",
-        )
+        print(f"Backboard add_memory error (detailed): {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # Don't raise an error - just return that it's saved locally
+        return {"status": "local_only", "message": "Saved locally only", "error": str(e)}
 
 
 @app.get("/preferences")
 async def list_preferences():
-    require_backboard_client()
+    if backboard_client is None:
+        # Return empty memories if Backboard not available
+        return {"memories": []}
+    
     assistant_id = await get_assistant_id()
     if not assistant_id:
-        raise HTTPException(
-            status_code=502,
-            detail="Preference lookup failed. Check the backend terminal.",
-        )
+        # Return empty memories if can't get assistant ID
+        return {"memories": []}
+    
     try:
         memories = await backboard_client.get_memories(assistant_id)
         return memories.model_dump()
     except Exception as e:
-        print("Backboard error:", str(e))
-        raise HTTPException(
-            status_code=502,
-            detail="Preference lookup failed. Check the backend terminal.",
-        )
+        print(f"Backboard get_memories error: {type(e).__name__}: {str(e)}")
+        # Return empty memories on error
+        return {"memories": []}
 
 
 def memory_contents(result):

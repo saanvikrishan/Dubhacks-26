@@ -39,9 +39,26 @@ import "./ui/redesign.css";
 const flags = capabilities();
 
 export default function App() {
-  const [loaded] = useState(() => storageAdapter.load(window.localStorage));
-  const [state, setState] = useState(loaded.state),
-    [storageError, setStorageError] = useState(loaded.error);
+  const [state, setState] = useState(null);
+  const [storageError, setStorageError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  
+  // Load state on mount
+  useEffect(() => {
+    async function loadState() {
+      try {
+        const loaded = await storageAdapter.load(window.localStorage);
+        setState(loaded.state);
+        setStorageError(loaded.error);
+      } catch (error) {
+        setState(storageAdapter.reset(window.localStorage));
+        setStorageError('Failed to load saved state. Starting fresh.');
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadState();
+  }, []);
   const [tab, setTab] = useState("Today"),
     [mode, setMode] = useState("cook"),
     [cookPhase, setCookPhase] = useState("groceries"),
@@ -52,21 +69,41 @@ export default function App() {
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60000);
     return () => clearInterval(timer);
   }, []);
+  
+  // Show loading screen while state is loading
+  if (loading || !state) {
+    return (
+      <div className="app-shell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+        <div style={{ textAlign: 'center' }}>
+          <Icon name="leaf" size={40} />
+          <p>Loading Daywell...</p>
+        </div>
+      </div>
+    );
+  }
+  
   const items = scheduledItems(state, byId),
     day = today(),
     summary = dailyNutrition(state.logs, byId, day),
     logs = state.logs.filter((l) => l.date === day);
   const close = () => setDialog(null);
-  function dispatch(action) {
+  async function dispatch(action) {
     if (storageError) throw new Error(storageError);
     const next = transition(state, action);
     try {
-      storageAdapter.save(window.localStorage, next);
-    } catch {
+      const savedToBackend = await storageAdapter.save(window.localStorage, next);
+      
+      // Always use the next state we just saved
+      // Don't reload from backend because that might give us stale or empty data
+      setState(next);
+      
+
+    } catch (err) {
       setStorageError(
         "Browser storage could not save your changes. Existing records are preserved.",
       );
@@ -74,7 +111,6 @@ export default function App() {
         "Could not save. Check browser storage or reload before continuing.",
       );
     }
-    setState(next);
     setError("");
     const messages = {
       configure: "Preferences saved.",
@@ -92,27 +128,30 @@ export default function App() {
     if (messages[action.type]) setNotice(messages[action.type]);
     return next;
   }
-  function safe(action) {
+  async function safe(action) {
     try {
-      dispatch(action);
+      await dispatch(action);
       return true;
     } catch (err) {
       setError(err.message);
       return false;
     }
   }
-  function goFood(nextMode) {
-    const window = nextMealWindow(
-      items,
-      day,
-      new Date(now),
-      Math.max(45, state.context.available),
-    );
-    if (window && !safe({ type: "updateContext", context: window })) return;
-    if (!window)
-      setNotice(
-        "No free window of 35 minutes or more was found. Adjust the meal window in Food.",
+  async function goFood(nextMode) {
+    // Only auto-calculate window if coming from Today tab and no manual override
+    if (tab === "Today") {
+      const window = nextMealWindow(
+        items,
+        day,
+        new Date(now),
+        Math.max(45, state.context.available),
       );
+      if (window && !(await safe({ type: "updateContext", context: window }))) return;
+      if (!window)
+        setNotice(
+          "No free window of 35 minutes or more was found. Adjust the meal window in Food.",
+        );
+    }
     setMode(nextMode);
     if (nextMode === "cook") {
       setGeminiMeals(null);
@@ -121,6 +160,7 @@ export default function App() {
     }
     setTab("Food");
   }
+<<<<<<< Updated upstream
   function setFoodMode(nextMode) {
     setMode(nextMode);
     if (nextMode === "cook") {
@@ -130,6 +170,9 @@ export default function App() {
     }
   }
   function choose(meal) {
+=======
+  async function choose(meal) {
+>>>>>>> Stashed changes
     const existing = state.mealPlans.find(
       (p) => p.date === state.context.date && p.start === state.context.start,
     );
@@ -137,12 +180,12 @@ export default function App() {
       setDialog({ type: "replace", meal, existing });
       return;
     }
-    if (safe({ type: "choose", mealId: meal.id })) {
+    if (await safe({ type: "choose", mealId: meal.id })) {
       setNotice(`${meal.name} added to My Plan.`);
       setDialog({ type: "details", meal });
     }
   }
-  function reviseMeal(plan) {
+  async function reviseMeal(plan) {
     const begin = Date.parse(localInstant(plan.date, plan.start));
     const next = items
       .filter(
@@ -158,7 +201,7 @@ export default function App() {
     const commitmentTime =
       next && timeKey(next.start) > plan.start ? timeKey(next.start) : "23:59";
     if (
-      !safe({
+      !(await safe({
         type: "updateContext",
         context: {
           date: plan.date,
@@ -170,7 +213,7 @@ export default function App() {
           commitment: next?.title ?? "No further commitment",
           commitmentTime,
         },
-      })
+      }))
     )
       return;
     setMode(byId[plan.mealId].mode);
@@ -719,8 +762,8 @@ export default function App() {
           title="Replace this planned meal?"
           onClose={close}
           button="Confirm replacement"
-          onConfirm={() => {
-            dispatch({ type: "choose", mealId: dialog.meal.id });
+          onConfirm={async () => {
+            await dispatch({ type: "choose", mealId: dialog.meal.id });
             setNotice("Meal replaced in My Plan.");
             setDialog({ type: "details", meal: dialog.meal });
           }}
@@ -738,8 +781,8 @@ export default function App() {
           title="Remove this consumption log?"
           onClose={close}
           button="Remove log"
-          onConfirm={() => {
-            dispatch({ type: "removeLog", id: dialog.log.id });
+          onConfirm={async () => {
+            await dispatch({ type: "removeLog", id: dialog.log.id });
             setDialog({ type: "intake" });
           }}
         >
