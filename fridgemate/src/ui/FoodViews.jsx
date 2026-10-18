@@ -19,7 +19,9 @@ import {
 export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
   const point = useRef(null),
     swiped = useRef(false),
-    [dx, setDx] = useState(0);
+    [dx, setDx] = useState(0),
+    [flyingOff, setFlyingOff] = useState(null);
+  
   return (
     <article
       className="swipe-card"
@@ -29,11 +31,13 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
         if (e.target !== e.currentTarget) return;
         if (e.key === "ArrowLeft") {
           e.preventDefault();
-          onPass();
+          setFlyingOff("left");
+          setTimeout(onPass, 300);
         }
         if (e.key === "ArrowRight") {
           e.preventDefault();
-          onAccept();
+          setFlyingOff("right");
+          setTimeout(onAccept, 300);
         }
         if (e.key === "Enter") onDetails();
       }}
@@ -48,26 +52,31 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
         swiped.current = false;
       }}
       onPointerMove={(e) => {
-        if (!point.current) return;
+        if (!point.current || flyingOff) return;
         const x = e.clientX - point.current.x,
           y = e.clientY - point.current.y;
         if (Math.abs(x) > 12 && Math.abs(x) > Math.abs(y) * 1.2) {
           e.currentTarget.setPointerCapture(e.pointerId);
-          setDx(Math.max(-160, Math.min(160, x)));
+          setDx(Math.max(-200, Math.min(200, x)));
         }
       }}
       onPointerUp={(e) => {
-        if (!point.current) return;
+        if (!point.current || flyingOff) return;
         const x = e.clientX - point.current.x,
           y = e.clientY - point.current.y;
         point.current = null;
         if (Math.abs(x) > 75 && Math.abs(x) > Math.abs(y) * 1.2) {
           swiped.current = true;
-          x > 0 ? onAccept() : onPass();
+          setFlyingOff(x > 0 ? "right" : "left");
+          setTimeout(() => {
+            x > 0 ? onAccept() : onPass();
+          }, 300);
+        } else {
+          setDx(0);
         }
-        setDx(0);
       }}
       onPointerCancel={() => {
+        if (flyingOff) return;
         point.current = null;
         setDx(0);
       }}
@@ -82,15 +91,25 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
       <div
         className="swipe-moving"
         style={{
-          transform: `translateX(${dx}px) rotate(${dx / 30}deg)`,
-          transition: dx ? "none" : undefined,
+          transform: flyingOff 
+            ? `translateX(${flyingOff === "right" ? 1000 : -1000}px) translateY(${flyingOff === "right" ? -30 : 30}px) rotate(${flyingOff === "right" ? 15 : -15}deg)`
+            : `translateX(${dx}px)`,
+          transition: flyingOff 
+            ? "transform 0.3s cubic-bezier(0.4, 0, 1, 1), opacity 0.3s ease-out"
+            : dx ? "none" : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
+          opacity: flyingOff 
+            ? 0
+            : dx ? Math.max(0.7, 1 - Math.abs(dx) / 300) : 1,
         }}
       >
         <div
-          className={`swipe-stamp ${dx > 0 ? "accept" : "pass"}`}
-          style={{ opacity: Math.min(1, Math.abs(dx) / 80) }}
+          className={`swipe-stamp ${dx > 0 || flyingOff === "right" ? "accept" : "pass"}`}
+          style={{ 
+            opacity: flyingOff ? 1 : Math.min(1, Math.abs(dx) / 50),
+            transform: `scale(${flyingOff ? 1.2 : Math.min(1.2, 0.8 + Math.abs(dx) / 100)})`,
+          }}
         >
-          {dx > 0 ? "YES" : "PASS"}
+          {(dx > 0 || flyingOff === "right") ? "YES" : "PASS"}
         </div>
         {children}
       </div>
