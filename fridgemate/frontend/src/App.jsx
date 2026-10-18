@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import {recipeSnapshots} from "./domain/generatedMeals.js";
+import {useCalendarRefresh} from "./adapters/calendarRefresh.js";
+import { useEffect, useRef, useState } from "react";
 import {
   Icon,
   Modal,
@@ -21,14 +23,16 @@ import {
   PlanCalendar,
 } from "./ui/CalendarViews";
 import { CookStart, FoodDiscovery, VenueDetails } from "./ui/FoodViews";
-import { money, mealImage, num, prefetchMealImages } from "./ui/format";
-import { byId, rememberMeal, rememberSuggestions } from "./data/suggestions";
+import { money, num, mealImage, prefetchMealImages } from "./ui/format";
+import { RecipeReview } from "./ui/RecipeReview";
+import { byId, rememberMeal, rememberSuggestions, restoreSuggestions } from "./data/suggestions";
 import { capabilities } from "./domain/config";
 import { clockTime, minutes } from "./domain/engine";
 import { dailyNutrition } from "./domain/nutrition";
 import {
   dayKey,
   localInstant,
+  mealWindowStillOpen,
   nextMealWindow,
   prettyDate,
   scheduledItems,
@@ -44,24 +48,35 @@ import "./ui/redesign.css";
 const flags = capabilities();
 
 export default function App() {
+  const stateRef = useRef(null);
   const [state, setState] = useState(null);
   const [storageError, setStorageError] = useState(null);
   const [loading, setLoading] = useState(true);
   
+  const [tab, setTab] = useState("Today"),
+    [mode, setMode] = useState("cook"),
+    [cookPhase, setCookPhase] = useState("discover"),
+    [geminiMeals, setGeminiMeals] = useState(null),
+    [groceryList, setGroceryList] = useState([]),
+    [date, setDate] = useState(today());
+
   // Load state on mount
   useEffect(() => {
     async function loadState() {
       try {
         const loaded = await storageAdapter.load(window.localStorage);
+        stateRef.current=loaded.state;
+        restoreSuggestions(recipeSnapshots(loaded.state));
+        const drafts=(loaded.state.generatedMeals??[]).filter(m=>m.suggestion===true && !m.sourceRecipeId);
+        if(drafts.length) {setGeminiMeals(drafts.map(m=>m.id));setGroceryList(loaded.state.groceryList??[]);}
         setState(loaded.state);
         setStorageError(loaded.error);
-        // If Gemini meals were persisted, go straight to discovery
-        if (loaded.state?.geminiMeals?.length) {
-          rememberSuggestions(loaded.state.geminiMeals);
-          setCookPhase("discover");
-        }
-      } catch (error) {
-        setState(storageAdapter.reset(window.localStorage));
+        // Legacy saved state from main kept Gemini meals here; keep them resolvable.
+        if (loaded.state?.geminiMeals?.length) rememberSuggestions(loaded.state.geminiMeals);
+      } catch {
+        stateRef.current=storageAdapter.reset(window.localStorage);
+        restoreSuggestions(recipeSnapshots(stateRef.current));
+        setState(stateRef.current);
         setStorageError('Failed to load saved state. Starting fresh.');
       } finally {
         setLoading(false);
@@ -69,10 +84,6 @@ export default function App() {
     }
     loadState();
   }, []);
-  const [tab, setTab] = useState("Today"),
-    [mode, setMode] = useState("cook"),
-    [cookPhase, setCookPhase] = useState("groceries"),
-    [date, setDate] = useState(today());
   const [dialog, setDialog] = useState(null),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
@@ -83,6 +94,8 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
   
+  useCalendarRefresh(stateRef, dispatch, setError);
+
   // Show loading screen while state is loading
   if (loading || !state) {
     return (
@@ -102,6 +115,7 @@ export default function App() {
     );
   }
   
+  restoreSuggestions(recipeSnapshots(state));
   const items = scheduledItems(state, byId),
     day = today(),
     summary = dailyNutrition(state.logs, byId, day),
@@ -109,9 +123,12 @@ export default function App() {
   const close = () => setDialog(null);
   async function dispatch(action) {
     if (storageError) throw new Error(storageError);
-    const next = transition(state, action);
+    const next = transition(stateRef.current, action);
     try {
-      const savedToBackend = await storageAdapter.save(window.localStorage, next);
+      storageAdapter.save(window.localStorage, next);
+      stateRef.current=next;
+      restoreSuggestions(recipeSnapshots(next));
+      if (["updatePantry","addGeneratedMeals","reviewGeneratedMeal"].includes(action.type)) void savePantryItems(next.pantry);
       
       // Always use the next state we just saved
       // Don't reload from backend because that might give us stale or empty data
@@ -124,6 +141,7 @@ export default function App() {
       );
       throw new Error(
         "Could not save. Check browser storage or reload before continuing.",
+        {cause:err},
       );
     }
     setError("");
@@ -192,36 +210,33 @@ export default function App() {
     }
   }
   async function goFood(nextMode) {
-    // Only auto-calculate window if coming from Today tab AND the user hasn't
-    // manually set a window for today already.
-    if (tab === "Today") {
-      const contextIsForToday = state.context.date === day;
-      const userSetManually = state.context.manuallySet === true;
-      if (!contextIsForToday || !userSetManually) {
-        const window = nextMealWindow(
-          items,
-          day,
-          new Date(now),
-          Math.max(45, state.context.available),
-        );
-        if (window && !(await safe({ type: "updateContext", context: { ...window, manuallySet: false } }))) return;
-      }
+    if (tab === "Today" && !mealWindowStillOpen(state.context, new Date(now))) {
+      const window = nextMealWindow(
+        items,
+        day,
+        new Date(now),
+        Math.max(45, state.context.available),
+      );
+      if (window && !(await safe({ type: "updateContext", context: { ...window, manuallySet: false } }))) return;
     }
     setMode(nextMode);
     if (nextMode === "cook") {
-      await safe({ type: "clearGeminiMeals" });
-      setCookPhase("groceries");
+      setGeminiMeals(null);
+      setGroceryList([]);
+      setCookPhase("discover");
     }
     setTab("Let's eat");
   }
   function setFoodMode(nextMode) {
     setMode(nextMode);
     if (nextMode === "cook") {
-      safe({ type: "clearGeminiMeals" });
-      setCookPhase("groceries");
+      setGeminiMeals(null);
+      setGroceryList([]);
+      setCookPhase("discover");
     }
   }
   async function choose(meal) {
+    if(meal.sourceRecipeId && !byId[meal.id] && !(await safe({type:"captureSourcedMeal",meal}))) return;
     rememberMeal(meal);
     // Check if the current context matches an open slot and fill it
     const openSlot = state.mealPlans.find(
@@ -316,12 +331,19 @@ export default function App() {
       }))
     )
       return;
-    setMode(byId[plan.mealId]?.mode ?? "cook");
+    const planned = byId[plan.mealId];
+    setMode(planned?.mode ?? "cook");
+    if((planned?.mode ?? "cook")==='cook') {
+      setGeminiMeals(planned?.suggestion?state.generatedMeals.filter(m=>m.suggestion===true&&!m.sourceRecipeId).map(m=>m.id):null);
+      setCookPhase('discover');
+    }
     setTab("Let's eat");
     close();
   }
-  const openLog = (meal, log = null) =>
+  const openLog = async (meal, log = null) => {
+    if(meal.sourceRecipeId && !byId[meal.id] && !(await safe({type:"captureSourcedMeal",meal}))) return;
     setDialog({ type: "log", meal, log, id: log?.id ?? crypto.randomUUID() });
+  };
   const openEvent = (event) => {
     // Open slots should navigate to Food → Cook with the right date/time context
     if (event.openSlot && event.plan) {
@@ -339,11 +361,11 @@ export default function App() {
       }).then(() => {
         setMode("cook");
         setCookPhase("groceries");
-        setTab("Food");
+        setTab("Let's eat");
       });
       return;
     }
-    setDialog({ type: "event", event });
+    setDialog({ type: "event", event: state.events.find(e=>e.id===event.id) ?? event });
   };
   const openDetails = (meal) => setDialog({ type: "details", meal });
   const addEvent = (eventDate) =>
@@ -787,6 +809,7 @@ export default function App() {
               </button>
             </div>
             <PlanCalendar
+              onAddRange={(day,range)=>setDialog({type:"event",event:{id:crypto.randomUUID(),title:"",start:localInstant(day,range.start),end:localInstant(day,range.end),kind:"event",source:"manual",busy:true,readOnly:false,draft:true}})}
               items={items}
               now={now}
               connected={state.calendar.connected}
@@ -804,33 +827,25 @@ export default function App() {
             <CookStart
               key={`cook-start-${JSON.stringify(state.pantry)}`}
               state={state}
-              onSuggested={async (meals, ingredients) => {
-                rememberSuggestions(meals);
+              onSuggested={async (meals, ingredients, pantry) => {
+                // Drafts and explicit grocery quantities are persisted together. No invented stock.
+                await dispatch({type:'addGeneratedMeals',meals,pantry,groceryList:ingredients});
                 prefetchMealImages(meals);
-                // Persist meals + grocery list to state so they survive reload
-                await safe({
-                  type: "setGeminiMeals",
-                  meals,
-                  groceryList: ingredients || [],
-                });
-                if (ingredients?.length) {
-                  const pantry = {};
-                  for (const name of ingredients)
-                    pantry[name] = Math.max(state.pantry[name] ?? 0, 500);
-                  await safe({ type: "updatePantry", pantry });
-                  const remote = await savePantryItems(ingredients);
-                  if (remote.status === "ok")
-                    setNotice("Groceries saved to Postgres.");
-                }
+                setGeminiMeals(meals.map(m=>m.id));
+                setGroceryList(ingredients || []);
                 setCookPhase("discover");
               }}
+              onBrowseLocal={()=>{setGeminiMeals(null);setCookPhase('discover');}}
+              onUnavailable={(message)=>{setGeminiMeals(null);setCookPhase('discover');setError(message);}}
+              onWindow={()=>setDialog({type:'time'})}
+              onPreferences={()=>setDialog({type:'profile'})}
               onEatOut={() => setFoodMode("eatOut")}
             />
           )}
         {tab === "Let's eat" &&
           !(mode === "cook" && cookPhase === "groceries") && (
             <FoodDiscovery
-              key={`${mode}-${state.context.date}-${state.context.start}-${state.context.available}-${(state.geminiMeals ?? []).map((m) => m.id).join(",") || "catalog"}-${state.events.length}`}
+              key={`${mode}-${state.context.date}-${state.context.start}-${state.context.available}-${geminiMeals?.join(",") || "catalog"}-${state.events.length}`}
               state={state}
               mode={mode}
               onMode={setFoodMode}
@@ -847,8 +862,9 @@ export default function App() {
                 safe({ type: "clearGeminiMeals" });
                 setCookPhase("groceries");
               }}
-              geminiMeals={mode === "cook" ? (state.geminiMeals ?? null) : null}
-              groceryList={state.groceryList ?? []}
+              geminiMeals={mode === "cook" && geminiMeals ? geminiMeals.map(id=>byId[id]).filter(Boolean) : null}
+              onReview={meal=>setDialog({type:"reviewRecipe",meal})}
+              groceryList={groceryList}
             />
           )}
         {tab === "Grocery list" && (
@@ -882,6 +898,7 @@ export default function App() {
       >
         <Icon name="spark" size={22} />
       </button>
+      {dialog?.type === "reviewRecipe" && <RecipeReview meal={dialog.meal} state={state} onSave={dispatch} onClose={close}/> }
       {dialog?.type === "calendar" && (
         <CalendarConnect
           state={state}
@@ -967,10 +984,10 @@ export default function App() {
                   const stripped = ing.name
                     .replace(/\s*\(.*?\)\s*/g, "")
                     .replace(
-                      /^[\d\s\/\u00BC-\u00BE\u2150-\u215E]*(?:cup|tbsp?|tsp?|oz|g|ml|lb|block|can|clove|head|bunch|slice|piece|sprig|handful|pinch|dash|package|pkg|bag)s?\s+(?:of\s+)?/i,
+                      /^[\d\s/\u00BC-\u00BE\u2150-\u215E]*(?:cup|tbsp?|tsp?|oz|g|ml|lb|block|can|clove|head|bunch|slice|piece|sprig|handful|pinch|dash|package|pkg|bag)s?\s+(?:of\s+)?/i,
                       "",
                     )
-                    .replace(/^[\d\s\/\u00BC-\u00BE\u2150-\u215E]+/, "")
+                    .replace(/^[\d\s/\u00BC-\u00BE\u2150-\u215E]+/, "")
                     .trim()
                     .toLowerCase();
                   const key =
@@ -1064,7 +1081,7 @@ export default function App() {
           onClose={close}
           button="Reset local demo"
           onConfirm={() => {
-            setState(storageAdapter.reset(window.localStorage));
+            stateRef.current=storageAdapter.reset(window.localStorage); restoreSuggestions([]); setState(stateRef.current);
             setStorageError(null);
             setNotice("Sample preferences restored.");
             close();

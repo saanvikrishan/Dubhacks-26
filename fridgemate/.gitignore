@@ -36,3 +36,8 @@ backend/.venv/
 __pycache__/
 *.pyc
 backend/**/__pycache__/
+
+# Local artifacts retained from the pre-frontend-move layout
+/node_modules/
+/dist/
+/.calendar-bridge/

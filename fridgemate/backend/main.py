@@ -15,16 +15,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
-
-import db as store
-import substitutions as swaps
-import usda
+from meal_generation import RecipeRequest, RecipeGenerator
+from travel import walking_client
+from kroger import kroger_client
 from skills.loader import load_skill
 
 ROOT = Path(__file__).resolve().parent
 # Prefer backend/.env, fall back to fridgemate/.env
 load_dotenv(ROOT / ".env")
 load_dotenv(ROOT.parent / ".env")
+
+import db as store
+import substitutions as swaps
+import usda
+from food_reference import food_reference
+from food_memory import recall_preferences, invalidate_preferences
+
 
 app = FastAPI(title="FridgeMate API")
 
@@ -207,7 +213,7 @@ class ChatTurn(BaseModel):
     text: str
 
 
-class RecipeRequest(BaseModel):
+class IntentRequest(BaseModel):
     ingredients: list[str] = Field(default_factory=list)
     diet: str = "anything"
     time: int = 30
@@ -257,7 +263,8 @@ def home():
         "backboard": bool(backboard_client),
         "database": store.SessionLocal is not None,
         "usda": usda.usda_configured(),
-        "model": GEMINI_MODEL if client else None,
+        "model": recipe_generator.models[0] if client else None,
+        "recipe_models": recipe_generator.models if client else [],
     }
 
 
@@ -501,7 +508,8 @@ async def store_preference(request: PreferenceRequest):
             request.content,
             metadata=request.metadata,
         )
-        print(f"[Success] Preference stored to Backboard")
+        invalidate_preferences()
+        print("[Success] Preference stored to Backboard")
         return result
     except Exception as e:
         print(f"Backboard add_memory error (detailed): {type(e).__name__}: {str(e)}")
@@ -1252,7 +1260,7 @@ User message:
 """
 
 
-async def interpret_constraints(request: RecipeRequest) -> dict:
+async def interpret_constraints(request: IntentRequest) -> dict:
     if not client:
         raise HTTPException(
             status_code=500,
@@ -1398,125 +1406,20 @@ async def substitute_ingredient(request: SubstituteRequest):
         "substitutions": [suggestion] if suggestion else [],
     }
 
+recipe_generator = RecipeGenerator()
+
 
 @app.post("/recipes")
-async def generate_recipes(request: RecipeRequest):
+async def generate_recipes(request: RecipeRequest | IntentRequest):
     enforce_rate_limit()
-    user_text = (
-        request.text
-        if isinstance(request.text, str)
-        else " ".join(str(item) for item in request.ingredients)
-    )
+    user_text = request.text if isinstance(request, IntentRequest) and request.text is not None else " ".join(request.ingredients)
     if blocked_user_text(user_text):
         reject_blocked_text()
-    if isinstance(request.text, str):
+    if isinstance(request, IntentRequest):
+        if request.text is None:
+            raise HTTPException(status_code=422, detail="Invalid recipe request.")
         return await interpret_constraints(request)
-    if not client:
-        raise HTTPException(
-            status_code=500,
-            detail="GEMINI_API_KEY is missing from backend/.env or fridgemate/.env",
-        )
-
-    cleaned = [str(i).strip()[:60] for i in request.ingredients if str(i).strip()][
-        :30
-    ]
-    ingredients = ", ".join(cleaned) if cleaned else "common pantry staples"
-    known_preferences = ""
-    if backboard_client is not None:
-        assistant_id = await get_assistant_id()
-        if assistant_id:
-            query = (
-                f"ingredients: {ingredients}; "
-                f"diet: {request.diet}; "
-                f"time: {request.time} minutes"
-            )
-            try:
-                found = await backboard_client.search_memories(
-                    assistant_id,
-                    query,
-                    limit=5,
-                )
-                facts = memory_contents(found)
-                if facts:
-                    known_preferences = "\n".join(f"- {fact}" for fact in facts)
-            except Exception as e:
-                print("Backboard error:", str(e))
-
-    exclusions = ", ".join(request.exclusions) if request.exclusions else "none"
-    skill = load_skill("recipe_skill")
-    prompt = f"""You are FridgeMate, a practical cooking assistant for college students.
-{skill}
-
-Available ingredients: {ingredients}
-Dietary preference: {request.diet}
-Avoid: {exclusions}
-Maximum cooking time: {request.time} minutes
-"""
-    if known_preferences:
-        prompt += f"""
-Known preferences from memory:
-{known_preferences}
-Follow these preferences. Do not suggest food that conflicts with them.
-"""
-
-    last_error = None
-    for model in GEMINI_FALLBACKS:
-        try:
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=model,
-                contents=prompt,
-                config={"response_mime_type": "application/json"},
-            )
-            parsed = json.loads(response.text or "{}")
-            recipes = parsed.get("recipes") if isinstance(parsed, dict) else None
-            if not isinstance(recipes, list) or not recipes:
-                raise ValueError("No recipes in model response")
-            meals = [
-                normalize_meal(r if isinstance(r, dict) else {}, i, cleaned)
-                for i, r in enumerate(recipes[:8])
-            ]
-            if usda.usda_configured():
-                meals = await usda.enrich_meals(meals)
-            # Images resolve on the client (CDN lookup) so Suggest stays fast.
-
-            async def _sub_json(prompt_text: str) -> dict:
-                for sub_model in GEMINI_FALLBACKS:
-                    try:
-                        sub_resp = await asyncio.to_thread(
-                            client.models.generate_content,
-                            model=sub_model,
-                            contents=prompt_text,
-                            config={"response_mime_type": "application/json"},
-                        )
-                        parsed_sub = json.loads(sub_resp.text or "{}")
-                        return parsed_sub if isinstance(parsed_sub, dict) else {}
-                    except Exception as sub_err:
-                        print(f"Substitution skill error ({sub_model}):", sub_err)
-                        if not gemini_transient(str(sub_err)):
-                            break
-                return {}
-
-            meals = await swaps.enrich_with_agent(meals, cleaned, _sub_json)
-            if model != GEMINI_MODEL:
-                print(f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)")
-            return redact_output(
-                {
-                    "meals": meals,
-                    "recipes": meals,
-                    "ingredients": cleaned,
-                    "model": model,
-                    "nutrition": "usda" if usda.usda_configured() else "gemini_estimate",
-                }
-            )
-        except Exception as e:
-            last_error = e
-            msg = str(e)
-            print(f"Gemini error ({model}):", msg)
-            if not gemini_transient(msg):
-                break
-
-    raise_gemini_failure(last_error, "Recipe generation")
+    return await recipe_generator.generate(client, request)
 
 
 @app.post("/vision/ingredients")
@@ -1703,6 +1606,32 @@ async def gcal_events(from_: str | None = None, to: str | None = None):
         })
     return {"events": events, "authorized": True}
 
+@app.post("/dining/walking")
+async def dining_walking():
+    # Explicit UI request only; fixed destinations, in-memory cache, no key in response.
+    return await asyncio.to_thread(walking_client.matrix)
+
+
+@app.get("/pricing/kroger/status")
+def kroger_status():
+    return kroger_client.status()
+
+
+@app.get("/pricing/kroger/locations")
+async def kroger_locations(zip_code: str):
+    try:
+        return await asyncio.to_thread(kroger_client.locations, zip_code)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+
+
+@app.get("/pricing/kroger/products")
+async def kroger_products(location_id: str, term: str):
+    try:
+        return await asyncio.to_thread(kroger_client.products, location_id, term)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+
 
 # ── Meal reminder message (Photon / iMessage) ────────────────────────────────
 
@@ -1850,6 +1779,26 @@ async def sync_meal_plans(request: SyncMealPlansRequest):
             pass  # photon_plans table may not exist until daemon runs ensureTables
 
     return {"status": "ok", "inserted": inserted}
+
+@app.get("/food/reference")
+async def get_food_reference(location_id: str = "70500807"):
+    try:
+        return await food_reference(location_id)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+
+
+@app.get("/nutrition/candidates")
+async def nutrition_candidates(q: str):
+    try:
+        return await usda.fdc_client.search_candidates(q)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+
+
+@app.get("/food/preferences")
+async def get_food_preferences():
+    return await recall_preferences(backboard_client, _assistant_id)
 
 
 class SyncScheduleEventsRequest(BaseModel):

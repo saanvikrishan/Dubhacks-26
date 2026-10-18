@@ -1,0 +1,19 @@
+.uw-catalog { margin-top: 1rem; }
+.uw-filters { display: grid; gap: .65rem; margin: 1rem 0; }
+.uw-filters label { display: grid; gap: .3rem; font-size: .82rem; }
+.uw-filters select, .uw-filters input { width: 100%; min-width: 0; padding: .55rem; border: 1px solid #d5dbd1; border-radius: .5rem; background: white; color: #243321; }
+.uw-dish-grid { display: grid; gap: .8rem; }
+.uw-dish { border: 1px solid #d5dbd1; border-radius: .75rem; padding: .9rem; background: #fff; font-size: .8rem; line-height: 1.5; overflow-wrap: anywhere; }
+.uw-dish h4 { font-size: 1rem; margin: 0 0 .35rem; }
+.uw-dish p { margin: .45rem 0; }
+.uw-dish dl { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: .4rem; }
+.uw-dish dt { color: #61705d; font-size: .73rem; }
+.uw-dish dd { margin: 0; font-weight: 600; }
+.uw-dish details { margin: .7rem 0; }
+.uw-dish pre { overflow: auto; white-space: pre-wrap; max-height: 15rem; }
+.uw-eligible { color: #365c27; font-weight: 600; }
+.uw-catalog > details { margin-top: 1rem; font-size: .8rem; }
+.uw-catalog .uw-dish dl { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); }
+.uw-catalog .uw-dish dl > div { display: block; padding: .25rem 0; border: 0; }
+.uw-catalog .uw-dish dt, .uw-catalog .uw-dish dd { display: block; text-align: left; text-transform: none; }
+.uw-catalog .fine-print { font-size: .78rem; line-height: 1.5; }

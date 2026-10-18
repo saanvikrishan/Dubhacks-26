@@ -65,16 +65,28 @@ export function portionNutrition(meal, servings = 1) {
   const { basis, yieldServings, values } = meal.nutrition;
   let factor;
   if (basis === "per_serving") factor = servings;
-  else if (basis === "per_100g" && meal.portionGrams > 0)
+  else if (
+    basis === "per_100g" &&
+    Number.isFinite(meal.portionGrams) &&
+    meal.portionGrams > 0
+  )
     factor = (meal.portionGrams * servings) / 100;
-  else if (basis === "per_recipe" && yieldServings > 0)
+  else if (
+    basis === "per_recipe" &&
+    Number.isFinite(yieldServings) &&
+    yieldServings > 0
+  )
     factor = servings / yieldServings;
   else throw new Error("Unknown nutrition basis or recipe yield.");
+  if (!Number.isFinite(factor) || factor <= 0)
+    throw new Error("Invalid nutrition scale.");
   return Object.fromEntries(
-    Object.keys(nutrientInfo).map((key) => [
-      key,
-      values[key] == null ? null : values[key] * factor,
-    ]),
+    Object.keys(nutrientInfo).map((key) => {
+      const value = values[key];
+      const scaled =
+        Number.isFinite(value) && value >= 0 ? value * factor : null;
+      return [key, Number.isFinite(scaled) ? scaled : null];
+    }),
   );
 }
 export function dailyNutrition(logs, meals, date) {
@@ -88,13 +100,15 @@ export function dailyNutrition(logs, meals, date) {
             : null,
         )
         .filter((v) => v != null);
+      const sum = known.reduce((a, b) => a + b, 0);
+      const hasTotal = known.length > 0 && Number.isFinite(sum);
       return [
         key,
         {
-          value: known.length ? known.reduce((a, b) => a + b, 0) : null,
+          value: hasTotal ? sum : null,
           known: known.length,
           total: entries.length,
-          complete: entries.length > 0 && known.length === entries.length,
+          complete: hasTotal && known.length === entries.length,
         },
       ];
     }),
@@ -117,6 +131,18 @@ export function goalStatus(summary, goal) {
     : value > goal.upper
       ? "Above your range"
       : "Within your range";
+}
+
+/** Display confirmed ingredient subtotals without turning incomplete totals into intake facts. */
+export function nutritionDisplayRows(meal, servings=1, keys=Object.keys(nutrientInfo)) {
+  const values=portionNutrition(meal,servings);
+  return keys.flatMap(key=>{
+    if(values[key]!=null)return [{key,value:values[key],partial:false}];
+    const coverage=meal.nutrition.coverage?.[key];
+    if(meal.nutrition.basis==='per_serving' && Number.isFinite(coverage?.knownSubtotal))
+      return [{key,value:coverage.knownSubtotal*servings,partial:true,known:coverage.known,total:coverage.total,missingIngredients:coverage.missingIngredients??[]}];
+    return [];
+  });
 }
 
 /** Rough adult reference values for grocery-basket coverage checks. */
@@ -213,8 +239,8 @@ export function assessGroceryNutrition(totals, itemNames = []) {
   const nutrients = Object.entries(GENERAL_DAILY_TARGETS).map(([key, meta]) => {
     const value = Number(totals?.[key]) || 0;
     const ratio = meta.target > 0 ? value / meta.target : 0;
-    let status = "gap";
-    let detail = "";
+    let status;
+    let detail;
     if (meta.mode === "minimum") {
       status = value >= meta.target ? "met" : "gap";
       detail =
