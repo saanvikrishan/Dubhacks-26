@@ -2,11 +2,10 @@ import { sourcedCookCandidate, sameSourceCandidate } from "./foodFacts.js";
 import { config, requireCapability } from "./config.js";
 import { assertMealAction, validateInputs } from "./engine.js";
 import { mealsFor, addGeneratedMeals, reviewGeneratedMeal, validateGeneratedMeal } from "./generatedMeals.js";
-import { rememberMeal, rememberSuggestions } from "../data/suggestions.js";
 import { normalizeCalendarState, validateEvent, scheduleMealsForDay, localInstant } from "./calendar.js";
+import { rememberMeal } from "../data/suggestions.js";
 
-/** Pin a chosen meal in the UI lookup cache so plan banners keep resolving.
- *  Persistence comes from the reviewed recipe snapshots in state.generatedMeals. */
+/** Pin a chosen meal in the UI lookup cache; persistence uses state.generatedMeals. */
 function withKnownMeal(state, meal) {
   if (meal?.id) rememberMeal(meal);
   return state;
@@ -52,6 +51,7 @@ export function createDemoState() {
       cuisines: [],
       tastes: [],
       dislikes: "",
+      avoidCuisines: [],
       phone: "",
       reminderFrom: "",
     },
@@ -118,11 +118,10 @@ function applyAction(state, action, c = config) {
   }
   if (action.type === "saveEvent") {
     requireCapability("calendarView", c);
-    // Manual entries default to meal slots — classes/workouts come from calendar import.
-    // Existing local tasks keep their kind so they can still be checked off.
+    // Manual entries are meal slots only — classes/workouts/tasks come from calendar import.
     const event = {
       ...action.event,
-      kind: action.event?.kind === "task" ? "task" : "meal",
+      kind: "meal",
       source: "manual",
       readOnly: false,
     };
@@ -529,116 +528,53 @@ export function validateState(state) {
     profile: {
       ...state.profile,
       cuisines: Array.isArray(state.profile?.cuisines) ? state.profile.cuisines : [],
+      avoidCuisines: Array.isArray(state.profile?.avoidCuisines) ? state.profile.avoidCuisines : [],
     },
   };
   validateInputs(state.profile, state.context, state.pantry);
-
-  // ── Carry through geminiMeals / groceryList (in-session, optional) ─────────
-  if (!Array.isArray(state.groceryList)) state = { ...state, groceryList: [] };
-  // geminiMeals can stay as-is (array or null); no deep validation needed
-
-  if (!Array.isArray(state.shoppingList)) {
-    state = { ...state, shoppingList: [] };
-  } else {
-    state = {
-      ...state,
-      shoppingList: state.shoppingList
-        .filter((item) => item && typeof item.name === "string" && item.name.trim())
-        .map((item) => ({
-          id:
-            typeof item.id === "string" && item.id
-              ? item.id
-              : crypto.randomUUID(),
-          name: item.name.trim().replace(/\s+/g, " ").slice(0, 80),
-          qty: typeof item.qty === "string" ? item.qty.trim().slice(0, 40) : "",
-          checked: Boolean(item.checked),
-        })),
-    };
-  }
-
   if (!Array.isArray(state.events) || !Array.isArray(state.mealPlans))
     throw new Error("Invalid saved calendar.");
-
-  // Re-hydrate Gemini suggestion meals so plan.mealId resolves after reload.
-  // Pin any meals already on the plan so a grocery refresh cannot wipe them.
-  if (Array.isArray(state.geminiMeals) && state.geminiMeals.length) {
-    rememberSuggestions(state.geminiMeals);
-    const plannedIds = new Set(
-      state.mealPlans.map((p) => p?.mealId).filter(Boolean),
-    );
-    for (const meal of state.geminiMeals) {
-      if (meal?.id && plannedIds.has(meal.id)) rememberMeal(meal);
-    }
+  for (const plan of [
+    state.plan,
+    state.previousPlan,
+    ...state.mealPlans,
+  ].filter(Boolean)) {
+    if (
+      (!plan.openSlot && !byId[plan.mealId]) ||
+      !Number.isFinite(plan.duration) ||
+      plan.duration < 0 ||
+      typeof plan.date !== "string" ||
+      typeof plan.start !== "string"
+    )
+      throw new Error("Invalid saved meal plan.");
+    portion(plan.servings);
   }
-
-  // ── Filter bad meal plans instead of throwing ─────────────────────────────
-  state = {
-    ...state,
-    mealPlans: state.mealPlans.filter((plan) => {
-      if (!plan?.id) return false;
-      if (typeof plan.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(plan.date)) return false;
-      if (typeof plan.start !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(plan.start)) return false;
-      // Open slots are placeholders (no meal yet) — keep them.
-      if (plan.openSlot && !plan.mealId) {
-        return Number.isFinite(plan.duration) && plan.duration > 0;
-      }
-      if (!byId[plan.mealId]) return false;
-      if (!Number.isFinite(plan.duration) || plan.duration <= 0) return false;
-      try { portion(plan.servings); return true; } catch { return false; }
-    }),
-  };
-
-  // Deduplicate meal plans (keep last)
-  const seenPlans = new Set();
-  state = {
-    ...state,
-    mealPlans: [...state.mealPlans].reverse().filter((p) => {
-      if (seenPlans.has(p.id)) return false;
-      seenPlans.add(p.id);
-      return true;
-    }).reverse(),
-  };
-
-  // Drop plan/previousPlan if they reference a removed meal
-  if (state.plan && !state.plan.openSlot && !byId[state.plan.mealId]) state = { ...state, plan: null };
-  if (state.previousPlan && !state.previousPlan.openSlot && !byId[state.previousPlan.mealId])
-    state = { ...state, previousPlan: null };
-
-  // ── Filter bad logs instead of throwing ──────────────────────────────────
-  state = {
-    ...state,
-    logs: state.logs.filter((log) => {
-      if (!byId[log.mealId] || typeof log.id !== "string") return false;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(log.date)) return false;
-      try { portion(log.servings); return true; } catch { return false; }
-    }),
-  };
-
-  // Deduplicate logs (keep last)
-  const seenLogs = new Set();
-  state = {
-    ...state,
-    logs: [...state.logs].reverse().filter((l) => {
-      if (seenLogs.has(l.id)) return false;
-      seenLogs.add(l.id);
-      return true;
-    }).reverse(),
-  };
-
-  // ── Drop invalid events instead of throwing ───────────────────────────────
-  const goodEvents = [];
-  for (const e of state.events) {
-    try { goodEvents.push(validateEvent(e)); } catch { /* skip */ }
+  for (const log of state.logs) {
+    if (
+      !byId[log.mealId] ||
+      typeof log.id !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(log.date)
+    )
+      throw new Error("Invalid saved meal log.");
+    portion(log.servings);
   }
-  const seenEvents = new Set();
-  state = {
-    ...state,
-    events: goodEvents.filter((e) => {
-      if (seenEvents.has(e.id)) return false;
-      seenEvents.add(e.id);
-      return true;
-    }),
-  };
-
+  if (new Set(state.logs.map((log) => log.id)).size !== state.logs.length)
+    throw new Error("Duplicate saved meal records.");
+  state.events.forEach(validateEvent);
+  if (
+    new Set(state.events.map((e) => e.id)).size !== state.events.length ||
+    new Set(state.mealPlans.map((p) => p.id)).size !== state.mealPlans.length
+  )
+    throw new Error("Duplicate scheduled activity identifiers.");
+  for (const plan of state.mealPlans)
+    if (
+      (!plan.openSlot && !byId[plan.mealId]) ||
+      !plan.id ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(plan.date) ||
+      !/^([01]\d|2[0-3]):[0-5]\d$/.test(plan.start) ||
+      !Number.isFinite(plan.duration) ||
+      plan.duration <= 0
+    )
+      throw new Error("Invalid scheduled meal.");
   return state;
 }

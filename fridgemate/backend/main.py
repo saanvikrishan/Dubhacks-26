@@ -12,10 +12,12 @@ from backboard import BackboardClient
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 from meal_generation import RecipeRequest, RecipeGenerator
+from meal_images import KEY as IMAGE_KEY, MealImageRequest, MealImageService, PhotoIndex, PredrawRequest, WarmRequest, image_key, request_from_meal
 from travel import walking_client
 from kroger import kroger_client
 from skills.loader import load_skill
@@ -29,7 +31,7 @@ import db as store
 import substitutions as swaps
 import usda
 from food_reference import food_reference
-from food_memory import recall_preferences, invalidate_preferences
+from food_memory import MealFeedback, record_feedback, learned_preferences
 
 
 app = FastAPI(title="FridgeMate API")
@@ -508,8 +510,7 @@ async def store_preference(request: PreferenceRequest):
             request.content,
             metadata=request.metadata,
         )
-        invalidate_preferences()
-        print("[Success] Preference stored to Backboard")
+        print(f"[Success] Preference stored to Backboard")
         return result
     except Exception as e:
         print(f"Backboard add_memory error (detailed): {type(e).__name__}: {str(e)}")
@@ -1419,7 +1420,18 @@ async def generate_recipes(request: RecipeRequest | IntentRequest):
         if request.text is None:
             raise HTTPException(status_code=422, detail="Invalid recipe request.")
         return await interpret_constraints(request)
-    return await recipe_generator.generate(client, request)
+    learned = await learned_preferences(backboard_client, request.userId) if request.userId else None
+    result = await recipe_generator.generate(client, request, learned)
+    # Start every photo now, before the browser renders the deck; cards join these jobs.
+    # Batches prepared ahead of time wait until they are opened (POST /food/image/predraw).
+    photos = [request_from_meal(m) for m in result.get("meals", [])]
+    for meal, photo in zip(result.get("meals", []), photos):
+        meal["photoKey"] = image_key(photo)   # the browser polls /food/image-status with this
+    if not request.prepare:
+        meal_images.warm(client, photos)
+        # Hold the answer until the first photo exists, so the deck never opens on a blank card.
+        await meal_images.first_ready([meal["photoKey"] for meal in result.get("meals", [])])
+    return result
 
 
 @app.post("/vision/ingredients")
@@ -1797,8 +1809,64 @@ async def nutrition_candidates(q: str):
 
 
 @app.get("/food/preferences")
-async def get_food_preferences():
-    return await recall_preferences(backboard_client, _assistant_id)
+async def get_food_preferences(user: str | None = None):
+    # Learned preferences come only from this user's own Backboard assistant.
+    learned = await learned_preferences(backboard_client, user)
+    return {"status": learned["status"], "preferences": [], "learned": learned}
+
+
+@app.post("/food/feedback")
+async def post_food_feedback(event: MealFeedback):
+    try:
+        return await record_feedback(backboard_client, event)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+
+
+meal_images = MealImageService(index=PhotoIndex(backboard_client))
+
+
+@app.post("/food/image")
+async def create_meal_image(request: MealImageRequest):
+    # Own cache, concurrency limit and daily cap; not counted against recipe requests.
+    if blocked_user_text(" ".join([request.name, *request.ingredients])):
+        reject_blocked_text()
+    return await meal_images.image(client, request)
+
+
+@app.on_event("startup")
+async def warm_common_dishes():
+    # Optional: prepare everyday dishes when the server starts (bounded by MEAL_IMAGE_WARM_LIMIT).
+    if os.getenv("MEAL_IMAGE_WARM") == "1":
+        meal_images.warm_common(client, popular=await meal_images.index.popular_dishes() if meal_images.index else None)
+
+
+@app.post("/food/image/predraw")
+async def predraw_meal_images(request: PredrawRequest):
+    """A prepared batch was just opened: draw its photos now, in the background lane."""
+    return {"keys": meal_images.predraw(client, request.requests)}
+
+
+@app.get("/food/image-status")
+async def meal_image_status(keys: str = ""):
+    wanted = [k for k in keys.split(",") if IMAGE_KEY.match(k)][:16]
+    return meal_images.status(wanted)
+
+
+@app.post("/food/image/warm")
+async def warm_meal_images(request: WarmRequest):
+    """Draw likely dishes ahead of time, ordered by this user's Backboard-learned likes."""
+    learned = await learned_preferences(backboard_client, request.user) if request.user else None
+    popular = await meal_images.index.popular_dishes() if meal_images.index else None
+    return {"started": meal_images.warm_common(client, learned, request.cuisines, popular)}
+
+
+@app.get("/food/image/{filename}")
+async def get_meal_image(filename: str):
+    path = meal_images.path(filename.removesuffix(".jpg")) if filename.endswith(".jpg") else None
+    if path is None or not path.exists():
+        raise HTTPException(status_code=404, detail="Image not found.")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 class SyncScheduleEventsRequest(BaseModel):

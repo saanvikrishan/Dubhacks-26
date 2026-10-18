@@ -3,6 +3,7 @@ import priceManifest from '../data/food/pricing-matches.json' with {type:'json'}
 import saved from '../data/food/usda-browser.json' with {type:'json'};
 import {normalizeUsdaFood,ingredientNutrition} from '../adapters/usdaFood.js';
 import {nutrientInfo} from './nutrition.js';
+import {resolveIngredientName} from './ingredientNames.js';
 
 const finite = n=>typeof n==='number' && Number.isFinite(n) && n>=0;
 const same = (a,b)=>JSON.stringify(a)===JSON.stringify(b);
@@ -28,13 +29,11 @@ export function installFoodReference(raw){reference=normalizeFoodReference(raw);
 export function recipeFingerprint(meal){return JSON.stringify([meal.name,meal.ingredients.map(i=>[i.name,i.grams]),meal.timing,meal.steps,meal.equipment]);}
 function hash(s){let a=2166136261,b=5381;for(const c of s){a=Math.imul(a^c.charCodeAt(0),16777619);b=Math.imul(b,33)^c.charCodeAt(0);}return (a>>>0).toString(16)+(b>>>0).toString(16);}
 
-// Standard recipe choices are explicit assumptions, not claims about pantry brands.
-const RECIPE_CHOICES = {'cheese':'cheddar cheese','bread':'whole-wheat bread','yogurt':'plain whole-milk yogurt','lettuce':'green leaf lettuce'};
-const ALIASES = {'cucumbers':'cucumber','tomato':'tomatoes','egg':'eggs','radish':'radishes','carrot':'carrots','onion':'onions','firm tofu':'tofu','cooked chickpeas':'chickpeas'};
+// Names resolve through the reviewed manifest; generic words become explicit, visible assumptions.
 export function recipeIngredient(name, source=reference) {
-  const original=String(name).trim().toLowerCase();
-  const key=ALIASES[original]??RECIPE_CHOICES[original]??original;
-  return {key,match:source.ingredients[key],assumption:RECIPE_CHOICES[original]?`For this recipe, ${original} means ${key}.`:null};
+  const resolved=resolveIngredientName(name);
+  const key=resolved.key??String(name).trim().toLowerCase();
+  return {key,match:source.ingredients[key],assumption:resolved.assumption};
 }
 
 export function packageGrams(key,quote,source=reference) {

@@ -34,7 +34,7 @@ test('food, cuisine, taste and dislikes affect ordering without replacing dietar
   assert.ok(comparePreferences(rice,pasta,{cuisines:['Chinese'],tastes:['Savory']})<0);
   assert.ok(comparePreferences(pasta,rice,{cuisines:['Italian'],dislikes:'pasta'})>0);
   const remembered=foodPreferences({...createDemoState().profile,cuisines:['Italian'],tastes:['Spicy'],dislikes:'olives',events:[{title:'private'}]});
-  assert.deepEqual(Object.keys(remembered).sort(),['cuisines','dislikes','preferred','tastes']);
+  assert.deepEqual(Object.keys(remembered).sort(),['avoidCuisines','cuisines','dislikes','preferred','tastes']);
 });
 test('recipe requests carry soft preferences and still use the existing bounded recipe service',async()=>{
   const state=createDemoState();state.profile={...state.profile,cuisines:['Italian'],tastes:['Mild'],dislikes:'olives'};

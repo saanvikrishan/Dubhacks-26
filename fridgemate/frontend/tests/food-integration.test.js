@@ -18,8 +18,12 @@ function fixture(price=2,now=Date.now()) {
 function state(){const s=createDemoState();s.pantry={...testPantry};s.profile.budget=20;s.context.available=180;s.context.commitmentTime='15:00';return s;}
 
 test('Foundation energy selects Atwater specific once, falls back correctly and retains missing nutrients',()=>{
- const raw=structuredClone(saved.records.find(r=>r.fdcId===2259793));const match=manifest.matches.find(m=>m.fdcId===raw.fdcId);
- const specific=raw.foodNutrients.find(r=>r.nutrient.id===2048).amount;
+ // A Foundation-style record built from a saved one, with all three published energy rows.
+ const base=saved.records.find(r=>r.dataType==='SR Legacy');
+ const match={...manifest.matches.find(m=>m.fdcId===base.fdcId),expectedDataType:'Foundation'};
+ const raw={...structuredClone(base),dataType:'Foundation',foodNutrients:[...structuredClone(base.foodNutrients).filter(r=>![1008,2047,2048].includes(r.nutrient.id)),
+   {nutrient:{id:2048,unitName:'kcal'},amount:111},{nutrient:{id:2047,unitName:'kcal'},amount:115},{nutrient:{id:1008,unitName:'kcal'},amount:120}]};
+ const specific=111;
  let normalized=normalizeUsdaFood(raw,match);assert.equal(normalized.values.energy_kcal,specific);
  raw.foodNutrients=raw.foodNutrients.filter(r=>r.nutrient.id!==2048);
  normalized=normalizeUsdaFood(raw,match);assert.equal(normalized.values.energy_kcal,raw.foodNutrients.find(r=>r.nutrient.id===2047).amount);
@@ -36,9 +40,13 @@ test('full-detail nutrient IDs, units and measured grams drive calculations, nev
  const reference=normalizeFoodReference(fixture());
  const full=deriveCookNutrition([{name:'tofu',grams:150},{name:'olive oil',grams:5}],reference);
  assert.ok(Math.abs(full.values.energy_kcal-(144*1.5+884*.05))<1e-8);
- const unknown=deriveCookNutrition([{name:'rice',grams:100},{name:'tofu',grams:150}],reference);
+ const unknown=deriveCookNutrition([{name:'noodles',grams:100},{name:'tofu',grams:150}],reference);
  assert.equal(unknown.values.energy_kcal,null);assert.equal(unknown.coverage.energy_kcal.known,1);
  assert.equal(unknown.matches[0].fdcId,null);
+ // A generic word resolves only through a documented default, and the choice is shown to the user.
+ const assumed=deriveCookNutrition([{name:'rice',grams:100},{name:'tofu',grams:150}],reference);
+ assert.ok(Math.abs(assumed.values.energy_kcal-(365+144*1.5))<1);
+ assert.deepEqual(assumed.assumptions,['For this recipe, rice means uncooked white rice.']);
 });
 test('Kroger portion costs use actual package mass; promotions and checkout totals remain separate',()=>{
  const reference=normalizeFoodReference(fixture());
@@ -83,7 +91,7 @@ test('Backboard preferences break ties only after current preferences and cannot
  installFoodReference(fixture());const s=state();s.profile.preferred='';
  const candidates=catalog.filter(m=>m.mode==='cook').map(m=>sourcedCookCandidate(m));
  const result=recommend(candidates,s,{mode:'cook',preferences:[{preferred:'tomatoes',cuisines:[]}]});
- assert.ok(result.cards.length<=3);assert.ok(result.cards[0].preferenceReason.includes('Backboard'));
+ assert.ok(result.cards.length<=3);assert.ok(result.cards[0].preferenceReason.includes('picked before'));
  s.profile.budget=0;assert.equal(recommend(candidates,s,{mode:'cook',preferences:[{preferred:'tofu'}]}).cards.length,0);
  s.profile.budget=20;s.profile.exclusions=['soy'];assert.ok(recommend(candidates,s,{mode:'cook',preferences:[{preferred:'tofu'}]}).cards.every(r=>!r.meal.ingredients.some(i=>i.name==='tofu')));
 });

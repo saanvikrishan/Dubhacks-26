@@ -408,6 +408,7 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                 : "Use international format, like +1XXXXXXXXXX. Saving a number enrolls it for iMessage reminders."}
             </p>
             <fieldset><legend>Favorite cuisines</legend><div className="checks">{CUISINES.map(value=><label key={value}><input type="checkbox" checked={(profile.cuisines??[]).includes(value)} onChange={()=>toggle('cuisines',value)}/>{value}</label>)}</div></fieldset>
+            <fieldset><legend>Cuisines to avoid</legend><div className="checks">{CUISINES.map(value=><label key={value}><input type="checkbox" checked={(profile.avoidCuisines??[]).includes(value)} onChange={()=>toggle('avoidCuisines',value)}/>{value}</label>)}</div></fieldset>
             <fieldset><legend>Tastes you enjoy</legend><div className="checks">{TASTES.map(value=><label key={value}><input type="checkbox" checked={(profile.tastes??[]).includes(value)} onChange={()=>toggle('tastes',value)}/>{value}</label>)}</div><p className="fine-print">These preferences guide meal suggestions. When connected, Backboard remembers your food, cuisine and taste choices.</p></fieldset>
             <fieldset>
               <legend>Exclude these allergens</legend>

@@ -4,24 +4,81 @@ import { useFoodReference, refreshFoodReference } from "../adapters/foodReferenc
 import { withSourcedWalking } from "../domain/uwDining.js";
 import { useUwWalking, refreshWalking } from "../adapters/uwWalking.js";
 import { UwDiningCatalog, UwMenuPreview, UwWalkingSummary } from "./UwDining.jsx";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Icon, Modal } from "./Core";
 import {
   MEAL_IMAGE_PLACEHOLDER,
   isMealPlaceholder,
-  prefetchMealImages,
+  photoState,
+  photoVersion,
+  subscribePhotos,
+  trackMealPhotos,
   mealImage,
   money,
   num,
+  prefetchMealImages,
+  resolveMealImage,
+  taggedMealImage,
 } from "./format";
 
-function MealPhoto({ meal, alt, className }) {
-  // Only verified bundled illustrations resolve; everything else shows the placeholder.
-  const assigned = mealImage(meal);
-  const [failedSrc, setFailedSrc] = useState(null);
-  const [loadedSrc, setLoadedSrc] = useState(null);
-  const src = failedSrc === assigned ? MEAL_IMAGE_PLACEHOLDER : assigned;
-  const showReal = !isMealPlaceholder(src) && loadedSrc === src;
+/**
+ * Cards are shown only once their photo has loaded, best-ranked first, so swiping never lands on a
+ * blank card. Upcoming dishes are tracked (and drawn) ahead. After 25 s cards show regardless, so a
+ * provider outage can never hide the deck.
+ */
+function usePhotoGate(entries, ahead = []) {
+  useSyncExternalStore(subscribePhotos, photoVersion);
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setExpired(true), 25000);
+    return () => clearTimeout(timer);
+  }, []);
+  const upcoming = [...entries.map((e) => e.meal), ...ahead].filter(Boolean).slice(0, 12);
+  const signature = upcoming.map((m) => m.id).join("|");
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- tracked by id; the list object changes every render
+  useEffect(() => trackMealPhotos(upcoming), [signature]);
+  // Always: cards with photos first, still-drawing next, failed photos last. The 25 s limit only
+  // ends the "plating" wait, so an outage can never hide the deck.
+  const by = (state) => entries.filter((e) => photoState(e.meal) === state);
+  const ready = by("ready");
+  return { ordered: [...ready, ...by("pending"), ...by("failed")], waiting: !expired && entries.length > 0 && ready.length === 0 };
+}
+
+function PhotoWait() {
+  return (
+    <div className="deck-empty">
+      <Icon name="fork" size={35} />
+      <h2>Plating your options…</h2>
+      <p>Your meals are ready; their photos are finishing.</p>
+    </div>
+  );
+}
+
+function MealPhoto({ meal, alt, className, label = "AI image" }) {
+  const initial = mealImage(meal);
+  const [src, setSrc] = useState(() => initial);
+  const [showReal, setShowReal] = useState(() => !isMealPlaceholder(initial));
+  const failed = useRef(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    failed.current = new Set();
+    const next = mealImage(meal);
+    setSrc(next);
+    setShowReal(!isMealPlaceholder(next));
+    resolveMealImage(meal).then((url) => {
+      if (cancelled || !url || failed.current.has(url)) return;
+      if (isMealPlaceholder(url)) {
+        setSrc(MEAL_IMAGE_PLACEHOLDER);
+        setShowReal(false);
+        return;
+      }
+      setSrc(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [meal?.id, meal?.name, meal?.imageSearch, meal?.imageUrl, meal?.photo]);
+  const generated = typeof src === "string" && src.startsWith("/api/food/image/");
   return (
     <span className={`meal-photo ${className || ""}`.trim()}>
       <span
@@ -40,15 +97,26 @@ function MealPhoto({ meal, alt, className }) {
         className={showReal ? "is-ready" : "is-waiting"}
         draggable={false}
         src={src}
-        alt={alt || meal?.name || "Meal"}
+        alt={generated ? `AI-generated image of ${meal?.name || "this meal"}` : alt || meal?.name || "Meal"}
         loading="eager"
         decoding="async"
-        onLoad={() => setLoadedSrc(src)}
+        onLoad={() => {
+          if (!isMealPlaceholder(src) && !failed.current.has(src)) {
+            setShowReal(true);
+          }
+        }}
         onError={() => {
-          if (!isMealPlaceholder(src)) setFailedSrc(src);
+          failed.current.add(src);
+          setShowReal(false);
+          const next = taggedMealImage(meal?.imageSearch || meal?.name || "food");
+          if (!failed.current.has(next)) {
+            setSrc(next);
+            return;
+          }
+          setSrc(MEAL_IMAGE_PLACEHOLDER);
         }}
       />
-      <span className="photo-label">{showReal ? "Meal illustration" : "Photo unavailable"}</span>
+      {showReal && generated && <span className="photo-label">{label}</span>}
     </span>
   );
 }
@@ -58,6 +126,7 @@ import { byId } from "../data/suggestions";
 import { clockTime, evaluate, recommend } from "../domain/engine";
 import { discoverCookMeals } from "../domain/discovery";
 import { requestRecipeDrafts, cookingMinutes } from "../adapters/recipes";
+import { recordSkip } from "../adapters/mealFeedback";
 import { nutritionDisplayRows, usdaConfidenceExplain } from "../domain/nutrition";
 import { mealSubstitutions, pantryCovers, substitutionLine } from "../domain/substitutions";
 import { prettyDate, eventsForDay, blocksMealPlanning } from "../domain/calendar";
@@ -168,7 +237,7 @@ export function CookStart({ state, onSuggested, onEatOut, onBrowseLocal, onUnava
       controller.current?.abort();
       controller.current=new AbortController();
       const pantry=Object.fromEntries(ingredients.filter(name=>quantities[name]!==undefined && quantities[name]!=='' && Number(quantities[name])>=0).map(name=>[name,Number(quantities[name])]));
-      const meals=await requestRecipeDrafts({state,ingredients,pantry,signal:AbortSignal.any([controller.current.signal,AbortSignal.timeout(40000)])});
+      const meals=await requestRecipeDrafts({state,ingredients,pantry,signal:AbortSignal.any([controller.current.signal,AbortSignal.timeout(60000)])});
       if(!meals.length) throw new Error('No recipes matched those inputs. Adjust the cooking window or browse local recipes.');
       await onSuggested(meals,ingredients,pantry);
     } catch (err) {
@@ -495,11 +564,36 @@ export function FoodDiscovery({
   onReview,
   geminiMeals = null,
   groceryList = [],
+  onMoreIdeas = null,
+  onPrepareMore = null,
 }) {
   const [passed, setPassed] = useState([]),
     [mood, setMood] = useState("any"),
     [sort, setSort] = useState("catalog"),
-    [openOnly, setOpenOnly] = useState(true);
+    [openOnly, setOpenOnly] = useState(true),
+    [moreLoading, setMoreLoading] = useState(false),
+    [moreError, setMoreError] = useState("");
+  // On success the parent swaps in the new batch, which starts a fresh deck.
+  async function getMoreIdeas() {
+    setMoreLoading(true);
+    setMoreError("");
+    try {
+      await onMoreIdeas();
+    } catch (err) {
+      setMoreError(err.name === "TimeoutError" ? "Recipe generation timed out. Try again." : err.message || "Could not get more ideas.");
+      setMoreLoading(false);
+    }
+  }
+  const canGetMore = mode === "cook" && Boolean(onMoreIdeas);
+  // Halfway through the deck, quietly prepare the next batch (and its photos).
+  const halfwaySeen = canGetMore && passed.length >= 4;
+  const nearEnd = canGetMore && passed.length >= 6;
+  useEffect(() => {
+    if (halfwaySeen) onPrepareMore?.("recipes");
+  }, [halfwaySeen, onPrepareMore]);
+  useEffect(() => {
+    if (nearEnd) onPrepareMore?.("photos");
+  }, [nearEnd, onPrepareMore]);
   const allDayBusy = eventsForDay(state.events ?? [], state.context.date).filter(e=>e.allDay && blocksMealPlanning(e) && !e.completed);
   const usingGemini = mode === "cook" && Array.isArray(geminiMeals);
   useEffect(() => {
@@ -519,9 +613,12 @@ export function FoodDiscovery({
     unique.set(recipeFingerprint(candidate),candidate);
   }
   const all=discoverCookMeals([...unique.values()],state,{sort,mood,passed,preferences:food.preferences});
-  const meals=all.display;
-  const school=recommend(buildUwDiningCatalog().filter(m=>m.dining.recordType==='menu').map(m=>prepareUwDiningMeal(m,state,walking.routes).meal),state,{mode:'eatOut',sort:'time',passed});
-  const schoolMeal=school.cards[0]?.meal;
+  const cookGate=usePhotoGate(mode==='cook'?all.display:[], mode==='cook'?[...unique.values()]:[]);
+  const meals=cookGate.ordered;
+  const uwMenu=buildUwDiningCatalog().filter(m=>m.dining.recordType==='menu').map(m=>prepareUwDiningMeal(m,state,walking.routes).meal);
+  const school=recommend(uwMenu,state,{mode:'eatOut',sort:'time',passed});
+  const schoolGate=usePhotoGate(mode==='eatOut'?school.cards:[], mode==='eatOut'?school.evaluations.filter(r=>r.feasible && !passed.includes(r.meal.id)).map(r=>r.meal):[]);
+  const schoolMeal=schoolGate.ordered[0]?.meal;
   const venues = uwDining
     .filter(
       (v) =>
@@ -535,7 +632,9 @@ export function FoodDiscovery({
     venue = schoolMeal?uwDining.find(v=>v.id===schoolMeal.dining.venueId):venues[0],
     nutrition = meal ? nutritionDisplayRows(meal,1,['energy_kcal','protein_g']) : [];
   const venueWalk=venue?currentWalking(walking.routes.find(r=>r.venueId===venue.id)):null;
-  const pass = (id) => setPassed((p) => [...p, id]);
+  // Campus cards picture the dish shown, or a published dish from that venue; else the old illustration.
+  const campusPhotoMeal=schoolMeal ?? (venue ? uwMenu.find(m=>m.dining.venueId===venue.id) : null) ?? null;
+  const pass = (id) => { recordSkip([meal, schoolMeal].find((m) => m?.id === id), state.context); setPassed((p) => [...p, id]); };
   const saved = state.mealPlans.find(
     (p) =>
       !p.openSlot &&
@@ -667,7 +766,9 @@ export function FoodDiscovery({
           </span>
           <span>← Pass · {mode === "cook" ? "Choose" : "Directions"} →</span>
         </div>
-        {mode === "cook" && meal ? (
+        {(mode === "cook" && cookGate.waiting) || (mode === "eatOut" && schoolGate.waiting) ? (
+          <PhotoWait />
+        ) : mode === "cook" && meal ? (
           <SwipeCard
             key={meal.id}
             label={`Meal swipe card: ${meal.name}`}
@@ -796,19 +897,30 @@ export function FoodDiscovery({
               onClick={() => onVenue(venue)}
               aria-label={`View ${venue.name} details`}
             >
-              <img
-                draggable={false}
-                src={`/food/${venue.photo}.png`}
-                alt="Illustrative meal, not a photo of this restaurant’s dish"
-              />
+              {campusPhotoMeal ? (
+                <MealPhoto
+                  key={campusPhotoMeal.id}
+                  meal={campusPhotoMeal}
+                  alt={campusPhotoMeal.name}
+                  label={schoolMeal ? "AI image · not dining-hall photography" : `AI image · example: ${campusPhotoMeal.name}`}
+                />
+              ) : (
+                <img
+                  draggable={false}
+                  src={`/food/${venue.photo}.png`}
+                  alt="Illustrative meal, not a photo of this restaurant’s dish"
+                />
+              )}
               <span className="cover-tag">
                 {venueWalk ? `${venueWalk.distanceMeters} m walking` : distanceMeters(venue) === 0
                   ? "At the HUB"
                   : `~${distanceMeters(venue)} m · straight-line`}
               </span>
-              <span className="photo-label">
-                AI illustration · not venue photography
-              </span>
+              {!campusPhotoMeal && (
+                <span className="photo-label">
+                  AI illustration · not venue photography
+                </span>
+              )}
             </button>
             <div className="flashcard-body">
               <div className="venue-card-status">
@@ -879,9 +991,15 @@ export function FoodDiscovery({
                 : mode==='cook' && food.status==='unavailable' ? 'Retry the price lookup. Missing prices have not been replaced with guesses.'
                 : mode==='cook' ? (Object.values(state.pantry).some(g => g > 0) ? "Choose a later time or review the reasons below. Your food restrictions stay in place." : "Add the groceries you have, or explore UW dining. You can plan for today or a future date.") : "Change the meal time or include locations outside their published hours."}
             </p>
+            {canGetMore && passed.length > 0 && (
+              <button className="primary" disabled={moreLoading} onClick={getMoreIdeas}>
+                {moreLoading ? "Finding new recipes…" : "Get more ideas"}
+              </button>
+            )}
+            {moreError && <p className="error">{moreError}</p>}
             {mode === "cook" && allDayBusy.length>0 && <p className="error">Your calendar marks {allDayBusy.map(e=>e.title).join(", ")} busy all day. Open the event in My Plan to change whether it blocks meals, or choose another date.</p>}
             <button
-              className="primary"
+              className={canGetMore && passed.length > 0 ? "secondary" : "primary"}
               disabled={mode==='cook' && ['not_requested','loading'].includes(food.status)}
               onClick={() => passed.length ? setPassed([]) : mode==='cook' && food.status==='unavailable' ? refreshFoodReference() : mode==='cook' ? (Object.values(state.pantry).some(g => g > 0) ? onWindow() : onChangeGroceries()) : setOpenOnly(false)}
             >
@@ -902,6 +1020,11 @@ export function FoodDiscovery({
           {mode === "cook" && onChangeGroceries ? (
             <button className="text-button" onClick={onChangeGroceries}>
               Change groceries
+            </button>
+          ) : null}
+          {canGetMore ? (
+            <button className="text-button" disabled={moreLoading} onClick={getMoreIdeas}>
+              {moreLoading ? "Finding new recipes…" : "More ideas"}
             </button>
           ) : null}
           <span>

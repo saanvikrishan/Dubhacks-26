@@ -8,7 +8,10 @@
       "expectedDataType": "SR Legacy",
       "preparation": "cooked",
       "weightBasis": "cooked_edible_weight",
-      "rationale": "Explicit Rice, brown, long-grain, cooked (Includes foods for USDA's Food Distribution Program) input form; ingredient averages are estimates, not branded-product or UW-dish nutrition."
+      "rationale": "Explicit Rice, brown, long-grain, cooked (Includes foods for USDA's Food Distribution Program) input form; ingredient averages are estimates, not branded-product or UW-dish nutrition.",
+      "aliases": [
+        "steamed brown rice"
+      ]
     },
     {
       "key": "tofu",
@@ -17,7 +20,12 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Firm calcium-set tofu, as packaged; not silken, fried or a different coagulant."
+      "rationale": "Firm calcium-set tofu, as packaged; not silken, fried or a different coagulant.",
+      "aliases": [
+        "firm tofu",
+        "extra firm tofu",
+        "extra-firm tofu"
+      ]
     },
     {
       "key": "cucumber",
@@ -26,7 +34,11 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Explicit Cucumber, with peel, raw input form; ingredient averages are estimates, not branded-product or UW-dish nutrition."
+      "rationale": "Explicit Cucumber, with peel, raw input form; ingredient averages are estimates, not branded-product or UW-dish nutrition.",
+      "aliases": [
+        "cucumbers",
+        "english cucumber"
+      ]
     },
     {
       "key": "chickpeas",
@@ -35,7 +47,12 @@
       "expectedDataType": "SR Legacy",
       "preparation": "cooked",
       "weightBasis": "cooked_edible_weight",
-      "rationale": "Cooked, boiled without salt; canned/salted and dry chickpeas require another match."
+      "rationale": "Cooked, boiled without salt; canned/salted and dry chickpeas require another match.",
+      "aliases": [
+        "cooked chickpeas",
+        "garbanzo beans",
+        "garbanzos"
+      ]
     },
     {
       "key": "olive oil",
@@ -44,7 +61,12 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Explicit Oil, olive, salad or cooking input form; ingredient averages are estimates, not branded-product or UW-dish nutrition."
+      "rationale": "Explicit Oil, olive, salad or cooking input form; ingredient averages are estimates, not branded-product or UW-dish nutrition.",
+      "aliases": [
+        "extra virgin olive oil",
+        "extra-virgin olive oil",
+        "evoo"
+      ]
     },
     {
       "key": "eggs",
@@ -53,16 +75,24 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Raw edible whole chicken egg input, without shell."
+      "rationale": "Raw edible whole chicken egg input, without shell.",
+      "aliases": [
+        "egg",
+        "whole eggs"
+      ]
     },
     {
       "key": "garlic",
-      "fdcId": 1104647,
+      "fdcId": 169230,
       "expectedDescription": "Garlic, raw",
-      "expectedDataType": "Foundation",
+      "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Explicit Garlic, raw input form; ingredient averages are estimates, not branded-product or UW-dish nutrition."
+      "rationale": "Garlic, raw (SR Legacy); uncooked/as-purchased input weight. SR Legacy chosen for a complete nutrient profile.",
+      "aliases": [
+        "garlic cloves",
+        "garlic clove"
+      ]
     },
     {
       "key": "tomatoes",
@@ -71,7 +101,13 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Explicit Tomatoes, red, ripe, raw, year round average input form; ingredient averages are estimates, not branded-product or UW-dish nutrition."
+      "rationale": "Explicit Tomatoes, red, ripe, raw, year round average input form; ingredient averages are estimates, not branded-product or UW-dish nutrition.",
+      "aliases": [
+        "tomato",
+        "roma tomatoes",
+        "cherry tomatoes",
+        "grape tomatoes"
+      ]
     },
     {
       "key": "frozen vegetables",
@@ -80,7 +116,11 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "USDA generic mixed frozen vegetables, unprepared; mixture variation remains an estimate."
+      "rationale": "USDA generic mixed frozen vegetables, unprepared; mixture variation remains an estimate.",
+      "aliases": [
+        "mixed vegetables",
+        "frozen mixed vegetables"
+      ]
     },
     {
       "key": "dry pasta",
@@ -89,7 +129,10 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Explicit Pasta, dry, unenriched input form; ingredient averages are estimates, not branded-product or UW-dish nutrition."
+      "rationale": "Explicit Pasta, dry, unenriched input form; ingredient averages are estimates, not branded-product or UW-dish nutrition.",
+      "aliases": [
+        "uncooked pasta"
+      ]
     },
     {
       "key": "soy sauce",
@@ -98,25 +141,38 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Regular shoyu, not tamari or reduced sodium."
+      "rationale": "Regular shoyu, not tamari or reduced sodium.",
+      "aliases": [
+        "light soy sauce",
+        "shoyu"
+      ]
     },
     {
       "key": "plain whole-milk yogurt",
-      "fdcId": 2259793,
+      "fdcId": 171284,
       "expectedDescription": "Yogurt, plain, whole milk",
-      "expectedDataType": "Foundation",
+      "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Explicit Yogurt, plain, whole milk input form; ingredient averages are estimates, not branded-product or UW-dish nutrition."
+      "rationale": "Yogurt, plain, whole milk (SR Legacy); uncooked/as-purchased input weight. SR Legacy chosen for a complete nutrient profile.",
+      "aliases": [
+        "plain yogurt",
+        "whole milk yogurt"
+      ]
     },
     {
       "key": "cheddar cheese",
-      "fdcId": 328637,
-      "expectedDescription": "Cheese, cheddar",
-      "expectedDataType": "Foundation",
+      "fdcId": 173414,
+      "expectedDescription": "Cheese, cheddar (Includes foods for USDA's Food Distribution Program)",
+      "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Explicit Cheese, cheddar input form; ingredient averages are estimates, not branded-product or UW-dish nutrition."
+      "rationale": "Cheese, cheddar (Includes foods for USDA's Food Distribution Program) (SR Legacy); uncooked/as-purchased input weight. SR Legacy chosen for a complete nutrient profile.",
+      "aliases": [
+        "cheddar",
+        "shredded cheddar",
+        "sharp cheddar"
+      ]
     },
     {
       "key": "whole-wheat bread",
@@ -125,7 +181,11 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Explicit Bread, whole-wheat, commercially prepared input form; ingredient averages are estimates, not branded-product or UW-dish nutrition."
+      "rationale": "Explicit Bread, whole-wheat, commercially prepared input form; ingredient averages are estimates, not branded-product or UW-dish nutrition.",
+      "aliases": [
+        "whole wheat bread",
+        "wheat bread"
+      ]
     },
     {
       "key": "radishes",
@@ -134,7 +194,10 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Reviewed exact raw edible ingredient identity; recipe nutrition remains an ingredient estimate."
+      "rationale": "Reviewed exact raw edible ingredient identity; recipe nutrition remains an ingredient estimate.",
+      "aliases": [
+        "radish"
+      ]
     },
     {
       "key": "red cabbage",
@@ -143,7 +206,10 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Reviewed exact raw edible ingredient identity; recipe nutrition remains an ingredient estimate."
+      "rationale": "Reviewed exact raw edible ingredient identity; recipe nutrition remains an ingredient estimate.",
+      "aliases": [
+        "purple cabbage"
+      ]
     },
     {
       "key": "green leaf lettuce",
@@ -152,7 +218,10 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Reviewed exact raw edible ingredient identity; recipe nutrition remains an ingredient estimate."
+      "rationale": "Reviewed exact raw edible ingredient identity; recipe nutrition remains an ingredient estimate.",
+      "aliases": [
+        "leaf lettuce"
+      ]
     },
     {
       "key": "spinach",
@@ -161,7 +230,10 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Reviewed exact raw edible ingredient identity; recipe nutrition remains an ingredient estimate."
+      "rationale": "Reviewed exact raw edible ingredient identity; recipe nutrition remains an ingredient estimate.",
+      "aliases": [
+        "baby spinach"
+      ]
     },
     {
       "key": "carrots",
@@ -170,7 +242,11 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Reviewed exact raw edible ingredient identity; recipe nutrition remains an ingredient estimate."
+      "rationale": "Reviewed exact raw edible ingredient identity; recipe nutrition remains an ingredient estimate.",
+      "aliases": [
+        "carrot",
+        "baby carrots"
+      ]
     },
     {
       "key": "onions",
@@ -179,12 +255,1458 @@
       "expectedDataType": "SR Legacy",
       "preparation": "raw",
       "weightBasis": "raw_edible_weight",
-      "rationale": "Reviewed exact raw edible ingredient identity; recipe nutrition remains an ingredient estimate."
+      "rationale": "Reviewed exact raw edible ingredient identity; recipe nutrition remains an ingredient estimate.",
+      "aliases": [
+        "onion",
+        "yellow onion",
+        "white onion",
+        "red onion"
+      ]
+    },
+    {
+      "key": "chicken breast",
+      "fdcId": 171077,
+      "expectedDescription": "Chicken, broiler or fryers, breast, skinless, boneless, meat only, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Chicken, broiler or fryers, breast, skinless, boneless, meat only, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "chicken breasts",
+        "boneless skinless chicken breast",
+        "chicken breast fillet"
+      ]
+    },
+    {
+      "key": "chicken thigh",
+      "fdcId": 173627,
+      "expectedDescription": "Chicken, broilers or fryers, dark meat, thigh, meat only, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Chicken, broilers or fryers, dark meat, thigh, meat only, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "chicken thighs",
+        "boneless chicken thigh",
+        "boneless skinless chicken thigh"
+      ]
+    },
+    {
+      "key": "ground beef",
+      "fdcId": 171796,
+      "expectedDescription": "Beef, ground, 85% lean meat / 15% fat, raw (Includes foods for USDA's Food Distribution Program)",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Beef, ground, 85% lean meat / 15% fat, raw (Includes foods for USDA's Food Distribution Program) (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "minced beef",
+        "beef mince",
+        "lean ground beef"
+      ]
+    },
+    {
+      "key": "ground turkey",
+      "fdcId": 171505,
+      "expectedDescription": "Turkey, Ground, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Turkey, Ground, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "minced turkey"
+      ]
+    },
+    {
+      "key": "bacon",
+      "fdcId": 168277,
+      "expectedDescription": "Pork, cured, bacon, unprepared",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Pork, cured, bacon, unprepared (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "bacon strips"
+      ]
+    },
+    {
+      "key": "salmon",
+      "fdcId": 175167,
+      "expectedDescription": "Fish, salmon, Atlantic, farmed, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Fish, salmon, Atlantic, farmed, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "salmon fillet",
+        "salmon fillets"
+      ]
+    },
+    {
+      "key": "canned tuna",
+      "fdcId": 173709,
+      "expectedDescription": "Fish, tuna, light, canned in water, drained solids (Includes foods for USDA's Food Distribution Program)",
+      "expectedDataType": "SR Legacy",
+      "preparation": "cooked",
+      "weightBasis": "cooked_edible_weight",
+      "rationale": "Fish, tuna, light, canned in water, drained solids (Includes foods for USDA's Food Distribution Program) (SR Legacy); cooked or canned input weight. Drained solids of light tuna canned in water.",
+      "aliases": [
+        "tuna in water",
+        "canned light tuna"
+      ]
+    },
+    {
+      "key": "shrimp",
+      "fdcId": 174210,
+      "expectedDescription": "Crustaceans, shrimp, mixed species, raw (may contain additives to retain moisture)",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Crustaceans, shrimp, mixed species, raw (may contain additives to retain moisture) (SR Legacy); uncooked/as-purchased input weight. USDA notes this raw shrimp may contain moisture-retaining additives, which raise sodium; typical of frozen retail shrimp.",
+      "aliases": [
+        "prawns",
+        "raw shrimp"
+      ]
+    },
+    {
+      "key": "black beans",
+      "fdcId": 175188,
+      "expectedDescription": "Beans, black turtle, mature seeds, canned",
+      "expectedDataType": "SR Legacy",
+      "preparation": "cooked",
+      "weightBasis": "cooked_edible_weight",
+      "rationale": "Beans, black turtle, mature seeds, canned (SR Legacy); cooked or canned input weight.",
+      "aliases": [
+        "canned black beans"
+      ]
+    },
+    {
+      "key": "kidney beans",
+      "fdcId": 173741,
+      "expectedDescription": "Beans, kidney, all types, mature seeds, canned",
+      "expectedDataType": "SR Legacy",
+      "preparation": "cooked",
+      "weightBasis": "cooked_edible_weight",
+      "rationale": "Beans, kidney, all types, mature seeds, canned (SR Legacy); cooked or canned input weight.",
+      "aliases": [
+        "red kidney beans",
+        "canned kidney beans"
+      ]
+    },
+    {
+      "key": "lentils",
+      "fdcId": 172420,
+      "expectedDescription": "Lentils, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Lentils, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "dried lentils",
+        "green lentils",
+        "brown lentils"
+      ]
+    },
+    {
+      "key": "peanut butter",
+      "fdcId": 174294,
+      "expectedDescription": "Peanut Butter, smooth (Includes foods for USDA's Food Distribution Program)",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Peanut Butter, smooth (Includes foods for USDA's Food Distribution Program) (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "creamy peanut butter"
+      ]
+    },
+    {
+      "key": "almonds",
+      "fdcId": 170567,
+      "expectedDescription": "Nuts, almonds",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Nuts, almonds (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "raw almonds"
+      ]
+    },
+    {
+      "key": "tempeh",
+      "fdcId": 174272,
+      "expectedDescription": "Tempeh",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Tempeh (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "edamame",
+      "fdcId": 168410,
+      "expectedDescription": "Edamame, frozen, unprepared",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Edamame, frozen, unprepared (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "frozen edamame"
+      ]
+    },
+    {
+      "key": "whole milk",
+      "fdcId": 171265,
+      "expectedDescription": "Milk, whole, 3.25% milkfat, with added vitamin D",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Milk, whole, 3.25% milkfat, with added vitamin D (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "soy milk",
+      "fdcId": 175215,
+      "expectedDescription": "Soymilk (all flavors), unsweetened, with added calcium, vitamins A and D",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Soymilk (all flavors), unsweetened, with added calcium, vitamins A and D (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "soymilk",
+        "unsweetened soy milk"
+      ]
+    },
+    {
+      "key": "butter",
+      "fdcId": 173410,
+      "expectedDescription": "Butter, salted",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Butter, salted (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "salted butter"
+      ]
+    },
+    {
+      "key": "unsalted butter",
+      "fdcId": 173430,
+      "expectedDescription": "Butter, without salt",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Butter, without salt (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "mozzarella",
+      "fdcId": 171244,
+      "expectedDescription": "Cheese, mozzarella, low moisture, part-skim",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Cheese, mozzarella, low moisture, part-skim (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "mozzarella cheese",
+        "shredded mozzarella"
+      ]
+    },
+    {
+      "key": "parmesan",
+      "fdcId": 171247,
+      "expectedDescription": "Cheese, parmesan, grated",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Cheese, parmesan, grated (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "parmesan cheese",
+        "grated parmesan",
+        "parmigiano reggiano"
+      ]
+    },
+    {
+      "key": "feta",
+      "fdcId": 173420,
+      "expectedDescription": "Cheese, feta",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Cheese, feta (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "feta cheese",
+        "crumbled feta"
+      ]
+    },
+    {
+      "key": "cream cheese",
+      "fdcId": 173418,
+      "expectedDescription": "Cheese, cream",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Cheese, cream (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "greek yogurt",
+      "fdcId": 170894,
+      "expectedDescription": "Yogurt, Greek, plain, nonfat (Includes foods for USDA's Food Distribution Program)",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Yogurt, Greek, plain, nonfat (Includes foods for USDA's Food Distribution Program) (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "plain greek yogurt",
+        "nonfat greek yogurt"
+      ]
+    },
+    {
+      "key": "heavy cream",
+      "fdcId": 170859,
+      "expectedDescription": "Cream, fluid, heavy whipping",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Cream, fluid, heavy whipping (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "heavy whipping cream",
+        "whipping cream"
+      ]
+    },
+    {
+      "key": "sour cream",
+      "fdcId": 171257,
+      "expectedDescription": "Cream, sour, cultured",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Cream, sour, cultured (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "white rice",
+      "fdcId": 168877,
+      "expectedDescription": "Rice, white, long-grain, regular, raw, enriched",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Rice, white, long-grain, regular, raw, enriched (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "uncooked white rice",
+        "long-grain white rice"
+      ]
+    },
+    {
+      "key": "brown rice",
+      "fdcId": 169703,
+      "expectedDescription": "Rice, brown, long-grain, raw (Includes foods for USDA's Food Distribution Program)",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Rice, brown, long-grain, raw (Includes foods for USDA's Food Distribution Program) (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "uncooked brown rice"
+      ]
+    },
+    {
+      "key": "cooked white rice",
+      "fdcId": 168878,
+      "expectedDescription": "Rice, white, long-grain, regular, enriched, cooked",
+      "expectedDataType": "SR Legacy",
+      "preparation": "cooked",
+      "weightBasis": "cooked_edible_weight",
+      "rationale": "Rice, white, long-grain, regular, enriched, cooked (SR Legacy); cooked or canned input weight.",
+      "aliases": [
+        "steamed rice",
+        "steamed white rice"
+      ]
+    },
+    {
+      "key": "rolled oats",
+      "fdcId": 173904,
+      "expectedDescription": "Cereals, oats, regular and quick, not fortified, dry",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Cereals, oats, regular and quick, not fortified, dry (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "oats",
+        "old-fashioned oats",
+        "quick oats"
+      ]
+    },
+    {
+      "key": "quinoa",
+      "fdcId": 168874,
+      "expectedDescription": "Quinoa, uncooked",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Quinoa, uncooked (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "uncooked quinoa"
+      ]
+    },
+    {
+      "key": "all-purpose flour",
+      "fdcId": 168894,
+      "expectedDescription": "Wheat flour, white, all-purpose, enriched, bleached",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Wheat flour, white, all-purpose, enriched, bleached (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "plain flour",
+        "white flour"
+      ]
+    },
+    {
+      "key": "flour tortillas",
+      "fdcId": 175037,
+      "expectedDescription": "Tortillas, ready-to-bake or -fry, flour, refrigerated",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Tortillas, ready-to-bake or -fry, flour, refrigerated (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "flour tortilla",
+        "wraps"
+      ]
+    },
+    {
+      "key": "corn tortillas",
+      "fdcId": 175036,
+      "expectedDescription": "Tortillas, ready-to-bake or -fry, corn",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Tortillas, ready-to-bake or -fry, corn (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "corn tortilla"
+      ]
+    },
+    {
+      "key": "white bread",
+      "fdcId": 174924,
+      "expectedDescription": "Bread, white, commercially prepared (includes soft bread crumbs)",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Bread, white, commercially prepared (includes soft bread crumbs) (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "sandwich bread"
+      ]
+    },
+    {
+      "key": "egg noodles",
+      "fdcId": 169731,
+      "expectedDescription": "Noodles, egg, dry, enriched",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Noodles, egg, dry, enriched (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "dry egg noodles"
+      ]
+    },
+    {
+      "key": "rice noodles",
+      "fdcId": 169742,
+      "expectedDescription": "Rice noodles, dry",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Rice noodles, dry (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "dry rice noodles",
+        "rice vermicelli",
+        "rice sticks"
+      ]
+    },
+    {
+      "key": "potatoes",
+      "fdcId": 170026,
+      "expectedDescription": "Potatoes, flesh and skin, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Potatoes, flesh and skin, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "potato"
+      ]
+    },
+    {
+      "key": "sweet potatoes",
+      "fdcId": 168482,
+      "expectedDescription": "Sweet potato, raw, unprepared (Includes foods for USDA's Food Distribution Program)",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Sweet potato, raw, unprepared (Includes foods for USDA's Food Distribution Program) (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "sweet potato",
+        "yams"
+      ]
+    },
+    {
+      "key": "broccoli",
+      "fdcId": 170379,
+      "expectedDescription": "Broccoli, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Broccoli, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "broccoli florets"
+      ]
+    },
+    {
+      "key": "red bell pepper",
+      "fdcId": 170108,
+      "expectedDescription": "Peppers, sweet, red, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Peppers, sweet, red, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "red bell peppers",
+        "red pepper"
+      ]
+    },
+    {
+      "key": "green bell pepper",
+      "fdcId": 170427,
+      "expectedDescription": "Peppers, sweet, green, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Peppers, sweet, green, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "green bell peppers",
+        "green pepper"
+      ]
+    },
+    {
+      "key": "zucchini",
+      "fdcId": 169291,
+      "expectedDescription": "Squash, summer, zucchini, includes skin, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Squash, summer, zucchini, includes skin, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "courgette"
+      ]
+    },
+    {
+      "key": "mushrooms",
+      "fdcId": 169251,
+      "expectedDescription": "Mushrooms, white, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Mushrooms, white, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "white mushrooms",
+        "button mushrooms"
+      ]
+    },
+    {
+      "key": "kale",
+      "fdcId": 168421,
+      "expectedDescription": "Kale, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Kale, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "cauliflower",
+      "fdcId": 169986,
+      "expectedDescription": "Cauliflower, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Cauliflower, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "cauliflower florets"
+      ]
+    },
+    {
+      "key": "green beans",
+      "fdcId": 169961,
+      "expectedDescription": "Beans, snap, green, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Beans, snap, green, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "string beans"
+      ]
+    },
+    {
+      "key": "corn",
+      "fdcId": 169998,
+      "expectedDescription": "Corn, sweet, yellow, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Corn, sweet, yellow, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "sweet corn",
+        "corn kernels"
+      ]
+    },
+    {
+      "key": "frozen peas",
+      "fdcId": 170016,
+      "expectedDescription": "Peas, green, frozen, unprepared (Includes foods for USDA's Food Distribution Program)",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Peas, green, frozen, unprepared (Includes foods for USDA's Food Distribution Program) (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "peas",
+        "green peas"
+      ]
+    },
+    {
+      "key": "celery",
+      "fdcId": 169988,
+      "expectedDescription": "Celery, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Celery, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "celery stalks"
+      ]
+    },
+    {
+      "key": "cabbage",
+      "fdcId": 169975,
+      "expectedDescription": "Cabbage, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Cabbage, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "green cabbage"
+      ]
+    },
+    {
+      "key": "bok choy",
+      "fdcId": 170390,
+      "expectedDescription": "Cabbage, chinese (pak-choi), raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Cabbage, chinese (pak-choi), raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "pak choi",
+        "baby bok choy"
+      ]
+    },
+    {
+      "key": "green onions",
+      "fdcId": 170005,
+      "expectedDescription": "Onions, spring or scallions (includes tops and bulb), raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Onions, spring or scallions (includes tops and bulb), raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "scallions",
+        "spring onions",
+        "green onion"
+      ]
+    },
+    {
+      "key": "ginger",
+      "fdcId": 169231,
+      "expectedDescription": "Ginger root, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Ginger root, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "fresh ginger",
+        "ginger root"
+      ]
+    },
+    {
+      "key": "avocado",
+      "fdcId": 171705,
+      "expectedDescription": "Avocados, raw, all commercial varieties",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Avocados, raw, all commercial varieties (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "avocados"
+      ]
+    },
+    {
+      "key": "lemon juice",
+      "fdcId": 167747,
+      "expectedDescription": "Lemon juice, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Lemon juice, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "lime juice",
+      "fdcId": 168156,
+      "expectedDescription": "Lime juice, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Lime juice, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "lemon",
+      "fdcId": 167746,
+      "expectedDescription": "Lemons, raw, without peel",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Lemons, raw, without peel (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "lemons"
+      ]
+    },
+    {
+      "key": "jalapeno",
+      "fdcId": 168576,
+      "expectedDescription": "Peppers, jalapeno, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Peppers, jalapeno, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "jalapeño",
+        "jalapenos",
+        "jalapeño pepper",
+        "jalapeno pepper"
+      ]
+    },
+    {
+      "key": "cilantro",
+      "fdcId": 169997,
+      "expectedDescription": "Coriander (cilantro) leaves, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Coriander (cilantro) leaves, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "fresh cilantro",
+        "coriander leaves"
+      ]
+    },
+    {
+      "key": "basil",
+      "fdcId": 172232,
+      "expectedDescription": "Basil, fresh",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Basil, fresh (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "fresh basil",
+        "basil leaves"
+      ]
+    },
+    {
+      "key": "parsley",
+      "fdcId": 170416,
+      "expectedDescription": "Parsley, fresh",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Parsley, fresh (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "fresh parsley"
+      ]
+    },
+    {
+      "key": "canned tomatoes",
+      "fdcId": 170051,
+      "expectedDescription": "Tomatoes, red, ripe, canned, packed in tomato juice",
+      "expectedDataType": "SR Legacy",
+      "preparation": "cooked",
+      "weightBasis": "cooked_edible_weight",
+      "rationale": "Tomatoes, red, ripe, canned, packed in tomato juice (SR Legacy); cooked or canned input weight.",
+      "aliases": [
+        "diced tomatoes",
+        "canned diced tomatoes"
+      ]
+    },
+    {
+      "key": "tomato paste",
+      "fdcId": 170459,
+      "expectedDescription": "Tomato products, canned, paste, without salt added (Includes foods for USDA's Food Distribution Program)",
+      "expectedDataType": "SR Legacy",
+      "preparation": "cooked",
+      "weightBasis": "cooked_edible_weight",
+      "rationale": "Tomato products, canned, paste, without salt added (Includes foods for USDA's Food Distribution Program) (SR Legacy); cooked or canned input weight.",
+      "aliases": []
+    },
+    {
+      "key": "bean sprouts",
+      "fdcId": 169957,
+      "expectedDescription": "Mung beans, mature seeds, sprouted, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Mung beans, mature seeds, sprouted, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "mung bean sprouts"
+      ]
+    },
+    {
+      "key": "eggplant",
+      "fdcId": 169228,
+      "expectedDescription": "Eggplant, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Eggplant, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "aubergine"
+      ]
+    },
+    {
+      "key": "bananas",
+      "fdcId": 173944,
+      "expectedDescription": "Bananas, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Bananas, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "banana"
+      ]
+    },
+    {
+      "key": "apples",
+      "fdcId": 171688,
+      "expectedDescription": "Apples, raw, with skin (Includes foods for USDA's Food Distribution Program)",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Apples, raw, with skin (Includes foods for USDA's Food Distribution Program) (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "apple"
+      ]
+    },
+    {
+      "key": "blueberries",
+      "fdcId": 171711,
+      "expectedDescription": "Blueberries, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Blueberries, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "strawberries",
+      "fdcId": 167762,
+      "expectedDescription": "Strawberries, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Strawberries, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "oranges",
+      "fdcId": 169097,
+      "expectedDescription": "Oranges, raw, all commercial varieties",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Oranges, raw, all commercial varieties (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "orange"
+      ]
+    },
+    {
+      "key": "mango",
+      "fdcId": 169910,
+      "expectedDescription": "Mangos, raw",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Mangos, raw (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "mangoes"
+      ]
+    },
+    {
+      "key": "vegetable oil",
+      "fdcId": 171411,
+      "expectedDescription": "Oil, soybean, salad or cooking",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Oil, soybean, salad or cooking (SR Legacy); uncooked/as-purchased input weight. US \"vegetable oil\" is usually soybean oil.",
+      "aliases": [
+        "cooking oil",
+        "neutral oil",
+        "soybean oil"
+      ]
+    },
+    {
+      "key": "canola oil",
+      "fdcId": 172336,
+      "expectedDescription": "Oil, canola",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Oil, canola (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "sesame oil",
+      "fdcId": 171016,
+      "expectedDescription": "Oil, sesame, salad or cooking",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Oil, sesame, salad or cooking (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "toasted sesame oil"
+      ]
+    },
+    {
+      "key": "mayonnaise",
+      "fdcId": 171009,
+      "expectedDescription": "Salad dressing, mayonnaise, regular",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Salad dressing, mayonnaise, regular (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "mayo"
+      ]
+    },
+    {
+      "key": "ketchup",
+      "fdcId": 168556,
+      "expectedDescription": "Catsup",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Catsup (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "tomato ketchup"
+      ]
+    },
+    {
+      "key": "honey",
+      "fdcId": 169640,
+      "expectedDescription": "Honey",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Honey (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "sugar",
+      "fdcId": 169655,
+      "expectedDescription": "Sugars, granulated",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Sugars, granulated (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "white sugar",
+        "granulated sugar"
+      ]
+    },
+    {
+      "key": "brown sugar",
+      "fdcId": 168833,
+      "expectedDescription": "Sugars, brown",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Sugars, brown (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "maple syrup",
+      "fdcId": 169661,
+      "expectedDescription": "Syrups, maple",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Syrups, maple (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "salt",
+      "fdcId": 173468,
+      "expectedDescription": "Salt, table",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Salt, table (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "table salt",
+        "sea salt",
+        "kosher salt"
+      ]
+    },
+    {
+      "key": "black pepper",
+      "fdcId": 170931,
+      "expectedDescription": "Spices, pepper, black",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Spices, pepper, black (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "ground black pepper"
+      ]
+    },
+    {
+      "key": "chili powder",
+      "fdcId": 171319,
+      "expectedDescription": "Spices, chili powder",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Spices, chili powder (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "cumin",
+      "fdcId": 170923,
+      "expectedDescription": "Spices, cumin seed",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Spices, cumin seed (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "ground cumin",
+        "cumin seed"
+      ]
+    },
+    {
+      "key": "paprika",
+      "fdcId": 171329,
+      "expectedDescription": "Spices, paprika",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Spices, paprika (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "smoked paprika"
+      ]
+    },
+    {
+      "key": "garlic powder",
+      "fdcId": 171325,
+      "expectedDescription": "Spices, garlic powder",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Spices, garlic powder (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "onion powder",
+      "fdcId": 171327,
+      "expectedDescription": "Spices, onion powder",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Spices, onion powder (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "dried oregano",
+      "fdcId": 171328,
+      "expectedDescription": "Spices, oregano, dried",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Spices, oregano, dried (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "oregano"
+      ]
+    },
+    {
+      "key": "red pepper flakes",
+      "fdcId": 170932,
+      "expectedDescription": "Spices, pepper, red or cayenne",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Spices, pepper, red or cayenne (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "cayenne pepper",
+        "chili flakes",
+        "crushed red pepper",
+        "cayenne"
+      ]
+    },
+    {
+      "key": "cinnamon",
+      "fdcId": 171320,
+      "expectedDescription": "Spices, cinnamon, ground",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Spices, cinnamon, ground (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "ground cinnamon"
+      ]
+    },
+    {
+      "key": "curry powder",
+      "fdcId": 170924,
+      "expectedDescription": "Spices, curry powder",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Spices, curry powder (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "turmeric",
+      "fdcId": 172231,
+      "expectedDescription": "Spices, turmeric, ground",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Spices, turmeric, ground (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "ground turmeric"
+      ]
+    },
+    {
+      "key": "vinegar",
+      "fdcId": 172237,
+      "expectedDescription": "Vinegar, distilled",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Vinegar, distilled (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "white vinegar",
+        "distilled vinegar"
+      ]
+    },
+    {
+      "key": "rice vinegar",
+      "fdcId": 2083928,
+      "expectedDescription": "RICE VINEGAR",
+      "expectedDataType": "Branded",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Published package-label values for one brand (Mizkan America, Inc.); other brands vary. RICE VINEGAR (Branded); uncooked/as-purchased input weight.",
+      "aliases": [
+        "rice wine vinegar",
+        "seasoned rice vinegar"
+      ],
+      "labelSource": true,
+      "brandOwner": "Mizkan America, Inc."
+    },
+    {
+      "key": "apple cider vinegar",
+      "fdcId": 173469,
+      "expectedDescription": "Vinegar, cider",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Vinegar, cider (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "cider vinegar"
+      ]
+    },
+    {
+      "key": "sriracha",
+      "fdcId": 171186,
+      "expectedDescription": "Sauce, hot chile, sriracha",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Sauce, hot chile, sriracha (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "sriracha sauce"
+      ]
+    },
+    {
+      "key": "hot sauce",
+      "fdcId": 174527,
+      "expectedDescription": "Sauce, ready-to-serve, pepper or hot",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Sauce, ready-to-serve, pepper or hot (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "gochujang",
+      "fdcId": 2113732,
+      "expectedDescription": "SUNCHANG GOCHUJANG RED PEPPER PASTE, MEDIUM HOT",
+      "expectedDataType": "Branded",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Published package-label values for one brand (Honey World Inc.); other brands vary. SUNCHANG GOCHUJANG RED PEPPER PASTE, MEDIUM HOT (Branded); uncooked/as-purchased input weight.",
+      "aliases": [
+        "korean chili paste"
+      ],
+      "labelSource": true,
+      "brandOwner": "Honey World Inc."
+    },
+    {
+      "key": "kimchi",
+      "fdcId": 170392,
+      "expectedDescription": "Cabbage, kimchi",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Cabbage, kimchi (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "salsa",
+      "fdcId": 174524,
+      "expectedDescription": "Sauce, salsa, ready-to-serve",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Sauce, salsa, ready-to-serve (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "hummus",
+      "fdcId": 174289,
+      "expectedDescription": "Hummus, commercial",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Hummus, commercial (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "coconut milk",
+      "fdcId": 170173,
+      "expectedDescription": "Nuts, coconut milk, canned (liquid expressed from grated meat and water)",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Nuts, coconut milk, canned (liquid expressed from grated meat and water) (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "canned coconut milk"
+      ]
+    },
+    {
+      "key": "chicken broth",
+      "fdcId": 174536,
+      "expectedDescription": "Soup, chicken broth, ready-to-serve",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Soup, chicken broth, ready-to-serve (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "chicken stock"
+      ]
+    },
+    {
+      "key": "vegetable broth",
+      "fdcId": 171583,
+      "expectedDescription": "Soup, vegetable broth, ready to serve",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Soup, vegetable broth, ready to serve (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "vegetable stock"
+      ]
+    },
+    {
+      "key": "fish sauce",
+      "fdcId": 174531,
+      "expectedDescription": "Sauce, fish, ready-to-serve",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Sauce, fish, ready-to-serve (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "oyster sauce",
+      "fdcId": 174529,
+      "expectedDescription": "Sauce, oyster, ready-to-serve",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Sauce, oyster, ready-to-serve (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": []
+    },
+    {
+      "key": "hoisin sauce",
+      "fdcId": 172886,
+      "expectedDescription": "Sauce, hoisin, ready-to-serve",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Sauce, hoisin, ready-to-serve (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "hoisin"
+      ]
+    },
+    {
+      "key": "teriyaki sauce",
+      "fdcId": 171167,
+      "expectedDescription": "Sauce, teriyaki, ready-to-serve",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Sauce, teriyaki, ready-to-serve (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "teriyaki"
+      ]
+    },
+    {
+      "key": "cornstarch",
+      "fdcId": 169698,
+      "expectedDescription": "Cornstarch",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Cornstarch (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "corn starch"
+      ]
+    },
+    {
+      "key": "water",
+      "fdcId": 173647,
+      "expectedDescription": "Beverages, water, tap, drinking",
+      "expectedDataType": "SR Legacy",
+      "preparation": "raw",
+      "weightBasis": "raw_edible_weight",
+      "rationale": "Beverages, water, tap, drinking (SR Legacy); uncooked/as-purchased input weight.",
+      "aliases": [
+        "tap water"
+      ]
     }
   ],
+  "defaults": {
+    "cheese": {
+      "key": "cheddar cheese"
+    },
+    "bread": {
+      "key": "whole-wheat bread"
+    },
+    "yogurt": {
+      "key": "plain whole-milk yogurt"
+    },
+    "lettuce": {
+      "key": "green leaf lettuce"
+    },
+    "rice": {
+      "key": "white rice",
+      "note": "uncooked white rice"
+    },
+    "jasmine rice": {
+      "key": "white rice",
+      "note": "uncooked white rice"
+    },
+    "basmati rice": {
+      "key": "white rice",
+      "note": "uncooked white rice"
+    },
+    "cooked rice": {
+      "key": "cooked white rice",
+      "note": "cooked white rice"
+    },
+    "pasta": {
+      "key": "dry pasta",
+      "note": "uncooked dry pasta"
+    },
+    "spaghetti": {
+      "key": "dry pasta",
+      "note": "uncooked dry pasta"
+    },
+    "penne": {
+      "key": "dry pasta",
+      "note": "uncooked dry pasta"
+    },
+    "macaroni": {
+      "key": "dry pasta",
+      "note": "uncooked dry pasta"
+    },
+    "fusilli": {
+      "key": "dry pasta",
+      "note": "uncooked dry pasta"
+    },
+    "rotini": {
+      "key": "dry pasta",
+      "note": "uncooked dry pasta"
+    },
+    "linguine": {
+      "key": "dry pasta",
+      "note": "uncooked dry pasta"
+    },
+    "chicken": {
+      "key": "chicken breast",
+      "note": "raw boneless skinless chicken breast"
+    },
+    "beef": {
+      "key": "ground beef",
+      "note": "raw 85% lean ground beef"
+    },
+    "turkey": {
+      "key": "ground turkey",
+      "note": "raw ground turkey"
+    },
+    "tuna": {
+      "key": "canned tuna",
+      "note": "canned light tuna in water, drained"
+    },
+    "milk": {
+      "key": "whole milk"
+    },
+    "oil": {
+      "key": "vegetable oil",
+      "note": "vegetable (soybean) oil"
+    },
+    "pepper": {
+      "key": "black pepper",
+      "note": "ground black pepper"
+    },
+    "flour": {
+      "key": "all-purpose flour"
+    },
+    "tortilla": {
+      "key": "flour tortillas"
+    },
+    "tortillas": {
+      "key": "flour tortillas"
+    },
+    "beans": {
+      "key": "black beans",
+      "note": "canned black beans, drained"
+    }
+  },
   "unresolved": {
-    "cheese": "Specify the cheese type, e.g. cheddar cheese.",
-    "bread": "Specify bread type, e.g. whole-wheat bread.",
-    "yogurt": "Specify milk-fat and style, e.g. plain whole-milk yogurt."
+    "broth": "Say chicken broth or vegetable broth.",
+    "stock": "Say chicken broth or vegetable broth.",
+    "noodles": "Say egg noodles or rice noodles.",
+    "fish": "Name the fish, e.g. salmon or canned tuna.",
+    "meat": "Name the meat, e.g. ground beef or chicken breast."
   }
 }

@@ -34,8 +34,15 @@ export function normalizeUsdaFood(raw, match) {
     throw new Error(
       "USDA food must exactly match the reviewed FDC ID, description and data type.",
     );
+  // Branded rows are one product's label; accepted only when the reviewed match says so and names the brand.
+  const reviewedLabel =
+    raw.dataType === "Branded" &&
+    match.labelSource === true &&
+    typeof match.brandOwner === "string" &&
+    match.brandOwner.trim() !== "" &&
+    raw.brandOwner === match.brandOwner;
   if (
-    !["SR Legacy", "Foundation", "Survey (FNDDS)"].includes(raw.dataType) ||
+    (!["SR Legacy", "Foundation", "Survey (FNDDS)"].includes(raw.dataType) && !reviewedLabel) ||
     !Array.isArray(raw.foodNutrients) ||
     !raw.foodNutrients.some((r) => Number.isInteger(r.nutrient?.id))
   )
@@ -102,6 +109,7 @@ export function normalizeUsdaFood(raw, match) {
     values,
     provenance: {
       sourceType: "usda_fdc",
+      labelBrandOwner: reviewedLabel ? match.brandOwner : null,
       sourceUrl: `https://fdc.nal.usda.gov/food-details/${raw.fdcId}/nutrients`,
       retrievalUrl: raw.retrievalUrl,
       checkedAt: raw.retrievedAt,

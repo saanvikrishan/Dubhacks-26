@@ -3,8 +3,7 @@ import { byId as catalogById } from "./catalog.js";
 const extras = Object.create(null);
 const pinned = new Set();
 
-/** UI lookup cache only. The state service uses its persisted recipe snapshots.
- *  Pinned meals (chosen into My Plan) survive suggestion refreshes. */
+/** UI lookup cache only. The state service uses its persisted recipe snapshots. */
 export function rememberSuggestions(meals) {
   for (const meal of meals || []) {
     if (meal?.id) extras[meal.id] = meal;
