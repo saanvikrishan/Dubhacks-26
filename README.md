@@ -16,6 +16,24 @@ Dinner fails when the fridge and the calendar never meet. WhatsCooking.ai turns 
 
 React and Vite frontend, FastAPI backend, Postgres for plans and reminders, the Spectrum iMessage API for delivery, and Google Calendar OAuth for a read-only import of the day you already have.
 
+## Quick Start
+
+```sh
+git clone https://github.com/saanvikrishan/Dubhacks-26.git && cd Dubhacks-26/fridgemate
+python -m pip install -r backend/requirements.txt
+npm ci --prefix frontend && npm install --prefix photon
+```
+
+Run these in three terminals, from `backend/`, `frontend/`, and `photon/`:
+
+```sh
+python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+npm run dev -- --host 127.0.0.1
+node remind.mjs
+```
+
+Full setup, environment variables, and architecture details: see [fridgemate/README.md](fridgemate/README.md)
+
 ## Challenges we ran into
 
 Google's OAuth dance uses PKCE, and the code verifier was gone by the time the redirect came back, so a valid client still could not finish the token exchange. We keep the in-flight flow keyed by OAuth state so the verifier is still there when Google returns.
