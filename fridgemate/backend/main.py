@@ -450,6 +450,157 @@ def memory_contents(result):
     return contents
 
 
+class ProfilePatchRequest(BaseModel):
+    text: str
+    current_profile: dict | None = None
+
+
+@app.post("/profile-patch")
+async def profile_patch(request: ProfilePatchRequest):
+    """
+    Given a natural-language preference statement, use Gemini to extract
+    suggested profile changes. Always returns a proposal — the frontend
+    must ask the user before applying it.
+    """
+    enforce_rate_limit()
+    if blocked_user_text(request.text):
+        reject_blocked_text()
+    if not client:
+        raise HTTPException(
+            status_code=500,
+            detail="GEMINI_API_KEY is missing from backend/.env",
+        )
+
+    current = request.current_profile or {}
+    current_diet = current.get("diet", "anything")
+    current_exclusions = current.get("exclusions", [])
+    current_preferred = current.get("preferred", "")
+    current_cuisines = current.get("cuisines", [])
+
+    VALID_DIETS = ["anything", "vegetarian", "vegan"]
+    VALID_EXCLUSIONS = [
+        "soy", "egg", "milk", "wheat", "peanut",
+        "tree nut", "sesame", "fish", "shellfish",
+    ]
+    VALID_CUISINES = [
+        "Italian", "Mexican", "Chinese", "Japanese", "Indian", "Thai",
+        "Korean", "Mediterranean", "American", "French", "Greek", "Spanish",
+        "Middle Eastern", "Vietnamese", "Caribbean", "Latin American",
+    ]
+    VALID_EQUIPMENT = [
+        "stove", "pan", "pot", "microwave", "oven", "air fryer", "rice cooker",
+        "toaster", "blender", "electric kettle", "baking sheet", "cutting board",
+        "knife", "mixing bowl", "spatula", "colander", "slow cooker",
+    ]
+
+    prompt = f"""
+You are a profile assistant for a meal planning app. The user said:
+"{request.text}"
+
+Their current settings:
+- Diet: {current_diet}
+- Excluded allergens: {", ".join(current_exclusions) or "none"}
+- Preferred food/cuisine text: "{current_preferred}"
+- Liked cuisines: {", ".join(current_cuisines) or "none set"}
+- Equipment: {", ".join(current.get("equipment", [])) or "none set"}
+- Cooking access: {current.get("cooking", True)}
+
+Extract any preference changes implied by their message. Return ONLY valid JSON:
+{{
+  "diet": null or one of: {VALID_DIETS},
+  "cooking": null or true/false (if they mention having or not having a kitchen),
+  "exclusions_add": [] (allergens to add, from: {VALID_EXCLUSIONS}),
+  "exclusions_remove": [] (allergens to remove),
+  "preferred": null or short free-text preference string, max 40 chars (e.g. "spicy Indian food", "pasta"),
+  "cuisines_add": [] (cuisines to add, from: {VALID_CUISINES}),
+  "cuisines_remove": [] (cuisines to remove),
+  "equipment_add": [] (equipment to add, from: {VALID_EQUIPMENT}),
+  "equipment_remove": [] (equipment to remove),
+  "summary": "One warm, conversational sentence describing what you detected and asking if they want to apply it. E.g. 'Sounds like you love Indian food and have an air fryer — want me to update your profile?'"
+}}
+
+Rules:
+- Only include fields where you detected a clear intent. Use null/[] for no-change fields.
+- "love X food" → cuisines_add + update preferred.
+- "I'm vegan/vegetarian" → set diet.
+- "I'm allergic to / I can't eat X" → exclusions_add if X is a valid allergen.
+- "I have a microwave / blender / etc" → equipment_add.
+- "I don't have a stove / no kitchen" → cooking: false.
+- "I want more protein / trying to lose weight" → note in summary only (goals require numeric values, skip).
+- Always end summary with a direct question: "Want me to update your profile?"
+- If nothing relevant, set summary to null.
+"""
+
+    last_error = None
+    for model in GEMINI_FALLBACKS:
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=model,
+                contents=prompt,
+                config={"response_mime_type": "application/json"},
+            )
+            parsed = json.loads(response.text or "{}")
+            if not isinstance(parsed, dict):
+                raise ValueError("Non-object response")
+
+            # Sanitize — only pass through valid values
+            patch = {}
+            diet = parsed.get("diet")
+            if diet in VALID_DIETS:
+                patch["diet"] = diet
+
+            excl_add = [e for e in (parsed.get("exclusions_add") or []) if e in VALID_EXCLUSIONS]
+            excl_remove = [e for e in (parsed.get("exclusions_remove") or []) if e in VALID_EXCLUSIONS]
+            if excl_add:
+                patch["exclusions_add"] = excl_add
+            if excl_remove:
+                patch["exclusions_remove"] = excl_remove
+
+            preferred = parsed.get("preferred")
+            if isinstance(preferred, str) and preferred.strip():
+                patch["preferred"] = preferred.strip()[:40]
+
+            cuisines_add = [c for c in (parsed.get("cuisines_add") or []) if c in VALID_CUISINES]
+            cuisines_remove = [c for c in (parsed.get("cuisines_remove") or []) if c in VALID_CUISINES]
+            if cuisines_add:
+                patch["cuisines_add"] = cuisines_add
+            if cuisines_remove:
+                patch["cuisines_remove"] = cuisines_remove
+
+            equipment_add = [e for e in (parsed.get("equipment_add") or []) if e in VALID_EQUIPMENT]
+            equipment_remove = [e for e in (parsed.get("equipment_remove") or []) if e in VALID_EQUIPMENT]
+            if equipment_add:
+                patch["equipment_add"] = equipment_add
+            if equipment_remove:
+                patch["equipment_remove"] = equipment_remove
+
+            cooking = parsed.get("cooking")
+            if isinstance(cooking, bool):
+                patch["cooking"] = cooking
+
+            summary = parsed.get("summary")
+            if not isinstance(summary, str) or not summary.strip():
+                summary = None
+
+            has_changes = bool(patch)
+            return redact_output({
+                "patch": patch,
+                "summary": summary,
+                "has_changes": has_changes,
+            })
+        except HTTPException:
+            raise
+        except Exception as e:
+            last_error = e
+            msg = str(e)
+            print(f"Profile patch error ({model}):", msg)
+            if not gemini_transient(msg):
+                break
+
+    raise_gemini_failure(last_error, "Profile patch")
+
+
 def slug(name: str, index: int) -> str:
     base = re.sub(r"[^a-z0-9]+", "-", (name or "meal").lower()).strip("-")[:40]
     return f"gemini-{base or 'meal'}-{index}"

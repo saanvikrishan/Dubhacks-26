@@ -34,3 +34,11 @@ test('Postgres pantry mirror sends entered quantities and never invents 500 gram
  assert.equal(called,false);assert.equal(result.status,'quantities_required');
  assert.equal(EQUIPMENT.includes('air fryer'),true);assert.equal(EQUIPMENT.includes('rice cooker'),true);assert.equal(EQUIPMENT.includes('slow cooker'),true);
 });
+
+test('new main cuisine preferences survive legacy reload and profile updates',()=>{
+ const old=createDemoState();delete old.profile.cuisines;
+ const restored=validateState(old);assert.deepEqual(restored.profile.cuisines,[]);
+ const changed=transition(restored,{type:'updateProfile',profile:{...restored.profile,cuisines:['Italian']}});
+ assert.deepEqual(validateState(JSON.parse(JSON.stringify(changed))).profile.cuisines,['Italian']);
+ assert.deepEqual(restored.profile.cuisines,[]);
+});

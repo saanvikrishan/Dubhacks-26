@@ -1123,6 +1123,8 @@ function Assistant({ state, onAction, onClose }) {
   async function sendPrompt(raw) {
     const sent = raw.trim();
     if (!sent || busy) return;
+
+    // 1. Try local command interpreter first
     let response;
     try {
       response = interpretFoodRequest(sent, state, catalog);
@@ -1136,6 +1138,115 @@ function Assistant({ state, onAction, onClose }) {
       setError("");
       return;
     }
+
+    // 2. Detect preference/taste statements — route to profile-patch
+    // 2. Detect preference statements by scanning for known profile keywords
+    const DIETS     = ["vegan", "vegetarian"];
+    const ALLERGENS = ["soy","egg","milk","wheat","peanut","tree nut","sesame","fish","shellfish"];
+    const EQUIPMENT = ["microwave","oven","air fryer","rice cooker","toaster","blender",
+      "electric kettle","baking sheet","cutting board","knife","mixing bowl","spatula",
+      "colander","slow cooker","stove","pan","pot"];
+    const CUISINES  = ["italian","mexican","chinese","japanese","indian","thai","korean",
+      "mediterranean","american","french","greek","spanish","middle eastern",
+      "vietnamese","caribbean","latin american"];
+
+    const q = sent.toLowerCase();
+
+    const hitsDiet      = DIETS.some(d => q.includes(d));
+    const hitsAllergen  = ALLERGENS.some(a => q.includes(a));
+    const hitsEquipment = EQUIPMENT.some(e => q.includes(e));
+    const hitsCuisine   = CUISINES.some(c => q.includes(c));
+    const hitsCooking   = /\b(kitchen|cooking access)\b/.test(q);
+
+    if (hitsDiet || hitsAllergen || hitsEquipment || hitsCuisine || hitsCooking) {
+      const patch = {};
+
+      const negative = /\b(hate|avoid|don.?t eat|can.?t eat|allergic|intolerant|no |not |without|don.?t have|can.?t have|don.?t like|dislike)\b/.test(q);
+      const positive = !negative;
+
+      // Diet
+      if (q.includes("vegan"))         patch.diet = "vegan";
+      else if (q.includes("vegetarian")) patch.diet = "vegetarian";
+      else if (/\bi eat (meat|everything|anything|all)\b/.test(q)) patch.diet = "anything";
+
+      // Cooking access
+      if (/\bno (kitchen|stove|oven|cooking)\b|\bcan.?t cook\b/.test(q)) patch.cooking = false;
+      else if (/\b(have|got).{0,10}kitchen\b|\bcan cook\b/.test(q))       patch.cooking = true;
+
+      // Allergens — negative = add exclusion, positive = remove exclusion
+      if (negative) {
+        const add = ALLERGENS.filter(a => q.includes(a));
+        if (add.length) patch.exclusions_add = add;
+      } else {
+        const remove = ALLERGENS.filter(a => q.includes(a));
+        if (remove.length) patch.exclusions_remove = remove;
+      }
+
+      // Equipment — positive = add, negative = remove
+      if (positive) {
+        const add = EQUIPMENT.filter(e => q.includes(e));
+        if (add.length) patch.equipment_add = add;
+      } else {
+        const remove = EQUIPMENT.filter(e => q.includes(e));
+        if (remove.length) patch.equipment_remove = remove;
+      }
+
+      // Cuisines — positive = add to liked, negative = remove
+      if (positive) {
+        const add = CUISINES.filter(c => q.includes(c));
+        if (add.length) {
+          patch.cuisines_add = add.map(c => c.charAt(0).toUpperCase() + c.slice(1));
+          if (!patch.preferred) patch.preferred = add[0] + " food";
+        }
+      } else {
+        const remove = CUISINES.filter(c => q.includes(c));
+        if (remove.length)
+          patch.cuisines_remove = remove.map(c => c.charAt(0).toUpperCase() + c.slice(1));
+      }
+
+      if (Object.keys(patch).length > 0) {
+        const newProfile = { ...state.profile };
+        if (patch.diet)       newProfile.diet = patch.diet;
+        if (patch.preferred)  newProfile.preferred = patch.preferred;
+        if (patch.cooking != null) newProfile.cooking = patch.cooking;
+        if (patch.exclusions_add?.length)
+          newProfile.exclusions = [...new Set([...newProfile.exclusions, ...patch.exclusions_add])];
+        if (patch.exclusions_remove?.length)
+          newProfile.exclusions = newProfile.exclusions.filter(e => !patch.exclusions_remove.includes(e));
+        if (patch.equipment_add?.length)
+          newProfile.equipment = [...new Set([...newProfile.equipment, ...patch.equipment_add])];
+        if (patch.equipment_remove?.length)
+          newProfile.equipment = newProfile.equipment.filter(e => !patch.equipment_remove.includes(e));
+        if (patch.cuisines_add?.length)
+          newProfile.cuisines = [...new Set([...(newProfile.cuisines ?? []), ...patch.cuisines_add])];
+        if (patch.cuisines_remove?.length)
+          newProfile.cuisines = (newProfile.cuisines ?? []).filter(c => !patch.cuisines_remove.includes(c));
+
+        const changes = [];
+        if (patch.diet) changes.push(`set diet to ${patch.diet}`);
+        if (patch.cooking != null) changes.push(patch.cooking ? "turn cooking on" : "turn cooking off");
+        if (patch.exclusions_add?.length)    changes.push(`exclude ${patch.exclusions_add.join(", ")}`);
+        if (patch.exclusions_remove?.length) changes.push(`stop excluding ${patch.exclusions_remove.join(", ")}`);
+        if (patch.equipment_add?.length)     changes.push(`add ${patch.equipment_add.join(", ")} to your equipment`);
+        if (patch.equipment_remove?.length)  changes.push(`remove ${patch.equipment_remove.join(", ")} from equipment`);
+        if (patch.cuisines_add?.length)      changes.push(`add ${patch.cuisines_add.join(", ")} to liked cuisines`);
+        if (patch.preferred) changes.push(`set preferred food to "${patch.preferred}"`);
+
+        setMessages((prev) => [
+          ...prev,
+          { user: true, message: sent },
+          {
+            message: `Got it — I'd ${changes.join(", ")}. Want me to save that?`,
+            proposal: { type: "updateProfile", profile: newProfile },
+          },
+        ]);
+        setText("");
+        return;
+      }
+      // Keywords hit but nothing actionable — fall through to Gemini
+    }
+
+    // 3. Fall through to Gemini meal interpreter
     const history = messages
       .filter(
         (item) =>
@@ -1263,25 +1374,41 @@ function Assistant({ state, onAction, onClose }) {
                 msg.message
               )}
               {msg.proposal && (
-                <button
-                  className="assistant-apply"
-                  disabled={msg.applied}
-                  onClick={() => {
-                    try {
-                      onAction(msg.proposal);
-                      setMessages((prev) =>
-                        prev.map((m, j) =>
-                          j === i ? { ...m, applied: true } : m,
-                        ),
-                      );
-                      setError("");
-                    } catch (err) {
-                      setError(err.message);
-                    }
-                  }}
-                >
-                  {msg.applied ? "Applied" : "Apply this change"}
-                </button>
+                <div className="assistant-proposal">
+                  <button
+                    className="assistant-apply-link"
+                    disabled={msg.applied}
+                    onClick={() => {
+                      try {
+                        onAction(msg.proposal);
+                        setMessages((prev) =>
+                          prev.map((m, j) =>
+                            j === i ? { ...m, applied: true } : m,
+                          ),
+                        );
+                        setError("");
+                      } catch (err) {
+                        setError(err.message);
+                      }
+                    }}
+                  >
+                    {msg.applied ? "✓ Done" : "Yes, update my profile →"}
+                  </button>
+                  {!msg.applied && (
+                    <button
+                      className="assistant-dismiss-link"
+                      onClick={() =>
+                        setMessages((prev) =>
+                          prev.map((m, j) =>
+                            j === i ? { ...m, proposal: null } : m,
+                          ),
+                        )
+                      }
+                    >
+                      No thanks
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           </div>

@@ -40,6 +40,7 @@ export function createDemoState() {
       cooking: true,
       equipment: ["stove", "pan", "pot"],
       goals: [],
+      cuisines: [],
     },
     context: {
       date: today(),
@@ -395,7 +396,13 @@ export function validateState(state) {
       state.context.commitmentTime = `${hours.toString().padStart(2, '0')}:${minutes}`;
     }
   }
-  
+  state = {
+    ...state,
+    profile: {
+      ...state.profile,
+      cuisines: Array.isArray(state.profile?.cuisines) ? state.profile.cuisines : [],
+    },
+  };
   validateInputs(state.profile, state.context, state.pantry);
   if (!Array.isArray(state.events) || !Array.isArray(state.mealPlans))
     throw new Error("Invalid saved calendar.");

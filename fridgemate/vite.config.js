@@ -6,6 +6,11 @@ export default defineConfig({
   plugins: [react(), calendarApi()],
   server: {
     proxy: {
+      "/api/profile-patch": {
+        target: process.env.DAYWELL_BACKEND_URL || process.env.DAYWELL_DINING_BACKEND_URL || "http://127.0.0.1:8000",
+        changeOrigin: true,
+        rewrite: path => path.replace(/^\/api/, ""),
+      },
       "/api/pricing": {
         target: process.env.DAYWELL_BACKEND_URL || process.env.DAYWELL_DINING_BACKEND_URL || "http://127.0.0.1:8000",
         changeOrigin: true,

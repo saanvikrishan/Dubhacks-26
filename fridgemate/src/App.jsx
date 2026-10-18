@@ -165,10 +165,6 @@ export default function App() {
         Math.max(45, state.context.available),
       );
       if (window && !(await safe({ type: "updateContext", context: { ...window, manuallySet: false } }))) return;
-      if (!window)
-        setNotice(
-          "No free window of 35 minutes or more was found. Adjust the meal window in Food.",
-        );
     }
     setMode(nextMode);
     if (nextMode === "cook") {

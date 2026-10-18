@@ -1,6 +1,6 @@
 # Main feature audit — 2026-10-18
 
-Compared the live checkout against freshly fetched `origin/main` commit `7117d8c`. The feature-branch integration preserves the main history. Real .env files are excluded; the earlier temporary stash remains as a recovery backup.
+Compared the live checkout against freshly fetched `origin/main` commit `b4d8025`. The feature-branch integration preserves the main history. Real .env files are excluded; the earlier temporary stash remains as a recovery backup.
 
 ## Compatibility fixes made in this audit
 
@@ -14,9 +14,9 @@ Compared the live checkout against freshly fetched `origin/main` commit `7117d8c
 
 ## Preserved teammate functionality
 
-All 17 main HTTP method/path combinations remain. Additional routes provide walking results and read-only Kroger package quotes. No named UI components from main were removed.
+All main HTTP method/path combinations remain, including the new `/profile-patch` proposal endpoint. Additional routes provide walking results and read-only Kroger package quotes. No named UI components from main were removed.
 
-- Daywell AI chat, conversation history, constraint interpretation and phrasing endpoints.
+- Daywell AI chat, conversation history, constraint interpretation and phrasing endpoints. The latest main profile preference proposals, explicit accept/dismiss controls and cuisine preference persistence are preserved; their new endpoint has a preview proxy.
 - Fridge-photo ingredient scanning, free-text groceries, editable quantities and used-up ingredient confirmation.
 - Postgres pantry and saved-meal routes; saved-meal write on selection.
 - Dynamic dish image matching and prefetch, nutrition detail/goal UI, and USDA lookup endpoint/module.
@@ -37,7 +37,7 @@ Calendar refresh is read-only, for already connected providers. Universal/two-wa
 
 ## Verification
 
-The latest pricing/image checks run 116 JavaScript tests and 22 backend tests; all pass. Full lint and production build pass; the existing large-bundle warning remains. New regressions cover historical main snapshots, equipment choices, exact gram payloads, retained endpoints and separate assistant/draft requests. Earlier isolated browser checks verified drag selection, future-date preservation and clearable duration input.
+The latest pricing/image checks run 117 JavaScript tests and 23 backend tests; all pass. Full lint and production build pass; the existing large-bundle warning remains. New regressions cover historical main snapshots, equipment choices, exact gram payloads, retained endpoints and separate assistant/draft requests. Earlier isolated browser checks verified drag selection, future-date preservation and clearable duration input.
 
 ## Holiday calendar correction
 
