@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { catalog, pantryItems } from "../data/catalog";
+import { catalog } from "../data/catalog";
 import { byId } from "../data/suggestions";
 import { capabilities, config } from "../domain/config";
 import { clockTime, evaluate, minutes, timeParts } from "../domain/engine";
@@ -8,7 +8,13 @@ import {
   goalStatus,
   nutrientInfo,
   portionNutrition,
+  usdaConfidenceExplain,
 } from "../domain/nutrition";
+import {
+  mealSubstitutions,
+  pantryCovers,
+  substitutionLine,
+} from "../domain/substitutions";
 import { money, num, niceTime } from "./format";
 import { today } from "../domain/state";
 
@@ -151,22 +157,37 @@ function MealArt({ meal }) {
     </div>
   );
 }
-function Modal({ title, onClose, children, wide = false }) {
+function Modal({
+  title,
+  onClose,
+  children,
+  wide = false,
+  className = "",
+  leading = null,
+  subtitle = "",
+}) {
   const ref = useRef(null);
   useEffect(() => {
     const el = ref.current;
     el.showModal();
     return () => el.close();
   }, []);
+  const label = typeof title === "string" ? title : "Dialog";
   return (
     <dialog
       ref={ref}
-      className={wide ? "wide" : ""}
+      className={[wide ? "wide" : "", className].filter(Boolean).join(" ")}
       onCancel={onClose}
-      aria-label={title}
+      aria-label={label}
     >
       <div className="dialog-header">
-        <h2>{title}</h2>
+        <div className="dialog-heading">
+          {leading}
+          <div>
+            <h2>{title}</h2>
+            {subtitle ? <p className="dialog-subtitle">{subtitle}</p> : null}
+          </div>
+        </div>
         <button
           className="icon-button"
           aria-label="Close dialog"
@@ -291,8 +312,6 @@ function ContextFields({ value, onChange }) {
         <div className="form-grid">
           {field("eating", "Eating (min)")}
           {field("cleanup", "Cooking cleanup (min)")}
-          {field("onward", "Onward travel (min)")}
-          {field("buffer", "Buffer (min)")}
           {field("service", "Eat-out service (min)")}
         </div>
       </details>
@@ -428,7 +447,14 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
             <fieldset>
               <legend>Available equipment</legend>
               <div className="checks">
-                {["stove", "pan", "pot"].map((item) => (
+                {[
+                  "stove", "pan", "pot",
+                  "microwave", "oven", "air fryer", "rice cooker",
+                  "toaster", "blender", "electric kettle",
+                  "baking sheet", "cutting board", "knife",
+                  "mixing bowl", "spatula", "colander",
+                  "slow cooker",
+                ].map((item) => (
                   <label key={item}>
                     <input
                       type="checkbox"
@@ -462,13 +488,26 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                     value={goal.nutrient}
                     onChange={(e) => editGoal(i, "nutrient", e.target.value)}
                   >
-                    {Object.entries(nutrientInfo).map(
-                      ([key, [label, unit]]) => (
-                        <option key={key} value={key}>
-                          {label} ({unit})
-                        </option>
-                      ),
-                    )}
+                    <optgroup label="Macronutrients &amp; Energy">
+                      {["energy_kcal","protein_g","carbohydrate_g","fiber_g","sugar_g","added_sugar_g"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Lipids (Fats)">
+                      {["fat_g","saturated_fat_g","trans_fat_g","mono_fat_g","poly_fat_g","cholesterol_mg"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Vitamins">
+                      {["vitamin_a_mcg","vitamin_c_mg","vitamin_d_mcg","vitamin_e_mg","vitamin_k_mcg","thiamin_mg","riboflavin_mg","niacin_mg","pantothenic_mg","vitamin_b6_mg","folate_mcg","vitamin_b12_mcg","choline_mg"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Minerals">
+                      {["calcium_mg","iron_mg","magnesium_mg","phosphorus_mg","potassium_mg","sodium_mg","zinc_mg","copper_mg","manganese_mg","selenium_mcg"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
                   </select>
                 </label>
                 <label>
@@ -572,7 +611,12 @@ function NutritionTable({ meal, servings = 1 }) {
         ))}
       </div>
       <p className="fine-print">
-        Illustrative demo nutrition · {num(servings)} serving
+        {meal.nutrition?.kind === "usda_estimated"
+          ? `USDA FoodData Central estimate${meal.nutrition.confidence ? ` · ${meal.nutrition.confidence} confidence` : ""}`
+          : meal.nutrition?.kind === "gemini_suggestion"
+            ? "Gemini estimate · not verified"
+            : "Illustrative demo nutrition"}{" "}
+        · {num(servings)} serving
         {servings === 1 ? "" : "s"} · {num(meal.portionGrams * servings)} g.{" "}
         {meal.nutrition.preparation}
       </p>
@@ -598,14 +642,33 @@ function Details({
         <>
           <h3>What’s in this portion</h3>
           <NutritionTable meal={meal} />
-          <details className="allowances">
+          <details className="allowances" open={meal.nutrition?.kind === "usda_estimated"}>
             <summary>Nutrition source & basis</summary>
             <p>{meal.nutrition.source}</p>
-            <p>
-              ID: {meal.id} · Basis: {meal.nutrition.basis} · Fixture checked:{" "}
-              {meal.nutrition.checkedAt}. No external source verifies these
-              numbers.
-            </p>
+            {meal.nutrition?.kind === "usda_estimated" ? (
+              <>
+                <p>
+                  <strong>
+                    {(meal.nutrition.confidence || "medium").replace(/^./, (c) =>
+                      c.toUpperCase(),
+                    )}{" "}
+                    confidence:
+                  </strong>{" "}
+                  {usdaConfidenceExplain(meal.nutrition)}
+                </p>
+                <p>
+                  High ≈ most ingredients matched · Medium ≈ about half · Low ≈
+                  only a few. Unmatched ingredients are left out of the totals.
+                  Macros are summed from USDA matches and scaled per serving.
+                </p>
+              </>
+            ) : (
+              <p>
+                ID: {meal.id} · Basis: {meal.nutrition.basis} · Checked:{" "}
+                {meal.nutrition.checkedAt}. No external source verifies these
+                numbers.
+              </p>
+            )}
           </details>
         </>
       )}
@@ -634,12 +697,27 @@ function Details({
               <li key={item.name}>
                 <span>{item.name}</span>
                 <span>
-                  {item.grams} g needed · {state.pantry[item.name] ?? 0} g on
-                  hand
+                  {item.grams} g needed ·{" "}
+                  {pantryCovers(item.name, state.pantry)
+                    ? "on hand"
+                    : `${state.pantry[item.name] ?? 0} g on hand`}
                 </span>
               </li>
             ))}
           </ul>
+          {mealSubstitutions(meal, state.pantry).length > 0 && (
+            <>
+              <h3>Alternatives for what you don’t have</h3>
+              <ul className="substitution-list">
+                {mealSubstitutions(meal, state.pantry).map((s) => (
+                  <li key={`${s.missing}-${s.useInstead || "omit"}`}>
+                    <strong>{substitutionLine(s)}</strong>
+                    {s.note ? <span className="muted"> — {s.note}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           <h3>Let’s make it</h3>
           <ol className="recipe">
             {meal.steps.map((step) => (
@@ -668,21 +746,16 @@ function Details({
           : meal.allergens.join(", ") || "None listed"}
         . Demo information does not verify real allergen safety.
       </p>
-      {!result.feasible && (
-        <div className="notice warning">{result.reasons.join(" ")}</div>
-      )}
       <div className="dialog-actions">
-        {result.feasible && (
-          <button
-            className="primary"
-            onClick={() => {
-              onClose();
-              onChoose(meal);
-            }}
-          >
+        <button
+          className="primary"
+          onClick={() => {
+            onClose();
+            onChoose(meal);
+          }}
+        >
             Choose this meal
           </button>
-        )}
         {flags.mealLogging.available && (
           <button
             className="secondary"
@@ -794,7 +867,7 @@ function Card({
           <p className="card-footnote">
             {selected
               ? `Planned for ${state.plan.date}, ${niceTime(state.plan.start)}–${niceTime(clockTime(minutes(state.plan.start) + state.plan.duration))}.`
-              : `Fits ${niceTime(state.context.start)}–${niceTime(clockTime(minutes(state.context.start) + result.duration))}, including buffer.`}{" "}
+              : `Fits ${niceTime(state.context.start)}–${niceTime(clockTime(minutes(state.context.start) + result.duration))}.`}{" "}
             Nutrition is illustrative.
           </p>
         )}
@@ -802,10 +875,47 @@ function Card({
     </article>
   );
 }
-function Kitchen({ state, onSave, onSaved }) {
-  const [pantry, setPantry] = useState({ ...state.pantry }),
+function pantryEntries(pantry) {
+  return Object.entries(pantry || {})
+    .filter(([, grams]) => Number(grams) > 0)
+    .map(([name, grams]) => ({ name, grams: Number(grams) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function Kitchen({ state, onSave }) {
+  const [items, setItems] = useState(() => pantryEntries(state.pantry)),
+    [draft, setDraft] = useState(""),
+    [grams, setGrams] = useState("500"),
     [error, setError] = useState(""),
     [saved, setSaved] = useState(false);
+
+  function addItem() {
+    const name = draft.trim().replace(/\s+/g, " ").slice(0, 60);
+    if (!name) return;
+    const amount = Number(grams);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) {
+      setError("Enter a quantity above 0 g and up to 100000 g.");
+      return;
+    }
+    const key = name.toLowerCase();
+    setItems((list) => {
+      const existing = list.find((item) => item.name.toLowerCase() === key);
+      if (existing)
+        return list.map((item) =>
+          item.name.toLowerCase() === key
+            ? { ...item, grams: Math.max(item.grams, amount) }
+            : item,
+        );
+      return [...list, { name, grams: amount }].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+    });
+    setDraft("");
+    setGrams("500");
+    setError("");
+    setSaved(false);
+  }
+
   return (
     <section className="panel kitchen-panel">
       <div className="section-heading">
@@ -816,13 +926,105 @@ function Kitchen({ state, onSave, onSaved }) {
         <Icon name="kitchen" size={30} />
       </div>
       <p className="muted">
-        Confirmed edible quantities in grams. Rice and chickpeas are already
-        cooked; pasta is dry. Sample pantry values are editable. Choosing a meal
-        leaves inventory as entered.
+        Add what you actually have. Quantities are in grams—rice and chickpeas
+        as cooked, pasta as dry. Choosing a meal leaves inventory as entered.
       </p>
       <form
-        onSubmit={async (e) => {
+        className="kitchen-add"
+        onSubmit={(e) => {
           e.preventDefault();
+          addItem();
+        }}
+      >
+        <label>
+          Ingredient
+          <input
+            type="text"
+            value={draft}
+            placeholder="e.g. spinach, chicken, tortillas"
+            aria-label="Ingredient name"
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setError("");
+            }}
+          />
+        </label>
+        <label>
+          Amount
+          <span className="input-unit">
+            <input
+              type="number"
+              min="1"
+              max="100000"
+              step="1"
+              value={grams}
+              aria-label="Amount in grams"
+              onChange={(e) => {
+                setGrams(e.target.value);
+                setError("");
+              }}
+            />
+            <span>g</span>
+          </span>
+        </label>
+        <button type="submit" className="secondary" disabled={!draft.trim()}>
+          Add
+        </button>
+      </form>
+      <div className="kitchen-list" role="list" aria-label="Groceries on hand">
+        {items.map((item) => (
+          <div className="kitchen-row" role="listitem" key={item.name}>
+            <span className="kitchen-name">{item.name}</span>
+            <span className="input-unit">
+              <input
+                type="number"
+                min="1"
+                max="100000"
+                step="1"
+                value={item.grams}
+                aria-label={`${item.name} grams`}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setItems((list) =>
+                    list.map((row) =>
+                      row.name === item.name
+                        ? { ...row, grams: Number.isFinite(next) ? next : 0 }
+                        : row,
+                    ),
+                  );
+                  setSaved(false);
+                }}
+              />
+              <span>g</span>
+            </span>
+            <button
+              type="button"
+              className="text-button"
+              aria-label={`Remove ${item.name}`}
+              onClick={() => {
+                setItems((list) => list.filter((row) => row.name !== item.name));
+                setSaved(false);
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+        {!items.length && (
+          <p className="kitchen-empty">
+            Nothing listed yet—type an ingredient above to start.
+          </p>
+        )}
+      </div>
+      <button
+        type="button"
+        className="primary"
+        onClick={async () => {
+          const pantry = Object.fromEntries(
+            items
+              .filter((item) => item.name && item.grams > 0)
+              .map((item) => [item.name, item.grams]),
+          );
           try {
             await onSave({ type: "updatePantry", pantry });
             setSaved(true);
@@ -833,41 +1035,17 @@ function Kitchen({ state, onSave, onSaved }) {
           }
         }}
       >
-        <div className="pantry-grid">
-          {pantryItems.map((item) => (
-            <label key={item}>
-              {item}
-              <span className="input-unit">
-                <input
-                  type="number"
-                  min="0"
-                  max="100000"
-                  step="1"
-                  value={pantry[item] ?? 0}
-                  required
-                  onChange={(e) => {
-                    setPantry({ ...pantry, [item]: Number(e.target.value) });
-                    setSaved(false);
-                  }}
-                />
-                <span>g</span>
-              </span>
-            </label>
-          ))}
-        </div>
-        <button type="submit" className="primary">
-          Save ingredients
-          <Icon name="check" size={17} />
-        </button>
-        {saved && (
-          <p role="status">Ingredients saved. Meal options refreshed.</p>
-        )}
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-      </form>
+        Save ingredients
+        <Icon name="check" size={17} />
+      </button>
+      {saved && (
+        <p role="status">Ingredients saved. Meal options refreshed.</p>
+      )}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </section>
   );
 }
@@ -999,147 +1177,362 @@ function Intake({ state, onEdit, onRemove }) {
     </section>
   );
 }
+const ASSISTANT_PROMPTS = [
+  "Compare meals for me",
+  "I have 45 minutes",
+  "What’s easy with my groceries?",
+  "Something lighter tonight",
+];
+
 function Assistant({ state, onAction, onClose }) {
   const [text, setText] = useState(""),
     [messages, setMessages] = useState([
       {
         message:
-          "A little help with your next meal. Try “compare meals” or “I have 45 minutes”.",
+          "Hi — I’m your food copilot. Ask in plain language, or tap a prompt below to start.",
       },
     ]),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  const listRef = useRef(null);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, busy]);
+
+  async function sendPrompt(raw) {
+    const sent = raw.trim();
+    if (!sent || busy) return;
+
+    // 1. Try local command interpreter first
+    let response;
+    try {
+      response = interpretFoodRequest(sent, state, catalog);
+    } catch (err) {
+      setError(err.message);
+      return;
+    }
+    if (!response.unrecognized) {
+      setMessages((prev) => [...prev, { user: true, message: sent }, response]);
+      setText("");
+      setError("");
+      return;
+    }
+
+    // 2. Detect preference/taste statements — route to profile-patch
+    // 2. Detect preference statements by scanning for known profile keywords
+    const DIETS     = ["vegan", "vegetarian"];
+    const ALLERGENS = ["soy","egg","milk","wheat","peanut","tree nut","sesame","fish","shellfish"];
+    const EQUIPMENT = ["microwave","oven","air fryer","rice cooker","toaster","blender",
+      "electric kettle","baking sheet","cutting board","knife","mixing bowl","spatula",
+      "colander","slow cooker","stove","pan","pot"];
+    const CUISINES  = ["italian","mexican","chinese","japanese","indian","thai","korean",
+      "mediterranean","american","french","greek","spanish","middle eastern",
+      "vietnamese","caribbean","latin american"];
+
+    const q = sent.toLowerCase();
+
+    const hitsDiet      = DIETS.some(d => q.includes(d));
+    const hitsAllergen  = ALLERGENS.some(a => q.includes(a));
+    const hitsEquipment = EQUIPMENT.some(e => q.includes(e));
+    const hitsCuisine   = CUISINES.some(c => q.includes(c));
+    const hitsCooking   = /\b(kitchen|cooking access)\b/.test(q);
+
+    if (hitsDiet || hitsAllergen || hitsEquipment || hitsCuisine || hitsCooking) {
+      const patch = {};
+
+      const negative = /\b(hate|avoid|don.?t eat|can.?t eat|allergic|intolerant|no |not |without|don.?t have|can.?t have|don.?t like|dislike)\b/.test(q);
+      const positive = !negative;
+
+      // Diet
+      if (q.includes("vegan"))         patch.diet = "vegan";
+      else if (q.includes("vegetarian")) patch.diet = "vegetarian";
+      else if (/\bi eat (meat|everything|anything|all)\b/.test(q)) patch.diet = "anything";
+
+      // Cooking access
+      if (/\bno (kitchen|stove|oven|cooking)\b|\bcan.?t cook\b/.test(q)) patch.cooking = false;
+      else if (/\b(have|got).{0,10}kitchen\b|\bcan cook\b/.test(q))       patch.cooking = true;
+
+      // Allergens — negative = add exclusion, positive = remove exclusion
+      if (negative) {
+        const add = ALLERGENS.filter(a => q.includes(a));
+        if (add.length) patch.exclusions_add = add;
+      } else {
+        const remove = ALLERGENS.filter(a => q.includes(a));
+        if (remove.length) patch.exclusions_remove = remove;
+      }
+
+      // Equipment — positive = add, negative = remove
+      if (positive) {
+        const add = EQUIPMENT.filter(e => q.includes(e));
+        if (add.length) patch.equipment_add = add;
+      } else {
+        const remove = EQUIPMENT.filter(e => q.includes(e));
+        if (remove.length) patch.equipment_remove = remove;
+      }
+
+      // Cuisines — positive = add to liked, negative = remove
+      if (positive) {
+        const add = CUISINES.filter(c => q.includes(c));
+        if (add.length) {
+          patch.cuisines_add = add.map(c => c.charAt(0).toUpperCase() + c.slice(1));
+          if (!patch.preferred) patch.preferred = add[0] + " food";
+        }
+      } else {
+        const remove = CUISINES.filter(c => q.includes(c));
+        if (remove.length)
+          patch.cuisines_remove = remove.map(c => c.charAt(0).toUpperCase() + c.slice(1));
+      }
+
+      if (Object.keys(patch).length > 0) {
+        const newProfile = { ...state.profile };
+        if (patch.diet)       newProfile.diet = patch.diet;
+        if (patch.preferred)  newProfile.preferred = patch.preferred;
+        if (patch.cooking != null) newProfile.cooking = patch.cooking;
+        if (patch.exclusions_add?.length)
+          newProfile.exclusions = [...new Set([...newProfile.exclusions, ...patch.exclusions_add])];
+        if (patch.exclusions_remove?.length)
+          newProfile.exclusions = newProfile.exclusions.filter(e => !patch.exclusions_remove.includes(e));
+        if (patch.equipment_add?.length)
+          newProfile.equipment = [...new Set([...newProfile.equipment, ...patch.equipment_add])];
+        if (patch.equipment_remove?.length)
+          newProfile.equipment = newProfile.equipment.filter(e => !patch.equipment_remove.includes(e));
+        if (patch.cuisines_add?.length)
+          newProfile.cuisines = [...new Set([...(newProfile.cuisines ?? []), ...patch.cuisines_add])];
+        if (patch.cuisines_remove?.length)
+          newProfile.cuisines = (newProfile.cuisines ?? []).filter(c => !patch.cuisines_remove.includes(c));
+
+        const changes = [];
+        if (patch.diet) changes.push(`set diet to ${patch.diet}`);
+        if (patch.cooking != null) changes.push(patch.cooking ? "turn cooking on" : "turn cooking off");
+        if (patch.exclusions_add?.length)    changes.push(`exclude ${patch.exclusions_add.join(", ")}`);
+        if (patch.exclusions_remove?.length) changes.push(`stop excluding ${patch.exclusions_remove.join(", ")}`);
+        if (patch.equipment_add?.length)     changes.push(`add ${patch.equipment_add.join(", ")} to your equipment`);
+        if (patch.equipment_remove?.length)  changes.push(`remove ${patch.equipment_remove.join(", ")} from equipment`);
+        if (patch.cuisines_add?.length)      changes.push(`add ${patch.cuisines_add.join(", ")} to liked cuisines`);
+        if (patch.preferred) changes.push(`set preferred food to "${patch.preferred}"`);
+
+        setMessages((prev) => [
+          ...prev,
+          { user: true, message: sent },
+          {
+            message: `Got it — I'd ${changes.join(", ")}. Want me to save that?`,
+            proposal: { type: "updateProfile", profile: newProfile },
+          },
+        ]);
+        setText("");
+        return;
+      }
+      // Keywords hit but nothing actionable — fall through to Gemini
+    }
+
+    // 3. Fall through to Gemini meal interpreter
+    const history = messages
+      .filter(
+        (item) =>
+          !item.pending &&
+          typeof item.message === "string" &&
+          item.message.trim(),
+      )
+      .slice(-4)
+      .map((item) => ({
+        role: item.user ? "user" : "assistant",
+        text: item.message.slice(0, 500),
+      }));
+    setBusy(true);
+    setMessages((prev) => [
+      ...prev,
+      { user: true, message: sent },
+      { message: "Thinking…", pending: true },
+    ]);
+    setText("");
+    setError("");
+    try {
+      const res = await fetch("/api/recipes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: sent, memories: [], history }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail =
+          typeof data.detail === "string"
+            ? data.detail
+            : Array.isArray(data.detail)
+              ? data.detail.map((item) => item.msg || item).join(" ")
+              : data.error || "Could not interpret that request.";
+        setMessages((prev) => prev.filter((item) => !item.pending));
+        setError(detail);
+        return;
+      }
+      if (data.intent === "conversation") {
+        const message =
+          typeof data.message === "string" && data.message.trim()
+            ? data.message.trim()
+            : "Tell me what you're looking for — ingredients, time, or budget — and I'll find something.";
+        setMessages((prev) => [
+          ...prev.filter((item) => !item.pending),
+          { message },
+        ]);
+        return;
+      }
+      const reply = replyFromPatch(data, state, catalog);
+      setMessages((prev) => [...prev.filter((item) => !item.pending), reply]);
+      const summary = reply.message;
+      if (typeof summary === "string" && summary) {
+        try {
+          const phrased = await fetch("/api/recipes/phrase", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ summary }),
+            signal: AbortSignal.timeout(25000),
+          });
+          const phraseData = await phrased.json().catch(() => ({}));
+          const phrasedText =
+            phrased.ok && typeof phraseData.text === "string"
+              ? phraseData.text.trim()
+              : "";
+          if (phrasedText)
+            setMessages((prev) =>
+              prev.map((item) =>
+                item === reply ? { ...item, message: phrasedText } : item,
+              ),
+            );
+        } catch {
+          // Keep the templated reply already on screen.
+        }
+      }
+    } catch (err) {
+      setMessages((prev) => prev.filter((item) => !item.pending));
+      setError(err.message || "Could not interpret that request.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <Modal title="Your food assistant" onClose={onClose}>
-      <p className="fine-print">
-        Simple local commands · AI is connected. Photon is not connected.
-      </p>
-      <div className="chat-messages" aria-live="polite">
+    <Modal
+      title="Daywell AI"
+      subtitle="Food copilot · live"
+      className="assistant-dialog"
+      onClose={onClose}
+      leading={
+        <span className="assistant-orb" aria-hidden="true">
+          <Icon name="spark" size={18} />
+        </span>
+      }
+    >
+      <div className="assistant-status">
+        <span className="assistant-pulse" aria-hidden="true" />
+        <span>Listening for meal help</span>
+      </div>
+      <div className="chat-messages" aria-live="polite" ref={listRef}>
         {messages.map((msg, i) => (
           <div
-            className={msg.user ? "chat-bubble user" : "chat-bubble"}
+            className={
+              msg.user
+                ? "chat-row user"
+                : msg.pending
+                  ? "chat-row pending"
+                  : "chat-row"
+            }
             key={i}
           >
-            {msg.message}
-            {msg.proposal && (
-              <button
-                className="secondary"
-                disabled={msg.applied}
-                onClick={() => {
-                  try {
-                    onAction(msg.proposal);
-                    setMessages((prev) =>
-                      prev.map((m, j) =>
-                        j === i ? { ...m, applied: true } : m,
-                      ),
-                    );
-                    setError("");
-                  } catch (err) {
-                    setError(err.message);
-                  }
-                }}
-              >
-                {msg.applied ? "Applied" : "Apply this change"}
-              </button>
+            {!msg.user && (
+              <span className="chat-avatar" aria-hidden="true">
+                <Icon name="spark" size={14} />
+              </span>
             )}
+            <div className={msg.user ? "chat-bubble user" : "chat-bubble"}>
+              {msg.pending ? (
+                <span className="chat-typing" aria-label="Thinking">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              ) : (
+                msg.message
+              )}
+              {msg.proposal && (
+                <div className="assistant-proposal">
+                  <button
+                    className="assistant-apply-link"
+                    disabled={msg.applied}
+                    onClick={() => {
+                      try {
+                        onAction(msg.proposal);
+                        setMessages((prev) =>
+                          prev.map((m, j) =>
+                            j === i ? { ...m, applied: true } : m,
+                          ),
+                        );
+                        setError("");
+                      } catch (err) {
+                        setError(err.message);
+                      }
+                    }}
+                  >
+                    {msg.applied ? "✓ Done" : "Yes, update my profile →"}
+                  </button>
+                  {!msg.applied && (
+                    <button
+                      className="assistant-dismiss-link"
+                      onClick={() =>
+                        setMessages((prev) =>
+                          prev.map((m, j) =>
+                            j === i ? { ...m, proposal: null } : m,
+                          ),
+                        )
+                      }
+                    >
+                      No thanks
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         ))}
       </div>
+      {messages.length < 3 && (
+        <div className="assistant-prompts" role="group" aria-label="Try asking">
+          {ASSISTANT_PROMPTS.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              className="assistant-chip"
+              disabled={busy}
+              onClick={() => sendPrompt(prompt)}
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+      )}
       <form
-        className="chat-form"
-        onSubmit={async (e) => {
+        className="chat-form assistant-composer"
+        onSubmit={(e) => {
           e.preventDefault();
-          const sent = text.trim();
-          if (!sent) return;
-          let response;
-          try {
-            response = interpretFoodRequest(sent, state, catalog);
-          } catch (err) {
-            setError(err.message);
-            return;
-          }
-          if (!response.unrecognized) {
-            setMessages((prev) => [
-              ...prev,
-              { user: true, message: sent },
-              response,
-            ]);
-            setText("");
-            setError("");
-            return;
-          }
-          setMessages((prev) => [
-            ...prev,
-            { user: true, message: sent },
-            { message: "Checking that…", pending: true },
-          ]);
-          setText("");
-          setError("");
-          try {
-            const res = await fetch("/api/recipes", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text: sent, memories: [] }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) {
-              const detail =
-                typeof data.detail === "string"
-                  ? data.detail
-                  : Array.isArray(data.detail)
-                    ? data.detail.map((item) => item.msg || item).join(" ")
-                    : data.error || "Could not interpret that request.";
-              setMessages((prev) => prev.filter((item) => !item.pending));
-              setError(detail);
-              return;
-            }
-            const reply = replyFromPatch(data, state, catalog);
-            setMessages((prev) => [
-              ...prev.filter((item) => !item.pending),
-              reply,
-            ]);
-            const summary = reply.message;
-            if (typeof summary === "string" && summary) {
-              try {
-                const phrased = await fetch("/api/recipes/phrase", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ summary }),
-                  signal: AbortSignal.timeout(25000),
-                });
-                const phraseData = await phrased.json().catch(() => ({}));
-                const text =
-                  phrased.ok && typeof phraseData.text === "string"
-                    ? phraseData.text.trim()
-                    : "";
-                if (text)
-                  setMessages((prev) =>
-                    prev.map((item) =>
-                      item === reply ? { ...item, message: text } : item,
-                    ),
-                  );
-              } catch {
-                // Keep the templated reply already on screen.
-              }
-            }
-          } catch (err) {
-            setMessages((prev) => prev.filter((item) => !item.pending));
-            setError(err.message || "Could not interpret that request.");
-          }
+          sendPrompt(text);
         }}
       >
         <label className="sr-only" htmlFor="chat-input">
-          Food request
+          Ask Daywell AI
         </label>
         <input
           id="chat-input"
           value={text}
+          disabled={busy}
           onChange={(e) => setText(e.target.value)}
-          placeholder="What would help with your meal?"
+          placeholder="Ask anything about meals…"
+          autoComplete="off"
         />
         <button
-          className="primary"
+          className="primary assistant-send"
           type="submit"
-          aria-label="Send food request"
+          disabled={busy || !text.trim()}
+          aria-label="Send"
         >
           <Icon name="arrow" />
         </button>
@@ -1172,7 +1565,7 @@ function Log({ data, onClose, onSave, onLogged }) {
               servings,
               date,
             });
-            onLogged();
+            onLogged(data.meal);
             onClose();
           } catch (err) {
             setError(err.message);
@@ -1230,6 +1623,52 @@ function Log({ data, onClose, onSave, onLogged }) {
   );
 }
 
+function UsedUpDialog({ meal, ingredients, onDone, onClose }) {
+  const [checked, setChecked] = useState(new Set());
+  function toggle(key) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+  return (
+    <Modal title="Did you use anything up?" onClose={onClose}>
+      <p className="muted">
+        You just made <strong>{meal.name}</strong>. Tap any ingredient you ran
+        out of so we can remove it from your pantry.
+      </p>
+      <div className="used-up-list">
+        {ingredients.map(({ display }) => (
+          <label key={display} className="used-up-item">
+            <input
+              type="checkbox"
+              checked={checked.has(display)}
+              onChange={() => toggle(display)}
+            />
+            <span>{display}</span>
+          </label>
+        ))}
+      </div>
+      <p className="fine-print">
+        Leave everything unchecked if you still have leftovers.
+      </p>
+      <div className="dialog-actions">
+        <button
+          className="primary"
+          onClick={() => onDone([...checked])}
+        >
+          {checked.size ? `Remove ${checked.size} item${checked.size > 1 ? "s" : ""}` : "Nothing ran out"}
+          <Icon name="check" />
+        </button>
+        <button className="secondary" onClick={onClose}>
+          Skip
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 export {
   Icon,
   Modal,
@@ -1242,4 +1681,5 @@ export {
   Log,
   Card,
   MealArt,
+  UsedUpDialog,
 };

@@ -6,6 +6,7 @@ import time
 from datetime import date
 from pathlib import Path
 
+import httpx
 from backboard import BackboardClient
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -15,6 +16,9 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 import db as store
+import substitutions as swaps
+import usda
+from skills.loader import load_skill
 
 ROOT = Path(__file__).resolve().parent
 # Prefer backend/.env, fall back to fridgemate/.env
@@ -35,6 +39,10 @@ def on_startup():
         )
     except Exception as e:
         print(f"[Startup] Database init failed: {type(e).__name__}: {e}")
+    key = usda.refresh_api_key()
+    print(
+        f"[Startup] USDA FoodData Central: {'ready' if key else 'not configured (set USDA_API_KEY)'}"
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -71,7 +79,6 @@ backboard_key = (os.getenv("BACKBOARD_API_KEY") or "").strip()
 backboard_client = BackboardClient(api_key=backboard_key) if backboard_key else None
 _assistant_id = None
 DEMO_ASSISTANT_NAME = "FridgeMate demo"
-PHOTOS = {"tofu", "pasta", "chickpeas"}
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg",
     "image/jpg",
@@ -125,6 +132,9 @@ INJECTION_PATTERNS = (
 )
 MEAL_ONLY = (
     "I can only help with meal planning — try asking about ingredients, time, or budget."
+)
+CONVO_FALLBACK = (
+    "Tell me what you're looking for — ingredients, time, or budget — and I'll find something."
 )
 RATE_LIMIT = 20
 RATE_WINDOW_SECONDS = 60
@@ -191,6 +201,11 @@ def raise_gemini_failure(last_error, action: str):
     )
 
 
+class ChatTurn(BaseModel):
+    role: str
+    text: str
+
+
 class RecipeRequest(BaseModel):
     ingredients: list[str] = Field(default_factory=list)
     diet: str = "anything"
@@ -198,10 +213,18 @@ class RecipeRequest(BaseModel):
     exclusions: list[str] = Field(default_factory=list)
     text: str | None = None
     memories: list[str] = Field(default_factory=list)
+    history: list[ChatTurn] = Field(default_factory=list)
 
 
 class PhraseRequest(BaseModel):
     summary: str
+
+
+class SubstituteRequest(BaseModel):
+    ingredient: str
+    available: list[str] = Field(default_factory=list)
+    recipe_name: str = ""
+    meal: dict | None = None
 
 
 class PreferenceRequest(BaseModel):
@@ -232,8 +255,26 @@ def home():
         "gemini": bool(client),
         "backboard": bool(backboard_client),
         "database": store.SessionLocal is not None,
+        "usda": usda.usda_configured(),
         "model": GEMINI_MODEL if client else None,
     }
+
+
+@app.get("/nutrition/lookup")
+async def nutrition_lookup(q: str):
+    """Debug / demo: look up per-100g macros from USDA FDC."""
+    if not usda.usda_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="USDA_API_KEY is missing from backend/.env or fridgemate/.env",
+        )
+    query = (q or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Query q is required.")
+    per_100 = await usda.lookup_per_100g(query)
+    if not per_100:
+        return {"query": query, "status": "not_found", "per_100g": None}
+    return {"query": query, "status": "ok", "per_100g": per_100, "source": "USDA FDC"}
 
 
 @app.get("/pantry")
@@ -405,20 +446,364 @@ def memory_contents(result):
     return contents
 
 
+class ProfilePatchRequest(BaseModel):
+    text: str
+    current_profile: dict | None = None
+
+
+@app.post("/profile-patch")
+async def profile_patch(request: ProfilePatchRequest):
+    """
+    Given a natural-language preference statement, use Gemini to extract
+    suggested profile changes. Always returns a proposal — the frontend
+    must ask the user before applying it.
+    """
+    enforce_rate_limit()
+    if blocked_user_text(request.text):
+        reject_blocked_text()
+    if not client:
+        raise HTTPException(
+            status_code=500,
+            detail="GEMINI_API_KEY is missing from backend/.env",
+        )
+
+    current = request.current_profile or {}
+    current_diet = current.get("diet", "anything")
+    current_exclusions = current.get("exclusions", [])
+    current_preferred = current.get("preferred", "")
+    current_cuisines = current.get("cuisines", [])
+
+    VALID_DIETS = ["anything", "vegetarian", "vegan"]
+    VALID_EXCLUSIONS = [
+        "soy", "egg", "milk", "wheat", "peanut",
+        "tree nut", "sesame", "fish", "shellfish",
+    ]
+    VALID_CUISINES = [
+        "Italian", "Mexican", "Chinese", "Japanese", "Indian", "Thai",
+        "Korean", "Mediterranean", "American", "French", "Greek", "Spanish",
+        "Middle Eastern", "Vietnamese", "Caribbean", "Latin American",
+    ]
+    VALID_EQUIPMENT = [
+        "stove", "pan", "pot", "microwave", "oven", "air fryer", "rice cooker",
+        "toaster", "blender", "electric kettle", "baking sheet", "cutting board",
+        "knife", "mixing bowl", "spatula", "colander", "slow cooker",
+    ]
+
+    prompt = f"""
+You are a profile assistant for a meal planning app. The user said:
+"{request.text}"
+
+Their current settings:
+- Diet: {current_diet}
+- Excluded allergens: {", ".join(current_exclusions) or "none"}
+- Preferred food/cuisine text: "{current_preferred}"
+- Liked cuisines: {", ".join(current_cuisines) or "none set"}
+- Equipment: {", ".join(current.get("equipment", [])) or "none set"}
+- Cooking access: {current.get("cooking", True)}
+
+Extract any preference changes implied by their message. Return ONLY valid JSON:
+{{
+  "diet": null or one of: {VALID_DIETS},
+  "cooking": null or true/false (if they mention having or not having a kitchen),
+  "exclusions_add": [] (allergens to add, from: {VALID_EXCLUSIONS}),
+  "exclusions_remove": [] (allergens to remove),
+  "preferred": null or short free-text preference string, max 40 chars (e.g. "spicy Indian food", "pasta"),
+  "cuisines_add": [] (cuisines to add, from: {VALID_CUISINES}),
+  "cuisines_remove": [] (cuisines to remove),
+  "equipment_add": [] (equipment to add, from: {VALID_EQUIPMENT}),
+  "equipment_remove": [] (equipment to remove),
+  "summary": "One warm, conversational sentence describing what you detected and asking if they want to apply it. E.g. 'Sounds like you love Indian food and have an air fryer — want me to update your profile?'"
+}}
+
+Rules:
+- Only include fields where you detected a clear intent. Use null/[] for no-change fields.
+- "love X food" → cuisines_add + update preferred.
+- "I'm vegan/vegetarian" → set diet.
+- "I'm allergic to / I can't eat X" → exclusions_add if X is a valid allergen.
+- "I have a microwave / blender / etc" → equipment_add.
+- "I don't have a stove / no kitchen" → cooking: false.
+- "I want more protein / trying to lose weight" → note in summary only (goals require numeric values, skip).
+- Always end summary with a direct question: "Want me to update your profile?"
+- If nothing relevant, set summary to null.
+"""
+
+    last_error = None
+    for model in GEMINI_FALLBACKS:
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=model,
+                contents=prompt,
+                config={"response_mime_type": "application/json"},
+            )
+            parsed = json.loads(response.text or "{}")
+            if not isinstance(parsed, dict):
+                raise ValueError("Non-object response")
+
+            # Sanitize — only pass through valid values
+            patch = {}
+            diet = parsed.get("diet")
+            if diet in VALID_DIETS:
+                patch["diet"] = diet
+
+            excl_add = [e for e in (parsed.get("exclusions_add") or []) if e in VALID_EXCLUSIONS]
+            excl_remove = [e for e in (parsed.get("exclusions_remove") or []) if e in VALID_EXCLUSIONS]
+            if excl_add:
+                patch["exclusions_add"] = excl_add
+            if excl_remove:
+                patch["exclusions_remove"] = excl_remove
+
+            preferred = parsed.get("preferred")
+            if isinstance(preferred, str) and preferred.strip():
+                patch["preferred"] = preferred.strip()[:40]
+
+            cuisines_add = [c for c in (parsed.get("cuisines_add") or []) if c in VALID_CUISINES]
+            cuisines_remove = [c for c in (parsed.get("cuisines_remove") or []) if c in VALID_CUISINES]
+            if cuisines_add:
+                patch["cuisines_add"] = cuisines_add
+            if cuisines_remove:
+                patch["cuisines_remove"] = cuisines_remove
+
+            equipment_add = [e for e in (parsed.get("equipment_add") or []) if e in VALID_EQUIPMENT]
+            equipment_remove = [e for e in (parsed.get("equipment_remove") or []) if e in VALID_EQUIPMENT]
+            if equipment_add:
+                patch["equipment_add"] = equipment_add
+            if equipment_remove:
+                patch["equipment_remove"] = equipment_remove
+
+            cooking = parsed.get("cooking")
+            if isinstance(cooking, bool):
+                patch["cooking"] = cooking
+
+            summary = parsed.get("summary")
+            if not isinstance(summary, str) or not summary.strip():
+                summary = None
+
+            has_changes = bool(patch)
+            return redact_output({
+                "patch": patch,
+                "summary": summary,
+                "has_changes": has_changes,
+            })
+        except HTTPException:
+            raise
+        except Exception as e:
+            last_error = e
+            msg = str(e)
+            print(f"Profile patch error ({model}):", msg)
+            if not gemini_transient(msg):
+                break
+
+    raise_gemini_failure(last_error, "Profile patch")
+
+
 def slug(name: str, index: int) -> str:
     base = re.sub(r"[^a-z0-9]+", "-", (name or "meal").lower()).strip("-")[:40]
     return f"gemini-{base or 'meal'}-{index}"
 
 
-def pick_photo(raw: str | None, name: str, blob: str) -> str:
-    if raw in PHOTOS:
-        return raw
-    text = f"{name} {blob}".lower()
-    if "pasta" in text or "noodle" in text:
-        return "pasta"
-    if "chickpea" in text or "hummus" in text or "bean" in text:
-        return "chickpeas"
-    return "tofu"
+# TheMealDB CDN thumbs — existing photos, not AI generation (fast).
+_image_cache: dict[str, str | None] = {}
+
+_IMAGE_STOP = {
+    "a",
+    "an",
+    "the",
+    "and",
+    "or",
+    "with",
+    "in",
+    "of",
+    "on",
+    "to",
+    "style",
+    "homemade",
+    "easy",
+    "quick",
+    "bowl",
+    "plate",
+    "dish",
+    "recipe",
+    "meal",
+    "fresh",
+    "simple",
+    "classic",
+    "best",
+    "loaded",
+    "healthy",
+    "spicy",
+    "zesty",
+}
+
+# Single-token searches that return random unrelated dishes too often.
+_IMAGE_GENERIC = {
+    "chicken",
+    "beef",
+    "pork",
+    "fish",
+    "salmon",
+    "tofu",
+    "egg",
+    "eggs",
+    "rice",
+    "pasta",
+    "noodle",
+    "noodles",
+    "soup",
+    "salad",
+    "curry",
+    "stir",
+    "fry",
+    "fried",
+    "baked",
+    "grilled",
+    "roasted",
+    "sauce",
+    "vegetable",
+    "veggie",
+    "veggies",
+}
+
+
+def _image_tokens(text: str) -> list[str]:
+    words = re.findall(r"[a-z0-9]+", (text or "").lower())
+    return [w for w in words if len(w) > 2 and w not in _IMAGE_STOP]
+
+
+def _score_dish_match(query: str, meal_title: str) -> int:
+    """Higher = better. Require meaningful overlap; punish conflicting proteins."""
+    want = set(_image_tokens(query))
+    got = set(_image_tokens(meal_title))
+    if not want or not got:
+        return -999
+    shared = want & got
+    if not shared:
+        return -400
+    # One shared token is only OK for short queries ("pad thai")
+    if len(want) >= 3 and len(shared) < 2:
+        return -200
+    score = len(shared) * 120
+    # Prefer titles that cover most of the query (not just "chicken")
+    score += int(180 * len(shared) / max(1, len(want)))
+    proteins = {
+        "shrimp",
+        "prawn",
+        "prawns",
+        "chicken",
+        "beef",
+        "pork",
+        "lamb",
+        "fish",
+        "salmon",
+        "tuna",
+        "bacon",
+        "sausage",
+        "crab",
+        "lobster",
+        "turkey",
+        "duck",
+        "steak",
+        "tofu",
+        "egg",
+        "eggs",
+    }
+    for p in proteins:
+        if p in got and p not in want:
+            score -= 500
+    # Mild penalty for long unrelated titles
+    extras = len(got - want)
+    score -= min(80, extras * 12)
+    return score
+
+
+def _image_search_queries(name: str) -> list[str]:
+    base = re.sub(r"\s+", " ", (name or "").strip())
+    base = re.sub(r"\([^)]*\)", "", base).strip(" ,-")
+    parts = [p for p in re.split(r"[\s/,-]+", base) if p]
+    meaningful = [p for p in parts if p.lower() not in _IMAGE_STOP]
+    candidates = [base]
+    if len(meaningful) >= 3:
+        candidates.append(" ".join(meaningful[:3]))
+    if len(meaningful) >= 2:
+        candidates.append(" ".join(meaningful[:2]))
+    # Only use a single distinctive token — never generic proteins/carbs alone
+    if len(meaningful) == 1 and meaningful[0].lower() not in _IMAGE_GENERIC:
+        candidates.append(meaningful[0])
+    out: list[str] = []
+    seen: set[str] = set()
+    for q in candidates:
+        q = q.strip(" ,-")[:60]
+        key = q.lower()
+        if q and key not in seen:
+            seen.add(key)
+            out.append(q)
+    return out
+
+
+async def resolve_dish_image(name: str, client: httpx.AsyncClient | None = None) -> str | None:
+    """Look up a real food photo by dish name (TheMealDB). Cached + ~ms CDN.
+
+    Picks the best-scoring title match — never blindly takes meals[0].
+    """
+    key = (name or "").strip().lower()
+    if not key:
+        return None
+    if key in _image_cache:
+        return _image_cache[key]
+
+    async def _search(http: httpx.AsyncClient) -> str | None:
+        best_url: str | None = None
+        best_score = 99  # require score >= 100
+        for q in _image_search_queries(name):
+            try:
+                response = await http.get(
+                    "https://www.themealdb.com/api/json/v1/1/search.php",
+                    params={"s": q},
+                )
+                if response.status_code != 200:
+                    continue
+                meals = (response.json() or {}).get("meals") or []
+                for meal in meals[:12]:
+                    title = meal.get("strMeal") or ""
+                    thumb = meal.get("strMealThumb")
+                    if not thumb:
+                        continue
+                    score = _score_dish_match(name, title)
+                    # Also reward close matches to the specific search query
+                    score = max(score, _score_dish_match(q, title) - 20)
+                    if score > best_score:
+                        best_score = score
+                        best_url = thumb
+            except Exception as e:
+                print(f"[Image] TheMealDB miss for {q!r}: {type(e).__name__}")
+        _image_cache[key] = best_url
+        if best_url:
+            print(f"[Image] matched {name!r} → score={best_score}")
+        else:
+            print(f"[Image] no confident match for {name!r}")
+        return best_url
+
+    if client is not None:
+        return await _search(client)
+    async with httpx.AsyncClient(timeout=2.5) as http:
+        return await _search(http)
+
+
+async def attach_dish_images(meals: list[dict]) -> None:
+    """Attach fast CDN image URLs in parallel (does not block on AI image gen)."""
+    if not meals:
+        return
+    async with httpx.AsyncClient(timeout=2.5) as client:
+
+        async def one(meal: dict) -> None:
+            # Prefer Gemini's short image_search phrase when present
+            label = (meal.get("imageSearch") or meal.get("name") or "").strip()
+            url = await resolve_dish_image(label, client)
+            if url:
+                meal["imageUrl"] = url
+                meal["photo"] = url
+
+        await asyncio.gather(*[one(m) for m in meals])
 
 
 def normalize_ingredient(item) -> dict:
@@ -459,6 +844,10 @@ def normalize_meal(raw: dict, index: int, fallback_ingredients: list[str]) -> di
         "anything"
     ]
     note = str(raw.get("nutrition_note") or "").strip()
+    raw_swaps = raw.get("substitutions") if isinstance(raw.get("substitutions"), list) else []
+    image_search = str(
+        raw.get("image_search") or raw.get("imageSearch") or name
+    ).strip()[:80]
 
     return {
         "id": slug(name, index),
@@ -496,8 +885,12 @@ def normalize_meal(raw: dict, index: int, fallback_ingredients: list[str]) -> di
             "Taste and adjust seasoning.",
         ],
         "mode": "cook",
-        "photo": pick_photo(raw.get("photo"), name, " ".join(steps)),
+        "photo": None,
+        "imageUrl": None,
+        "imageSearch": image_search,
         "suggestion": True,
+        "missingIngredients": [],
+        "substitutions": [s for s in raw_swaps if isinstance(s, dict)][:6],
     }
 
 
@@ -515,7 +908,14 @@ EXCLUSIONS = {
     "fish",
     "shellfish",
 }
-EQUIPMENT = {"stove", "pan", "pot"}
+EQUIPMENT = {
+    "stove", "pan", "pot",
+    "microwave", "oven", "air fryer", "rice cooker",
+    "toaster", "blender", "electric kettle",
+    "baking sheet", "cutting board", "knife",
+    "mixing bowl", "spatula", "colander",
+    "slow cooker",
+}
 PATCH_KEYS = ("mode", "sort", "passed", "profile", "context", "pantry", "unparsed")
 PROFILE_KEYS = ("diet", "exclusions", "preferred", "budget", "cooking", "equipment")
 CATALOG_PATH = ROOT.parent / "src" / "data" / "catalog.js"
@@ -669,44 +1069,89 @@ def validate_patch(raw, names: set[str]) -> dict:
     }
 
 
-def interpreter_prompt(text: str, memories: list[str], names: set[str]) -> str:
+def recent_turns(history) -> list[dict]:
+    turns = []
+    for item in history or []:
+        if isinstance(item, dict):
+            role, text = item.get("role"), item.get("text")
+        else:
+            role, text = getattr(item, "role", None), getattr(item, "text", None)
+        if role not in ("user", "assistant") or not isinstance(text, str):
+            continue
+        cleaned = " ".join(text.split())[:500]
+        if cleaned:
+            turns.append({"role": role, "text": cleaned})
+    return turns[-4:]
+
+
+def history_block(history) -> str:
+    turns = recent_turns(history)
+    if not turns:
+        return "None."
+    return "\n".join(
+        f"{'User' if turn['role'] == 'user' else 'Assistant'}: {turn['text']}"
+        for turn in turns
+    )
+
+
+async def conversational_reply(user_text: str, history) -> str:
+    enforce_rate_limit()
+    if blocked_user_text(user_text):
+        reject_blocked_text()
+    if not client:
+        return CONVO_FALLBACK
+    skill = load_skill("conversation_skill")
+    prompt = f"""You are the food assistant for Daywell.
+{skill}
+
+Recent conversation:
+{history_block(history)}
+
+User: {user_text}
+"""
+    for model in GEMINI_FALLBACKS:
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.models.generate_content,
+                    model=model,
+                    contents=prompt,
+                ),
+                timeout=20,
+            )
+            text = redact_text((response.text or "").strip())
+            if text:
+                return text
+        except HTTPException:
+            raise
+        except TimeoutError:
+            print(f"Gemini conversation timed out ({model})")
+            return CONVO_FALLBACK
+        except Exception as e:
+            msg = str(e)
+            print(f"Gemini conversation error ({model}):", msg)
+            if not gemini_transient(msg):
+                break
+    return CONVO_FALLBACK
+
+
+def interpreter_prompt(text: str, memories: list[str], names: set[str], history=None) -> str:
     memory_block = "\n".join(f"- {item}" for item in memories) or "None."
     ingredients = ", ".join(sorted(names))
-    return f"""You translate one meal request into a constraint patch for an existing catalog.
-Return JSON only. Use null for every field the user did not mention. Do not invent recipes.
-Do not invent pantry grams. If a food is not in the catalog ingredient list, leave it out of pantry and add the user's words to unparsed.
+    skill = load_skill("interpreter_skill")
+    return f"""You are Daywell's meal-request interpreter.
+{skill}
 
 Catalog ingredient names, exact spelling: {ingredients}
-Modes: compare, cook, eatOut
-Sorts: catalog, time, cost, protein
-Diets: anything, vegetarian, vegan
-Exclusions: soy, egg, milk, wheat, peanut, tree nut, sesame, fish, shellfish
-Equipment: stove, pan, pot
-Map "peanuts" to the exclusion "peanut". Budget is USD per meal, from 0 to 1000.
+
+Recent chat, oldest first:
+{history_block(history)}
 
 Known memories:
 {memory_block}
 
-User request:
+User message:
 {text}
-
-Return this object and no other keys inside profile or context:
-{{
-  "mode": null,
-  "sort": null,
-  "passed": null,
-  "profile": {{
-    "diet": null,
-    "exclusions": null,
-    "preferred": null,
-    "budget": null,
-    "cooking": null,
-    "equipment": null
-  }},
-  "context": {{"available": null}},
-  "pantry": null,
-  "unparsed": []
-}}
 """
 
 
@@ -732,7 +1177,7 @@ async def interpret_constraints(request: RecipeRequest) -> dict:
                 item for item in request.memories if isinstance(item, str) and item.strip()
             ]
     names = catalog_ingredient_names()
-    prompt = interpreter_prompt(text, memories, names)
+    prompt = interpreter_prompt(text, memories, names, request.history)
     last_error = None
     for model in GEMINI_FALLBACKS:
         try:
@@ -743,6 +1188,9 @@ async def interpret_constraints(request: RecipeRequest) -> dict:
                 config={"response_mime_type": "application/json"},
             )
             parsed = json.loads(response.text or "")
+            if isinstance(parsed, dict) and parsed.get("intent") == "conversation":
+                message = await conversational_reply(text, request.history)
+                return {"intent": "conversation", "message": message}
             try:
                 patch = validate_patch(parsed, names)
             except HTTPException:
@@ -752,6 +1200,7 @@ async def interpret_constraints(request: RecipeRequest) -> dict:
                 print(
                     f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)"
                 )
+            patch["intent"] = "meal_request"
             return redact_output(patch)
         except HTTPException:
             raise
@@ -796,10 +1245,9 @@ async def phrase_reply(request: PhraseRequest):
             status_code=500,
             detail="GEMINI_API_KEY is missing from backend/.env or fridgemate/.env",
         )
-    prompt = f"""Rewrite the meal assistant summary below as one or two natural, conversational sentences.
-Vary the wording. Keep every fact exactly: meal names, durations, costs, reasons, and disclosure lines such as catalog misses and "for this reply only".
-Do not add meals, times, prices, reasons, or advice that are not in the summary.
-Return only the rewritten sentences.
+    skill = load_skill("phrase_skill")
+    prompt = f"""You are Daywell's reply phrasing skill.
+{skill}
 
 Summary:
 {summary}
@@ -825,6 +1273,33 @@ Summary:
             if not gemini_transient(msg):
                 break
     raise_gemini_failure(last_error, "Reply phrasing")
+
+
+@app.post("/recipes/substitute")
+async def substitute_ingredient(request: SubstituteRequest):
+    """Suggest a swap for one missing ingredient given what the user has."""
+    ingredient = (request.ingredient or "").strip()
+    if not ingredient:
+        raise HTTPException(status_code=400, detail="ingredient is required.")
+    available = [
+        str(x).strip() for x in (request.available or []) if str(x).strip()
+    ][:40]
+    if request.meal and isinstance(request.meal, dict):
+        annotated = swaps.attach_substitutions(dict(request.meal), available)
+        return {
+            "status": "ok",
+            "ingredient": ingredient,
+            "substitutions": annotated.get("substitutions") or [],
+            "missingIngredients": annotated.get("missingIngredients") or [],
+            "meal": annotated,
+        }
+    suggestion = swaps.suggest_swap(ingredient, available)
+    return {
+        "status": "ok",
+        "ingredient": ingredient,
+        "substitution": suggestion,
+        "substitutions": [suggestion] if suggestion else [],
+    }
 
 
 @app.post("/recipes")
@@ -871,8 +1346,9 @@ async def generate_recipes(request: RecipeRequest):
                 print("Backboard error:", str(e))
 
     exclusions = ", ".join(request.exclusions) if request.exclusions else "none"
-    prompt = f"""
-You are FridgeMate, a practical cooking assistant for college students.
+    skill = load_skill("recipe_skill")
+    prompt = f"""You are FridgeMate, a practical cooking assistant for college students.
+{skill}
 
 Available ingredients: {ingredients}
 Dietary preference: {request.diet}
@@ -884,33 +1360,6 @@ Maximum cooking time: {request.time} minutes
 Known preferences from memory:
 {known_preferences}
 Follow these preferences. Do not suggest food that conflicts with them.
-"""
-    prompt += """
-Suggest 6 realistic recipes using these ingredients when possible.
-Prioritize using ingredients that might otherwise go to waste.
-Keep recipes affordable, beginner-friendly, and healthy.
-Mention any extra ingredients needed rather than pretending the user already has them.
-
-Return valid JSON only:
-{
-  "recipes": [
-    {
-      "name": "Recipe name",
-      "description": "Short description",
-      "time": 20,
-      "ingredients": ["ingredient 1", "ingredient 2"],
-      "steps": ["Step 1", "Step 2"],
-      "nutrition_note": "Brief, cautious nutrition note",
-      "photo": "tofu",
-      "diets": ["vegetarian"],
-      "allergens": [],
-      "energy_kcal": 450,
-      "protein_g": 20
-    }
-  ]
-}
-
-photo must be one of: tofu, pasta, chickpeas (closest visual match).
 """
 
     last_error = None
@@ -930,6 +1379,28 @@ photo must be one of: tofu, pasta, chickpeas (closest visual match).
                 normalize_meal(r if isinstance(r, dict) else {}, i, cleaned)
                 for i, r in enumerate(recipes[:8])
             ]
+            if usda.usda_configured():
+                meals = await usda.enrich_meals(meals)
+            # Images resolve on the client (CDN lookup) so Suggest stays fast.
+
+            async def _sub_json(prompt_text: str) -> dict:
+                for sub_model in GEMINI_FALLBACKS:
+                    try:
+                        sub_resp = await asyncio.to_thread(
+                            client.models.generate_content,
+                            model=sub_model,
+                            contents=prompt_text,
+                            config={"response_mime_type": "application/json"},
+                        )
+                        parsed_sub = json.loads(sub_resp.text or "{}")
+                        return parsed_sub if isinstance(parsed_sub, dict) else {}
+                    except Exception as sub_err:
+                        print(f"Substitution skill error ({sub_model}):", sub_err)
+                        if not gemini_transient(str(sub_err)):
+                            break
+                return {}
+
+            meals = await swaps.enrich_with_agent(meals, cleaned, _sub_json)
             if model != GEMINI_MODEL:
                 print(f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)")
             return redact_output(
@@ -938,6 +1409,7 @@ photo must be one of: tofu, pasta, chickpeas (closest visual match).
                     "recipes": meals,
                     "ingredients": cleaned,
                     "model": model,
+                    "nutrition": "usda" if usda.usda_configured() else "gemini_estimate",
                 }
             )
         except Exception as e:
@@ -976,14 +1448,9 @@ async def vision_ingredients(photo: UploadFile = File(...)):
             detail="Photo is too large (max 8 MB). Try a smaller image.",
         )
 
-    prompt = """
-You are FridgeMate. Look at this fridge / pantry photo and list edible ingredients
-you can clearly see (produce, proteins, dairy, leftovers in labeled containers, etc.).
-Ignore shelves, containers, brands, and non-food objects.
-Use short grocery-style names (e.g. "eggs", "spinach", "milk").
-Return valid JSON only:
-{"ingredients":["ingredient 1","ingredient 2"]}
-If nothing edible is visible, return {"ingredients":[]}.
+    skill = load_skill("vision_skill")
+    prompt = f"""You are FridgeMate's fridge / pantry vision skill.
+{skill}
 """
     image_part = types.Part.from_bytes(data=data, mime_type=content_type)
     last_error = None
