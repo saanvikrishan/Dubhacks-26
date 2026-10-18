@@ -1164,7 +1164,7 @@ function Log({ data, onClose, onSave, onLogged }) {
               servings,
               date,
             });
-            onLogged();
+            onLogged(data.meal);
             onClose();
           } catch (err) {
             setError(err.message);
@@ -1222,6 +1222,52 @@ function Log({ data, onClose, onSave, onLogged }) {
   );
 }
 
+function UsedUpDialog({ meal, ingredients, onDone, onClose }) {
+  const [checked, setChecked] = useState(new Set());
+  function toggle(key) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+  return (
+    <Modal title="Did you use anything up?" onClose={onClose}>
+      <p className="muted">
+        You just made <strong>{meal.name}</strong>. Tap any ingredient you ran
+        out of so we can remove it from your pantry.
+      </p>
+      <div className="used-up-list">
+        {ingredients.map(({ display }) => (
+          <label key={display} className="used-up-item">
+            <input
+              type="checkbox"
+              checked={checked.has(display)}
+              onChange={() => toggle(display)}
+            />
+            <span>{display}</span>
+          </label>
+        ))}
+      </div>
+      <p className="fine-print">
+        Leave everything unchecked if you still have leftovers.
+      </p>
+      <div className="dialog-actions">
+        <button
+          className="primary"
+          onClick={() => onDone([...checked])}
+        >
+          {checked.size ? `Remove ${checked.size} item${checked.size > 1 ? "s" : ""}` : "Nothing ran out"}
+          <Icon name="check" />
+        </button>
+        <button className="secondary" onClick={onClose}>
+          Skip
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 export {
   Icon,
   Modal,
@@ -1234,4 +1280,5 @@ export {
   Log,
   Card,
   MealArt,
+  UsedUpDialog,
 };

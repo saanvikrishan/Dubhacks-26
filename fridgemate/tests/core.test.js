@@ -331,7 +331,7 @@ test("invalid quantities and schedule values cannot mutate state", () => {
     /upper bound/,
   );
 });
-test("storage roundtrip and damaged data preservation", () => {
+test("storage roundtrip and damaged data preservation", async () => {
   const records = new Map(),
     storage = {
       getItem: (key) => records.get(key),
@@ -342,10 +342,10 @@ test("storage roundtrip and damaged data preservation", () => {
     type: "choose",
     mealId: "tofu-bowl",
   });
-  storageAdapter.save(storage, state);
-  assert.deepEqual(storageAdapter.load(storage).state, state);
+  await storageAdapter.save(storage, state);
+  assert.deepEqual((await storageAdapter.load(storage)).state, state);
   storage.setItem(STORAGE_KEY, "{broken");
-  assert.ok(storageAdapter.load(storage).error);
+  assert.ok((await storageAdapter.load(storage)).error);
   assert.equal(storage.getItem(STORAGE_KEY), "{broken");
 });
 test("assistant proposes bounded commands and uses the same plan without mutation", () => {

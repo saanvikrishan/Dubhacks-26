@@ -65,9 +65,29 @@ export function evaluate(meal, state, c = config) {
       );
       if (missingEquipment.length)
         reasons.push(`Needs equipment: ${missingEquipment.join(", ")}.`);
-      const missing = meal.ingredients.filter(
-        (item) => !(pantry[item.name] >= item.grams),
-      );
+      const missing = meal.ingredients.filter((item) => {
+        // Strip leading amounts/units AND trailing parenthetical notes so that
+        // "1/2 block firm tofu" → "tofu",
+        // "1 tbsp cooking oil (extra needed)" → "cooking oil",
+        // "1 cup cooked brown rice" → "cooked brown rice"
+        const stripped = item.name
+          .replace(/\s*\(.*?\)\s*/g, "")          // remove (extra needed), (optional), etc.
+          .replace(
+            /^[\d\s\/\u00BC-\u00BE\u2150-\u215E]*(?:cup|tbsp?|tsp?|oz|g|ml|lb|block|can|clove|head|bunch|slice|piece|sprig|handful|pinch|dash|package|pkg|bag)s?\s+(?:of\s+)?/i,
+            "",
+          )
+          .replace(/^[\d\s\/\u00BC-\u00BE\u2150-\u215E]+/, "")
+          .trim()
+          .toLowerCase();
+        // Check pantry: exact → stripped → substring
+        const pantryKey =
+          Object.keys(pantry).find((k) => k.toLowerCase() === item.name.toLowerCase()) ??
+          Object.keys(pantry).find((k) => k.toLowerCase() === stripped) ??
+          Object.keys(pantry).find(
+            (k) => stripped.includes(k.toLowerCase()) || k.toLowerCase().includes(stripped),
+          );
+        return !(pantry[pantryKey] >= item.grams);
+      });
       if (missing.length)
         reasons.push(
           `Not enough confirmed ingredients: ${missing.map((item) => `${item.name} (${item.grams} g needed)`).join(", ")}.`,

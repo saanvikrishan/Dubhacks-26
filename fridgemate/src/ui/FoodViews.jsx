@@ -455,19 +455,26 @@ export function FoodDiscovery({
           return true;
         })
         .map((meal) => {
+          // Gemini meals bypass the catalog feasibility check (ingredient names
+          // don't match pantry keys, and the user already told us what they have).
+          // We still run evaluate() to get timing/duration, but we clear any
+          // catalog-specific reasons so they don't show as errors in the UI.
           const result = evaluate(meal, state);
+          const duration =
+            result.duration ??
+            meal.timing.prep +
+              meal.timing.cook +
+              state.context.eating +
+              state.context.cleanup +
+              state.context.onward +
+              state.context.buffer;
           return {
             ...result,
             meal,
             feasible: true,
-            duration:
-              result.duration ??
-              meal.timing.prep +
-                meal.timing.cook +
-                state.context.eating +
-                state.context.cleanup +
-                state.context.onward +
-                state.context.buffer,
+            reasons: [],
+            gaps: result.gaps ?? [],
+            duration,
           };
         })
     : null;

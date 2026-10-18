@@ -6,27 +6,30 @@ const BACKEND_URL = "http://localhost:8000";
 // Backend-connected storage adapter with localStorage fallback
 export const storageAdapter = {
   async load(storage) {
-    // Always load from localStorage — the backend uses append-only Backboard memory
-    // which can return stale state if earlier saves failed or Backboard isn't connected.
+    const raw = storage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return { state: createDemoState(), error: null };
+    }
+    let parsed;
     try {
-      const raw = storage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        return {
-          state: validateState(parsed),
-          error: null,
-        };
-      } else {
-        return {
-          state: createDemoState(),
-          error: null,
-        };
-      }
+      parsed = JSON.parse(raw);
     } catch {
+      // JSON is corrupt — preserve the raw string and start fresh.
       return {
         state: createDemoState(),
-        error:
-          "Saved data could not be read. It has been preserved. Reset the demo to start saving again.",
+        error: "Saved data was unreadable and has been reset.",
+      };
+    }
+    // validateState now repairs recoverable issues (stale context, bad grams, etc.)
+    // instead of throwing, so your pantry/profile/logs are always preserved.
+    try {
+      return { state: validateState(parsed), error: null };
+    } catch (err) {
+      // Only truly unrecoverable corruption reaches here (wrong version, etc.).
+      // Keep the broken raw data in storage — don't silently wipe it.
+      return {
+        state: createDemoState(),
+        error: `Saved data could not be loaded (${err.message}). Reset the demo to start fresh.`,
       };
     }
   },

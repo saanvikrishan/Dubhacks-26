@@ -9,6 +9,7 @@ import {
   Intake,
   Assistant,
   Log,
+  UsedUpDialog,
 } from "./ui/Core";
 import {
   Agenda,
@@ -51,6 +52,10 @@ export default function App() {
         const loaded = await storageAdapter.load(window.localStorage);
         setState(loaded.state);
         setStorageError(loaded.error);
+        // If Gemini meals were persisted, go straight to discovery
+        if (loaded.state?.geminiMeals?.length) {
+          setCookPhase("discover");
+        }
       } catch (error) {
         setState(storageAdapter.reset(window.localStorage));
         setStorageError('Failed to load saved state. Starting fresh.');
@@ -63,8 +68,6 @@ export default function App() {
   const [tab, setTab] = useState("Today"),
     [mode, setMode] = useState("cook"),
     [cookPhase, setCookPhase] = useState("groceries"),
-    [geminiMeals, setGeminiMeals] = useState(null),
-    [groceryList, setGroceryList] = useState([]),
     [date, setDate] = useState(today());
   const [dialog, setDialog] = useState(null),
     [notice, setNotice] = useState(""),
@@ -160,8 +163,7 @@ export default function App() {
     }
     setMode(nextMode);
     if (nextMode === "cook") {
-      setGeminiMeals(null);
-      setGroceryList([]);
+      await safe({ type: "clearGeminiMeals" });
       setCookPhase("groceries");
     }
     setTab("Food");
@@ -169,8 +171,7 @@ export default function App() {
   function setFoodMode(nextMode) {
     setMode(nextMode);
     if (nextMode === "cook") {
-      setGeminiMeals(null);
-      setGroceryList([]);
+      safe({ type: "clearGeminiMeals" });
       setCookPhase("groceries");
     }
   }
@@ -627,8 +628,8 @@ export default function App() {
               state={state}
               onSuggested={async (meals, ingredients) => {
                 rememberSuggestions(meals);
-                setGeminiMeals(meals);
-                setGroceryList(ingredients || []);
+                // Persist meals + grocery list to state so they survive reload
+                await safe({ type: "setGeminiMeals", meals, groceryList: ingredients || [] });
                 if (ingredients?.length) {
                   const pantry = { ...state.pantry };
                   for (const item of pantryItems) {
@@ -669,10 +670,11 @@ export default function App() {
               onWindow={() => setDialog({ type: "time" })}
               onUndoPlan={() => safe({ type: "undo" })}
               onChangeGroceries={() => {
+                safe({ type: "clearGeminiMeals" });
                 setCookPhase("groceries");
               }}
-              geminiMeals={mode === "cook" ? geminiMeals : null}
-              groceryList={groceryList}
+              geminiMeals={mode === "cook" ? (state.geminiMeals ?? null) : null}
+              groceryList={state.groceryList ?? []}
             />
           )}
         <footer className="compact-footer">
@@ -760,11 +762,43 @@ export default function App() {
           data={dialog}
           onSave={dispatch}
           onClose={close}
-          onLogged={() =>
-            setNotice(
-              "Meal recorded. Use Undo to reverse it, or Meal log to edit a portion.",
-            )
-          }
+          onLogged={(meal) => {
+            // After logging a meal, ask which ingredients got used up
+            const mealObj = meal ?? dialog.meal;
+            if (mealObj?.ingredients?.length) {
+              // Find ingredients that are in the pantry (fuzzy match same as engine)
+              const pantryKeys = Object.keys(state.pantry).filter(
+                (k) => (state.pantry[k] ?? 0) > 0,
+              );
+              const usedIngredients = mealObj.ingredients
+                .map((ing) => {
+                  const stripped = ing.name
+                    .replace(/\s*\(.*?\)\s*/g, "")
+                    .replace(
+                      /^[\d\s\/\u00BC-\u00BE\u2150-\u215E]*(?:cup|tbsp?|tsp?|oz|g|ml|lb|block|can|clove|head|bunch|slice|piece|sprig|handful|pinch|dash|package|pkg|bag)s?\s+(?:of\s+)?/i,
+                      "",
+                    )
+                    .replace(/^[\d\s\/\u00BC-\u00BE\u2150-\u215E]+/, "")
+                    .trim()
+                    .toLowerCase();
+                  const key =
+                    pantryKeys.find((k) => k.toLowerCase() === ing.name.toLowerCase()) ??
+                    pantryKeys.find((k) => k.toLowerCase() === stripped) ??
+                    pantryKeys.find(
+                      (k) => stripped.includes(k.toLowerCase()) || k.toLowerCase().includes(stripped),
+                    );
+                  return key ? { display: key, original: ing.name } : null;
+                })
+                .filter(Boolean)
+                .filter((v, i, arr) => arr.findIndex((x) => x.display === v.display) === i);
+
+              if (usedIngredients.length) {
+                setDialog({ type: "usedUp", meal: mealObj, ingredients: usedIngredients });
+                return;
+              }
+            }
+            setNotice("Meal recorded. Use Undo to reverse it, or Meal log to edit a portion.");
+          }}
         />
       )}
       {dialog?.type === "replace" && (
@@ -801,6 +835,29 @@ export default function App() {
             Your subtotal will be recalculated. You can undo this removal.
           </p>
         </Confirm>
+      )}
+      {dialog?.type === "usedUp" && (
+        <UsedUpDialog
+          meal={dialog.meal}
+          ingredients={dialog.ingredients}
+          onDone={async (finishedKeys) => {
+            if (finishedKeys.length) {
+              const pantry = { ...state.pantry };
+              for (const key of finishedKeys) delete pantry[key];
+              await safe({ type: "updatePantry", pantry });
+              setNotice(
+                `Removed ${finishedKeys.join(", ")} from your pantry. Meal recorded.`,
+              );
+            } else {
+              setNotice("Meal recorded. Use Undo to reverse it, or Meal log to edit a portion.");
+            }
+            close();
+          }}
+          onClose={() => {
+            setNotice("Meal recorded. Use Undo to reverse it, or Meal log to edit a portion.");
+            close();
+          }}
+        />
       )}
       {dialog?.type === "reset" && (
         <Confirm
