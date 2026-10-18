@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import os
 import re
@@ -282,6 +283,102 @@ async def nutrition_lookup(q: str):
     if not per_100:
         return {"query": query, "status": "not_found", "per_100g": None}
     return {"query": query, "status": "ok", "per_100g": per_100, "source": "USDA FDC"}
+
+
+class GroceryAnalyzeItem(BaseModel):
+    name: str
+    qty: str = ""
+    grams: float | None = None
+
+
+class GroceryAnalyzeRequest(BaseModel):
+    items: list[GroceryAnalyzeItem]
+
+
+def _estimate_grams(qty: str, fallback: float = 150.0) -> float:
+    import re
+
+    text = (qty or "").strip().lower()
+    if not text:
+        return fallback
+    grams = re.search(r"(\d+(?:\.\d+)?)\s*(?:g|gram|grams)\b", text)
+    if grams:
+        return min(5000.0, max(10.0, float(grams.group(1))))
+    kg = re.search(r"(\d+(?:\.\d+)?)\s*(?:kg|kilo)", text)
+    if kg:
+        return min(5000.0, max(10.0, float(kg.group(1)) * 1000.0))
+    count = re.match(r"^(\d+(?:\.\d+)?)\s*(?:x|pcs?|pieces?|bags?|cans?)?$", text)
+    if count:
+        return min(5000.0, max(10.0, float(count.group(1)) * fallback))
+    leading = re.match(r"^(\d+(?:\.\d+)?)", text)
+    if leading:
+        return min(5000.0, max(10.0, float(leading.group(1)) * fallback))
+    return fallback
+
+
+@app.post("/nutrition/analyze-list")
+async def nutrition_analyze_list(request: GroceryAnalyzeRequest):
+    """Look up USDA macros for a grocery list and return basket totals."""
+    if not usda.usda_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="USDA_API_KEY is missing from backend/.env or fridgemate/.env",
+        )
+    if not request.items:
+        raise HTTPException(status_code=400, detail="Add at least one grocery item.")
+
+    totals = {
+        "energy_kcal": 0.0,
+        "protein_g": 0.0,
+        "carbohydrate_g": 0.0,
+        "fat_g": 0.0,
+        "fiber_g": 0.0,
+        "sodium_mg": 0.0,
+    }
+    matched = []
+    unmatched = []
+
+    for item in request.items:
+        name = (item.name or "").strip()
+        if not name:
+            continue
+        grams = (
+            float(item.grams)
+            if item.grams is not None and item.grams > 0
+            else _estimate_grams(item.qty)
+        )
+        per_100 = await usda.lookup_per_100g(name)
+        if not per_100:
+            # Retry with a simpler query (last meaningful word).
+            parts = [p for p in name.replace(",", " ").split() if len(p) > 2]
+            for candidate in ([name] + parts[::-1])[1:]:
+                per_100 = await usda.lookup_per_100g(candidate)
+                if per_100:
+                    break
+        if not per_100:
+            unmatched.append({"name": name, "grams": grams})
+            continue
+        factor = grams / 100.0
+        contribution = {k: float(per_100.get(k) or 0) * factor for k in totals}
+        for k, v in contribution.items():
+            totals[k] += v
+        matched.append(
+            {
+                "name": name,
+                "grams": grams,
+                "per_100g": per_100,
+                "contribution": contribution,
+                "source": "USDA FDC",
+            }
+        )
+
+    return {
+        "status": "ok",
+        "totals": totals,
+        "matched": matched,
+        "unmatched": unmatched,
+        "names": [i.name for i in request.items if (i.name or "").strip()],
+    }
 
 
 @app.get("/pantry")
@@ -1389,6 +1486,9 @@ async def vision_ingredients(photo: UploadFile = File(...)):
 _GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 _GCAL_REDIRECT = "http://localhost:8000/google-calendar/callback/"
 _gcal_tokens: dict = {}
+# One Flow per in-progress sign-in. The PKCE code_verifier lives on that
+# object and must be the same one used when the auth URL was built.
+_gcal_flows: dict = {}
 
 
 def _gcal_flow():
@@ -1421,19 +1521,36 @@ def _gcal_flow():
 @app.get("/google-calendar/auth-url")
 def gcal_auth_url():
     flow = _gcal_flow()
-    url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+    url, state = flow.authorization_url(access_type="offline", prompt="consent")
+    _gcal_flows[state] = flow
     return {"url": url}
 
 
+def _gcal_error(status: int, detail: str):
+    from fastapi.responses import JSONResponse  # type: ignore
+    return JSONResponse(status_code=status, content={"detail": detail})
+
+
 @app.get("/google-calendar/callback")
-def gcal_callback(code: str):
+def gcal_callback(code: str = "", state: str = ""):
     from fastapi.responses import HTMLResponse  # type: ignore
-    flow = _gcal_flow()
-    flow.fetch_token(code=code)
-    creds = flow.credentials
-    _gcal_tokens["access_token"] = creds.token
-    _gcal_tokens["refresh_token"] = creds.refresh_token
-    _gcal_tokens["connected"] = True
+    flow = _gcal_flows.pop(state, None) if state else None
+    if flow is None:
+        return _gcal_error(
+            400,
+            "Google sign-in expired or the state did not match. Start the connection again.",
+        )
+    try:
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        _gcal_tokens["access_token"] = creds.token
+        _gcal_tokens["refresh_token"] = creds.refresh_token
+        _gcal_tokens["connected"] = True
+    except Exception as e:
+        message = str(e)
+        if "secret" in message.lower():
+            message = type(e).__name__
+        return _gcal_error(400, message or type(e).__name__)
     return HTMLResponse("""<!doctype html><html><body><script>
 if(window.opener){window.opener.postMessage({type:'gcal-connected'},'http://localhost:5173');window.close();}
 else{document.write('<p>Connected! Close this tab.</p>');}
@@ -1682,3 +1799,218 @@ async def nutrition_candidates(q: str):
 @app.get("/food/preferences")
 async def get_food_preferences():
     return await recall_preferences(backboard_client, _assistant_id)
+
+
+class SyncScheduleEventsRequest(BaseModel):
+    user_id: str = Field(default="demo")
+    events: list[dict]
+
+
+@app.post("/sync-schedule-events")
+async def sync_schedule_events(request: SyncScheduleEventsRequest):
+    """
+    Upsert calendar events into photon_plans so the reminder daemon can text
+    for any source, not only meal slots. Keyed by source:eventId:YYYY-MM-DD.
+    """
+    if not store.SessionLocal:
+        return {"status": "local_only", "upserted": 0,
+                "message": "DATABASE_URL not set — events not written to Postgres."}
+
+    from sqlalchemy import text as sql_text
+
+    upserted = 0
+    skipped = 0
+    with store.SessionLocal() as conn:
+        for event in request.events or []:
+            event_id = str(event.get("id") or "").strip()
+            name = str(event.get("name") or "").strip()
+            meal_date = str(event.get("date") or "").strip()
+            meal_time = str(event.get("time") or "").strip()
+            source = str(event.get("source") or "").strip()
+            if (
+                not event_id or not name or not source
+                or not re.match(r"^\d{4}-\d{2}-\d{2}$", meal_date)
+                or not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", meal_time)
+            ):
+                skipped += 1
+                continue
+            event_key = f"{source}:{event_id}:{meal_date}"
+            try:
+                conn.execute(
+                    sql_text(
+                        """
+                        INSERT INTO photon_plans
+                            (user_id, meal_name, meal_date, meal_time, meal_id, event_key)
+                        VALUES (:uid, :name, :date, :time, NULL, :key)
+                        ON CONFLICT (user_id, event_key) WHERE event_key IS NOT NULL
+                        DO UPDATE SET
+                            meal_name = EXCLUDED.meal_name,
+                            meal_time = EXCLUDED.meal_time
+                        """
+                    ),
+                    {
+                        "uid": request.user_id or "demo",
+                        "name": name,
+                        "date": meal_date,
+                        "time": meal_time,
+                        "key": event_key,
+                    },
+                )
+                upserted += 1
+            except Exception as e:
+                print(f"sync-schedule-events upsert error for {event_key}: {e}")
+                skipped += 1
+        try:
+            conn.commit()
+        except Exception as e:
+            print(f"sync-schedule-events commit error: {e}")
+            return {"status": "error", "upserted": 0, "skipped": skipped,
+                    "detail": "Could not save schedule events."}
+
+    return {"status": "ok", "upserted": upserted, "skipped": skipped}
+
+
+_E164 = re.compile(r"^\+[1-9]\d{6,14}$")
+
+
+class EnrollPhoneRequest(BaseModel):
+    user_id: str = Field(default="demo")
+    phone: str
+
+
+def _spectrum_creds():
+    project_id = (os.getenv("SPECTRUM_PROJECT_ID") or "").strip()
+    secret = (os.getenv("SPECTRUM_PROJECT_SECRET") or "").strip()
+    if not project_id or not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Spectrum is not configured on the server.",
+        )
+    token = base64.b64encode(f"{project_id}:{secret}".encode()).decode()
+    return project_id, {"Authorization": f"Basic {token}"}
+
+
+def _spectrum_error(status: int, payload) -> None:
+    message = ""
+    if isinstance(payload, dict):
+        message = str(payload.get("message") or payload.get("code") or "")
+    secret = os.getenv("SPECTRUM_PROJECT_SECRET") or ""
+    if secret and secret in message:
+        message = ""
+    if "secret" in message.lower():
+        message = ""
+    raise HTTPException(
+        status_code=400 if status < 500 else 502,
+        detail=(message or "Spectrum rejected the enrollment.").strip()[:300],
+    )
+
+
+async def _spectrum_data(method: str, path: str, body: dict | None = None):
+    project_id, headers = _spectrum_creds()
+    if body is not None:
+        headers = {**headers, "Content-Type": "application/json"}
+    url = f"https://spectrum.photon.codes/projects/{project_id}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.request(method, url, headers=headers, json=body)
+    except httpx.HTTPError:
+        raise HTTPException(
+            status_code=502,
+            detail="Could not reach Spectrum to enroll that number.",
+        )
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
+    if response.status_code >= 400 or (
+        isinstance(payload, dict) and payload.get("succeed") is False
+    ):
+        _spectrum_error(response.status_code, payload)
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=502,
+            detail="Spectrum returned an unexpected response.",
+        )
+    return data
+
+
+@app.post("/enroll-phone")
+async def enroll_phone(request: EnrollPhoneRequest):
+    """
+    Enroll a profile phone with Spectrum, then store it for the reminder poller.
+    Shared projects send only the user's number. Dedicated projects also send
+    one of the project's own iMessage lines.
+    """
+    phone = (request.phone or "").strip()
+    if not _E164.match(phone):
+        raise HTTPException(
+            status_code=400,
+            detail="Enter a phone number in international format, like +12065551212.",
+        )
+    user_id = (request.user_id or "demo").strip() or "demo"
+
+    info = await _spectrum_data("GET", "/imessage/")
+    kind = info.get("type")
+    if kind == "shared":
+        body = {"type": "shared", "phoneNumber": phone}
+    elif kind == "dedicated":
+        lines = await _spectrum_data("GET", "/lines/?platform=imessage")
+        numbers = [
+            str(line.get("phoneNumber") or "").strip()
+            for line in (lines.get("lines") or [])
+            if isinstance(line, dict)
+        ]
+        assigned = next((number for number in numbers if _E164.match(number)), "")
+        if not assigned:
+            raise HTTPException(
+                status_code=502,
+                detail="This project has no iMessage line to assign.",
+            )
+        body = {
+            "type": "dedicated",
+            "phoneNumber": phone,
+            "assignedPhoneNumber": assigned,
+        }
+    else:
+        raise HTTPException(
+            status_code=502,
+            detail="Spectrum did not say whether reminders use a shared or dedicated line.",
+        )
+
+    created = await _spectrum_data("POST", "/users/", body)
+    sender = str(created.get("assignedPhoneNumber") or "").strip()
+    if not _E164.match(sender):
+        raise HTTPException(
+            status_code=502,
+            detail="Spectrum enrolled the number but did not return a line to text.",
+        )
+
+    if not store.SessionLocal:
+        raise HTTPException(
+            status_code=503,
+            detail="Spectrum accepted the number, but the reminder database is not configured.",
+        )
+    from sqlalchemy import text as sql_text
+
+    try:
+        with store.SessionLocal() as conn:
+            conn.execute(
+                sql_text(
+                    """
+                    INSERT INTO photon_contacts (user_id, phone)
+                    VALUES (:uid, :phone)
+                    ON CONFLICT (user_id) DO UPDATE SET phone = EXCLUDED.phone
+                    """
+                ),
+                {"uid": user_id, "phone": phone},
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"enroll-phone contact save error: {type(e).__name__}")
+        raise HTTPException(
+            status_code=500,
+            detail="Spectrum accepted the number, but it could not be saved for reminders.",
+        )
+
+    return {"status": "ok", "phone": phone, "sender": sender}

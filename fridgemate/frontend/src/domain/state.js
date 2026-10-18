@@ -3,6 +3,13 @@ import { config, requireCapability } from "./config.js";
 import { assertMealAction, validateInputs } from "./engine.js";
 import { mealsFor, addGeneratedMeals, reviewGeneratedMeal, validateGeneratedMeal } from "./generatedMeals.js";
 import { normalizeCalendarState, validateEvent, scheduleMealsForDay, localInstant } from "./calendar.js";
+import { rememberMeal } from "../data/suggestions.js";
+
+/** Pin a chosen meal in the UI lookup cache; persistence uses state.generatedMeals. */
+function withKnownMeal(state, meal) {
+  if (meal?.id) rememberMeal(meal);
+  return state;
+}
 
 export const today = () =>
   new Intl.DateTimeFormat("en-CA", {
@@ -44,6 +51,8 @@ export function createDemoState() {
       cuisines: [],
       tastes: [],
       dislikes: "",
+      phone: "",
+      reminderFrom: "",
     },
     context: {
       date: today(),
@@ -71,6 +80,7 @@ export function createDemoState() {
     logUndo: null,
     geminiMeals: null,
     groceryList: [],
+    shoppingList: [],
   };
 }
 function portion(value) {
@@ -107,17 +117,24 @@ function applyAction(state, action, c = config) {
   }
   if (action.type === "saveEvent") {
     requireCapability("calendarView", c);
-    validateEvent(action.event);
-    const existing = state.events.find((e) => e.id === action.event.id);
-    if (existing?.readOnly || action.event.source !== "manual")
+    // Manual entries are meal slots only — classes/workouts/tasks come from calendar import.
+    const event = {
+      ...action.event,
+      kind: "meal",
+      source: "manual",
+      readOnly: false,
+    };
+    validateEvent(event);
+    const existing = state.events.find((e) => e.id === event.id);
+    if (existing?.readOnly || (existing && existing.source !== "manual"))
       throw new Error(
         "Imported events are read-only. Edit them in Apple Calendar, then refresh.",
       );
     return {
       ...state,
       events: [
-        ...state.events.filter((e) => e.id !== action.event.id),
-        { ...action.event, readOnly: false },
+        ...state.events.filter((e) => e.id !== event.id),
+        event,
       ],
     };
   }
@@ -255,11 +272,12 @@ function applyAction(state, action, c = config) {
       duration: check.duration ?? state.context.available,
     };
     const before = state.mealPlans.find((p) => p.id === plan.id) ?? null;
+    const next = withKnownMeal(state, meal);
     return {
-      ...state,
+      ...next,
       previousPlan: before,
       plan,
-      mealPlans: [...state.mealPlans.filter((p) => p.id !== plan.id), plan],
+      mealPlans: [...next.mealPlans.filter((p) => p.id !== plan.id), plan],
       planUndo: { slotId: plan.id, before, after: plan },
     };
   }
@@ -346,6 +364,25 @@ function applyAction(state, action, c = config) {
   if (action.type === "clearGeminiMeals") {
     return { ...state, geminiMeals: null, groceryList: [] };
   }
+  if (action.type === "updateShoppingList") {
+    const list = Array.isArray(action.shoppingList)
+      ? action.shoppingList
+          .filter((item) => item && typeof item.name === "string" && item.name.trim())
+          .map((item) => ({
+            id:
+              typeof item.id === "string" && item.id
+                ? item.id
+                : crypto.randomUUID(),
+            name: item.name.trim().replace(/\s+/g, " ").slice(0, 80),
+            qty:
+              typeof item.qty === "string"
+                ? item.qty.trim().slice(0, 40)
+                : "",
+            checked: Boolean(item.checked),
+          }))
+      : [];
+    return { ...state, shoppingList: list };
+  }
   if (action.type === "scheduleDayMeals") {
     // Auto-schedule breakfast / lunch / dinner slots for the given date,
     // respecting calendar busy events. Each slot gets a placeholder plan entry
@@ -416,9 +453,10 @@ function applyAction(state, action, c = config) {
       duration:check.duration,
       openSlot: false,
     };
+    const next = withKnownMeal(state, meal);
     return {
-      ...state,
-      mealPlans: state.mealPlans.map((p) => (p.id === slotId ? filledPlan : p)),
+      ...next,
+      mealPlans: next.mealPlans.map((p) => (p.id === slotId ? filledPlan : p)),
     };
   }
   // No external operation is implemented. A flag cannot authorize one.

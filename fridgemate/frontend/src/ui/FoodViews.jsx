@@ -8,26 +8,77 @@ import { useEffect, useRef, useState } from "react";
 import { Icon, Modal } from "./Core";
 import {
   MEAL_IMAGE_PLACEHOLDER,
-  prefetchMealImages,
+  isMealPlaceholder,
   mealImage,
   money,
   num,
+  prefetchMealImages,
+  resolveMealImage,
+  taggedMealImage,
 } from "./format";
 
 function MealPhoto({ meal, alt, className }) {
-  const assigned = mealImage(meal);
-  const [failedSrc, setFailedSrc] = useState(null);
-  const src = failedSrc === assigned ? MEAL_IMAGE_PLACEHOLDER : assigned;
+  const initial = mealImage(meal);
+  const [src, setSrc] = useState(() => initial);
+  const [showReal, setShowReal] = useState(() => !isMealPlaceholder(initial));
+  const failed = useRef(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    failed.current = new Set();
+    const next = mealImage(meal);
+    setSrc(next);
+    setShowReal(!isMealPlaceholder(next));
+    resolveMealImage(meal).then((url) => {
+      if (cancelled || !url || failed.current.has(url)) return;
+      if (isMealPlaceholder(url)) {
+        setSrc(MEAL_IMAGE_PLACEHOLDER);
+        setShowReal(false);
+        return;
+      }
+      setSrc(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [meal?.id, meal?.name, meal?.imageSearch, meal?.imageUrl, meal?.photo]);
   return (
-    <><img
-      className={className}
-      draggable={false}
-      src={src}
-      alt={alt || meal?.name || "Meal"}
-      loading="eager"
-      decoding="async"
-      onError={() => {if(src!==MEAL_IMAGE_PLACEHOLDER)setFailedSrc(src);}}
-    /><span className="photo-label">{src===MEAL_IMAGE_PLACEHOLDER?"Photo unavailable":"Meal illustration"}</span></>
+    <span className={`meal-photo ${className || ""}`.trim()}>
+      <span
+        className={`meal-photo-anim${showReal ? " is-hidden" : ""}`}
+        aria-hidden="true"
+      >
+        <span className="meal-photo-plate" />
+        <span className="meal-photo-food a" />
+        <span className="meal-photo-food b" />
+        <span className="meal-photo-food c" />
+        <span className="meal-photo-steam s1" />
+        <span className="meal-photo-steam s2" />
+        <span className="meal-photo-steam s3" />
+      </span>
+      <img
+        className={showReal ? "is-ready" : "is-waiting"}
+        draggable={false}
+        src={src}
+        alt={alt || meal?.name || "Meal"}
+        loading="eager"
+        decoding="async"
+        onLoad={() => {
+          if (!isMealPlaceholder(src) && !failed.current.has(src)) {
+            setShowReal(true);
+          }
+        }}
+        onError={() => {
+          failed.current.add(src);
+          setShowReal(false);
+          const next = taggedMealImage(meal?.imageSearch || meal?.name || "food");
+          if (!failed.current.has(next)) {
+            setSrc(next);
+            return;
+          }
+          setSrc(MEAL_IMAGE_PLACEHOLDER);
+        }}
+      />
+    </span>
   );
 }
 import { catalog, pantryItems } from "../data/catalog";
@@ -491,7 +542,7 @@ export function FoodDiscovery({
   });
   const input=usingGemini?geminiMeals:[...catalog,...(state.generatedMeals??[]).filter(m=>m.review?.confirmed && !m.sourceRecipeId)];
   const unique=new Map();
-  for(const original of input.filter(m=>m.mode==='cook')) {
+  for(const original of input.filter(m=>m?.id && m.mode==='cook')) {
     const base=original.sourceRecipeId ? catalog.find(m=>m.id===original.sourceRecipeId)??state.generatedMeals.find(m=>m.id===original.sourceRecipeId)??original : original;
     const candidate=base.suggestion&&!base.review?.confirmed?enrichCookFacts(base,food.reference):sourcedCookCandidate(base,food.reference);
     unique.set(recipeFingerprint(candidate),candidate);
@@ -515,9 +566,15 @@ export function FoodDiscovery({
   const venueWalk=venue?currentWalking(walking.routes.find(r=>r.venueId===venue.id)):null;
   const pass = (id) => setPassed((p) => [...p, id]);
   const saved = state.mealPlans.find(
-    (p) => p.date === state.context.date && p.start === state.context.start,
+    (p) =>
+      !p.openSlot &&
+      p.mealId &&
+      p.date === state.context.date &&
+      p.start === state.context.start,
   );
-  const savedCheck = saved && !saved.openSlot && byId[saved.mealId] ? evaluate(byId[saved.mealId], state) : null;
+  const savedMeal = saved ? byId[saved.mealId] : null;
+  const savedCheck =
+    savedMeal ? evaluate(savedMeal, state) : null;
   return (
     <div className="food-layout">
       <section className="food-discovery">
@@ -603,13 +660,13 @@ export function FoodDiscovery({
             </label>
           </div>
         )}
-        {saved && !saved.openSlot && byId[saved.mealId] && (
+        {saved && savedMeal && (
           <div
             className="food-saved-slot"
           >
             <div>
               <span>PLANNED · {saved.start}</span>
-              <strong>{byId[saved.mealId].name}</strong>
+              <strong>{savedMeal.name}</strong>
               {savedCheck && !savedCheck.feasible && savedCheck.reasons.length > 0 && (
                 <p className="fine-print">
                   Heads up: {savedCheck.reasons[0].replace(/^Not enough confirmed ingredients:/i, "You may need:").replace(/^Needs \d+ minutes;.*$/, "Takes a bit longer than your window.")}
@@ -618,7 +675,7 @@ export function FoodDiscovery({
             </div>
             <button
               className="text-button"
-              onClick={() => onDetails(byId[saved.mealId])}
+              onClick={() => onDetails(savedMeal)}
             >
               Details
             </button>
