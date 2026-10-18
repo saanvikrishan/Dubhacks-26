@@ -465,9 +465,7 @@ export function FoodDiscovery({
             meal.timing.prep +
               meal.timing.cook +
               state.context.eating +
-              state.context.cleanup +
-              state.context.onward +
-              state.context.buffer;
+              state.context.cleanup;
           return {
             ...result,
             meal,
@@ -610,14 +608,14 @@ export function FoodDiscovery({
         )}
         {saved && (
           <div
-            className={`food-saved-slot ${savedCheck.feasible ? "" : "needs-review"}`}
+            className="food-saved-slot"
           >
             <div>
               <span>PLANNED · {saved.start}</span>
               <strong>{byId[saved.mealId].name}</strong>
-              {!savedCheck.feasible && (
-                <p>
-                  {savedCheck.reasons.join(" ")} Choose a replacement below.
+              {savedCheck && !savedCheck.feasible && savedCheck.reasons.length > 0 && (
+                <p className="fine-print">
+                  Heads up: {savedCheck.reasons[0].replace(/^Not enough confirmed ingredients:/i, "You may need:").replace(/^Needs \d+ minutes;.*$/, "Takes a bit longer than your window.")}
                 </p>
               )}
             </div>
@@ -684,12 +682,28 @@ export function FoodDiscovery({
                 <span>{num(nutrition.protein_g)} g protein</span>
               </div>
               <div className="fits-line">
-                <Icon name="check" size={16} />
+                <Icon name={(!usingGemini && result.reasons?.length) ? "edit" : "check"} size={16} />
                 {usingGemini
                   ? "AI idea from your ingredients · estimates only"
-                  : constrainedFallback
-                    ? `Showing outside constraints · ${result.reasons?.[0] ?? "adjust window or groceries"}`
-                    : "Ingredients, equipment, budget and calendar checked"}
+                  : result.reasons?.length
+                    ? (() => {
+                        const r = result.reasons[0] ?? "";
+                        if (/not enough confirmed ingredients/i.test(r)) {
+                          const match = r.match(/:\s*(.+)/);
+                          const items = match
+                            ? match[1].split(",").map((s) => s.replace(/\s*\(.*?\)/g, "").trim()).filter(Boolean)
+                            : [];
+                          return items.length
+                            ? `You may need to grab: ${items.slice(0, 3).join(", ")}${items.length > 3 ? ` +${items.length - 3} more` : ""}`
+                            : "You may need a few extra ingredients";
+                        }
+                        if (/needs equipment/i.test(r)) return r.replace("Needs equipment:", "Helpful to have:");
+                        if (/needs \d+ minutes/i.test(r)) return "Takes a bit longer than your current window — go for it anyway";
+                        if (/costs \$/i.test(r)) return r.replace("Costs", "Est.").replace(", above your", " · your cap is");
+                        if (/does not meet your/i.test(r)) return r.replace("Does not meet your", "Outside your current");
+                        return "A few things to keep in mind — see Recipe & nutrition";
+                      })()
+                    : "All set · ready to cook"}
               </div>
               <div className="swipe-actions">
                 <button
@@ -897,18 +911,34 @@ export function FoodDiscovery({
           </p>
         </details>
         {mode === "cook" &&
+          !usingGemini &&
           all.evaluations.some(
             (r) => r.meal.mode === "cook" && !r.feasible,
           ) && (
             <details className="small-panel">
-              <summary>Why some recipes are unavailable</summary>
+              <summary>Tips for these meals</summary>
               {all.evaluations
                 .filter((r) => r.meal.mode === "cook" && !r.feasible)
-                .map((r) => (
-                  <p className="fine-print" key={r.meal.id}>
-                    <strong>{r.meal.name}:</strong> {r.reasons.join(" ")}
-                  </p>
-                ))}
+                .map((r) => {
+                  const note = r.reasons.map((reason) => {
+                    if (/not enough confirmed ingredients/i.test(reason)) {
+                      const match = reason.match(/:\s*(.+)/);
+                      const items = match
+                        ? match[1].split(",").map((s) => s.replace(/\s*\(.*?\)/g, "").trim()).filter(Boolean)
+                        : [];
+                      return items.length ? `Grab: ${items.slice(0, 3).join(", ")}` : "A few ingredients needed";
+                    }
+                    if (/needs equipment/i.test(reason)) return reason.replace("Needs equipment:", "Helpful to have:");
+                    if (/needs \d+ minutes/i.test(reason)) return "Takes a bit longer than your window";
+                    if (/costs \$/i.test(reason)) return reason.replace("Costs", "Est.").replace(", above your", " · cap");
+                    return reason;
+                  }).join(" · ");
+                  return (
+                    <p className="fine-print" key={r.meal.id}>
+                      <strong>{r.meal.name}:</strong> {note}
+                    </p>
+                  );
+                })}
             </details>
           )}
       </aside>

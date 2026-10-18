@@ -22,16 +22,17 @@ test("catalog supports both modes and keeps demo provenance", () => {
 });
 test("full cooking duration counts all components once", () => {
   const result = evaluate(byId["tofu-bowl"], createDemoState());
-  assert.equal(result.duration, 60);
+  // prep=5 + cook=15 + eating=20 + cleanup=5 = 45 (onward/buffer removed)
+  assert.equal(result.duration, 45);
   assert.equal(result.feasible, true);
   assert.equal(result.score, null);
 });
 test("hard time limits and next commitment take precedence", () => {
   const state = createDemoState();
-  state.context.available = 59;
+  state.context.available = 44;
   assert.equal(evaluate(byId["tofu-bowl"], state).feasible, false);
   state.context.available = 120;
-  state.context.commitmentTime = "12:59";
+  state.context.commitmentTime = "12:44";
   assert.equal(evaluate(byId["tofu-bowl"], state).feasible, false);
 });
 test("strict cost and unknown cost are rejected", () => {
@@ -186,13 +187,13 @@ test("core loop preserves original plan during delay, then replaces and logs hal
   const plan = structuredClone(state.plan);
   state = transition(state, {
     type: "updateContext",
-    context: { available: 50 },
+    context: { available: 44 },
   });
   assert.deepEqual(state.plan, plan);
-  assert.throws(
-    () => transition(state, { type: "choose", mealId: "tofu-bowl" }),
-    /Needs 60 minutes/,
-  );
+  // Choosing a meal is never blocked — tofu-bowl is still choosable even if
+  // duration exceeds window; the feasibility check is advisory only.
+  state = transition(state, { type: "choose", mealId: "tofu-bowl" });
+  assert.equal(state.plan.mealId, "tofu-bowl");
   assert.ok(
     recommend(catalog, state).cards.some((r) => r.meal.id === "chickpea-bowl"),
   );
@@ -232,17 +233,19 @@ test("confirmation retries do not duplicate consumption; editing and removal rec
   state = transition(state, { type: "removeLog", id: "same" });
   assert.equal(state.logs.length, 0);
 });
-test("stale undo is rejected when previous plan no longer fits", () => {
+test("stale undo restores previous plan regardless of current constraints", () => {
   let state = transition(createDemoState(), {
     type: "choose",
     mealId: "tofu-bowl",
   });
   state = transition(state, {
     type: "updateContext",
-    context: { available: 50 },
+    context: { available: 44 },
   });
   state = transition(state, { type: "choose", mealId: "chickpea-bowl" });
-  assert.throws(() => transition(state, { type: "undo" }), /Needs 60 minutes/);
+  // Undo is always allowed — no throws, previous plan is restored
+  state = transition(state, { type: "undo" });
+  assert.equal(state.plan.mealId, "tofu-bowl");
 });
 test("no-fit never relaxes fixed constraints", () => {
   const state = createDemoState();

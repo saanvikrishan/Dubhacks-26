@@ -515,7 +515,14 @@ EXCLUSIONS = {
     "fish",
     "shellfish",
 }
-EQUIPMENT = {"stove", "pan", "pot"}
+EQUIPMENT = {
+    "stove", "pan", "pot",
+    "microwave", "oven", "air fryer", "rice cooker",
+    "toaster", "blender", "electric kettle",
+    "baking sheet", "cutting board", "knife",
+    "mixing bowl", "spatula", "colander",
+    "slow cooker",
+}
 PATCH_KEYS = ("mode", "sort", "passed", "profile", "context", "pantry", "unparsed")
 PROFILE_KEYS = ("diet", "exclusions", "preferred", "budget", "cooking", "equipment")
 CATALOG_PATH = ROOT.parent / "src" / "data" / "catalog.js"
@@ -681,7 +688,7 @@ Modes: compare, cook, eatOut
 Sorts: catalog, time, cost, protein
 Diets: anything, vegetarian, vegan
 Exclusions: soy, egg, milk, wheat, peanut, tree nut, sesame, fish, shellfish
-Equipment: stove, pan, pot
+Equipment: stove, pan, pot, microwave, oven, air fryer, rice cooker, toaster, blender, electric kettle, baking sheet, cutting board, knife, mixing bowl, spatula, colander, slow cooker
 Map "peanuts" to the exclusion "peanut". Budget is USD per meal, from 0 to 1000.
 
 Known memories:

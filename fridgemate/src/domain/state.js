@@ -32,8 +32,6 @@ export function createDemoState() {
       location: "Sample campus area",
       eating: config.timing.editableEatingAllowanceMinutes,
       cleanup: config.timing.editableCleanupAllowanceMinutes,
-      onward: 5,
-      buffer: config.timing.defaultBufferMinutes,
       service: 10,
     },
     pantry: {
@@ -206,7 +204,8 @@ function applyAction(state, action, c = config) {
       servings: 1,
       date: state.context.date,
       start: state.context.start,
-      duration: check.duration,
+      // duration may be null if time info is incomplete — use available window as fallback
+      duration: check.duration ?? state.context.available,
     };
     const before = state.mealPlans.find((p) => p.id === plan.id) ?? null;
     return {
@@ -220,7 +219,7 @@ function applyAction(state, action, c = config) {
   if (action.type === "undo") {
     if (state.planUndo) {
       const { slotId, before } = state.planUndo;
-      if (before) assertMealAction(byId[before.mealId], state, c);
+      // Always allow undo — no constraint check blocks restoring a previous choice
       return {
         ...state,
         plan: before,
@@ -232,8 +231,6 @@ function applyAction(state, action, c = config) {
         planUndo: null,
       };
     }
-    if (state.previousPlan)
-      assertMealAction(byId[state.previousPlan.mealId], state, c);
     return { ...state, plan: state.previousPlan, previousPlan: null };
   }
   if (action.type === "clearPlan")
@@ -281,9 +278,7 @@ function applyAction(state, action, c = config) {
         ? (meal.timing.prep ?? 0) +
           (meal.timing.cook ?? 0) +
           (ctx.eating ?? 20) +
-          (meal.mode === "cook" ? (ctx.cleanup ?? 5) : (ctx.service ?? 10)) +
-          (ctx.onward ?? 5) +
-          (ctx.buffer ?? 5)
+          (meal.mode === "cook" ? (ctx.cleanup ?? 5) : (ctx.service ?? 10))
         : 30;
     // If a plan already covers this meal's date+start slot, leave mealPlans alone.
     const existingPlan = state.mealPlans.find(

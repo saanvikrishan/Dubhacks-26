@@ -65,12 +65,14 @@ export function validateConfig(c) {
   )
     throw new Error("Comparison needs at least two cards.");
   const nutrients = [
-    "energy_kcal",
-    "protein_g",
-    "carbohydrate_g",
-    "fat_g",
-    "fiber_g",
-    "sodium_mg",
+    "energy_kcal", "protein_g", "carbohydrate_g", "fiber_g",
+    "sugar_g", "added_sugar_g",
+    "fat_g", "saturated_fat_g", "trans_fat_g", "mono_fat_g", "poly_fat_g", "cholesterol_mg",
+    "vitamin_a_mcg", "vitamin_c_mg", "vitamin_d_mcg", "vitamin_e_mg", "vitamin_k_mcg",
+    "thiamin_mg", "riboflavin_mg", "niacin_mg", "pantothenic_mg",
+    "vitamin_b6_mg", "folate_mcg", "vitamin_b12_mcg", "choline_mg",
+    "calcium_mg", "iron_mg", "magnesium_mg", "phosphorus_mg", "potassium_mg",
+    "sodium_mg", "zinc_mg", "copper_mg", "manganese_mg", "selenium_mcg",
   ];
   if (
     !Array.isArray(c.nutrition.displayNutrients) ||

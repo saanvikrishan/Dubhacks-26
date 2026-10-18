@@ -418,8 +418,7 @@ export function EventDialog({
           {timeLabel(event.end)}
         </p>
         <p className="muted">
-          One portion · {event.plan.duration} minutes, including eating, travel
-          and buffer.
+          One portion · {event.plan.duration} minutes, including prep, cooking and eating.
         </p>
         <div className="dialog-actions">
           <button className="primary" onClick={() => onRevise(event.plan)}>

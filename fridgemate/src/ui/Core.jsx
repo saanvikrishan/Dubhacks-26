@@ -291,8 +291,6 @@ function ContextFields({ value, onChange }) {
         <div className="form-grid">
           {field("eating", "Eating (min)")}
           {field("cleanup", "Cooking cleanup (min)")}
-          {field("onward", "Onward travel (min)")}
-          {field("buffer", "Buffer (min)")}
           {field("service", "Eat-out service (min)")}
         </div>
       </details>
@@ -428,7 +426,14 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
             <fieldset>
               <legend>Available equipment</legend>
               <div className="checks">
-                {["stove", "pan", "pot"].map((item) => (
+                {[
+                  "stove", "pan", "pot",
+                  "microwave", "oven", "air fryer", "rice cooker",
+                  "toaster", "blender", "electric kettle",
+                  "baking sheet", "cutting board", "knife",
+                  "mixing bowl", "spatula", "colander",
+                  "slow cooker",
+                ].map((item) => (
                   <label key={item}>
                     <input
                       type="checkbox"
@@ -462,13 +467,26 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                     value={goal.nutrient}
                     onChange={(e) => editGoal(i, "nutrient", e.target.value)}
                   >
-                    {Object.entries(nutrientInfo).map(
-                      ([key, [label, unit]]) => (
-                        <option key={key} value={key}>
-                          {label} ({unit})
-                        </option>
-                      ),
-                    )}
+                    <optgroup label="Macronutrients &amp; Energy">
+                      {["energy_kcal","protein_g","carbohydrate_g","fiber_g","sugar_g","added_sugar_g"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Lipids (Fats)">
+                      {["fat_g","saturated_fat_g","trans_fat_g","mono_fat_g","poly_fat_g","cholesterol_mg"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Vitamins">
+                      {["vitamin_a_mcg","vitamin_c_mg","vitamin_d_mcg","vitamin_e_mg","vitamin_k_mcg","thiamin_mg","riboflavin_mg","niacin_mg","pantothenic_mg","vitamin_b6_mg","folate_mcg","vitamin_b12_mcg","choline_mg"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Minerals">
+                      {["calcium_mg","iron_mg","magnesium_mg","phosphorus_mg","potassium_mg","sodium_mg","zinc_mg","copper_mg","manganese_mg","selenium_mcg"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
                   </select>
                 </label>
                 <label>
@@ -787,7 +805,7 @@ function Card({
           <p className="card-footnote">
             {selected
               ? `Planned for ${state.plan.date}, ${niceTime(state.plan.start)}–${niceTime(clockTime(minutes(state.plan.start) + state.plan.duration))}.`
-              : `Fits ${niceTime(state.context.start)}–${niceTime(clockTime(minutes(state.context.start) + result.duration))}, including buffer.`}{" "}
+              : `Fits ${niceTime(state.context.start)}–${niceTime(clockTime(minutes(state.context.start) + result.duration))}.`}{" "}
             Nutrition is illustrative.
           </p>
         )}
