@@ -4,7 +4,7 @@
 
 ## What it does
 
-Dinner fails when the fridge and the calendar never meet. WhatsCooking.ai turns a grocery list or a fridge photo into meals that fit your preferences and the open time on your day, then texts you before the slot so you cook it or pick something else. Built for people whose schedule moves faster than their meal plan.
+College students buy groceries they never eat. Dinner fails when the fridge and the calendar never meet. WhatsCooking.ai turns a grocery list or a fridge photo into meals that fit your preferences and the open time on your day, then texts you before the slot so you cook it or pick something else. Built for people whose schedule moves faster than their meal plan.
 
 ## Key features
 
