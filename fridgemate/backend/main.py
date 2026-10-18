@@ -131,6 +131,9 @@ INJECTION_PATTERNS = (
 MEAL_ONLY = (
     "I can only help with meal planning — try asking about ingredients, time, or budget."
 )
+CONVO_FALLBACK = (
+    "Tell me what you're looking for — ingredients, time, or budget — and I'll find something."
+)
 RATE_LIMIT = 20
 RATE_WINDOW_SECONDS = 60
 _request_times: list[float] = []
@@ -196,6 +199,11 @@ def raise_gemini_failure(last_error, action: str):
     )
 
 
+class ChatTurn(BaseModel):
+    role: str
+    text: str
+
+
 class RecipeRequest(BaseModel):
     ingredients: list[str] = Field(default_factory=list)
     diet: str = "anything"
@@ -203,6 +211,7 @@ class RecipeRequest(BaseModel):
     exclusions: list[str] = Field(default_factory=list)
     text: str | None = None
     memories: list[str] = Field(default_factory=list)
+    history: list[ChatTurn] = Field(default_factory=list)
 
 
 class PhraseRequest(BaseModel):
@@ -752,12 +761,85 @@ def validate_patch(raw, names: set[str]) -> dict:
     }
 
 
-def interpreter_prompt(text: str, memories: list[str], names: set[str]) -> str:
+def recent_turns(history) -> list[dict]:
+    turns = []
+    for item in history or []:
+        if isinstance(item, dict):
+            role, text = item.get("role"), item.get("text")
+        else:
+            role, text = getattr(item, "role", None), getattr(item, "text", None)
+        if role not in ("user", "assistant") or not isinstance(text, str):
+            continue
+        cleaned = " ".join(text.split())[:500]
+        if cleaned:
+            turns.append({"role": role, "text": cleaned})
+    return turns[-4:]
+
+
+def history_block(history) -> str:
+    turns = recent_turns(history)
+    if not turns:
+        return "None."
+    return "\n".join(
+        f"{'User' if turn['role'] == 'user' else 'Assistant'}: {turn['text']}"
+        for turn in turns
+    )
+
+
+async def conversational_reply(user_text: str, history) -> str:
+    enforce_rate_limit()
+    if blocked_user_text(user_text):
+        reject_blocked_text()
+    if not client:
+        return CONVO_FALLBACK
+    prompt = f"""You are the food assistant for Daywell. Chat naturally and briefly (1-2 sentences). You help with meal planning — ingredients, time, budget, dietary needs. If the user asks something unrelated to food/cooking, you can still respond conversationally, but steer back to how you can help with meals. Never invent recipe names, nutrition facts, or specific dishes — if they ask for actual meal suggestions, tell them to describe what they're looking for (ingredients, time, budget) so you can check real options.
+
+Recent conversation:
+{history_block(history)}
+
+User: {user_text}
+"""
+    for model in GEMINI_FALLBACKS:
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.models.generate_content,
+                    model=model,
+                    contents=prompt,
+                ),
+                timeout=20,
+            )
+            text = redact_text((response.text or "").strip())
+            if text:
+                return text
+        except HTTPException:
+            raise
+        except TimeoutError:
+            print(f"Gemini conversation timed out ({model})")
+            return CONVO_FALLBACK
+        except Exception as e:
+            msg = str(e)
+            print(f"Gemini conversation error ({model}):", msg)
+            if not gemini_transient(msg):
+                break
+    return CONVO_FALLBACK
+
+
+def interpreter_prompt(text: str, memories: list[str], names: set[str], history=None) -> str:
     memory_block = "\n".join(f"- {item}" for item in memories) or "None."
     ingredients = ", ".join(sorted(names))
-    return f"""You translate one meal request into a constraint patch for an existing catalog.
-Return JSON only. Use null for every field the user did not mention. Do not invent recipes.
+    return f"""You classify one message and, when it is a meal request, translate it into a constraint patch for an existing catalog.
+Return JSON only. The object below shows the shape. Set intent from the message, not always "meal_request".
+
+Set "intent" to "meal_request" or "conversation".
+Use "meal_request" when the user wants meal options, or is refining an earlier meal request: cheaper, faster, more protein, a diet, an ingredient, a budget, a time limit, cook versus eat out, or "something else".
+A follow-up that changes a constraint is still a meal_request even if it names no dish. "what about cheaper options" after a vegetarian request is a meal_request.
+Carry constraints that are still in force from the recent chat into the patch. For "cheaper" or "faster" with no number, set sort to "cost" or "time" and leave budget and available null. Do not invent a dollar amount or a minute count.
+Use "conversation" for greetings, thanks, questions about the app, and other small talk that does not ask for or refine meals.
+
+For a meal_request, use null for every patch field the user did not mention and that the recent chat does not already constrain. Do not invent recipes.
 Do not invent pantry grams. If a food is not in the catalog ingredient list, leave it out of pantry and add the user's words to unparsed.
+For a conversation, leave every patch field null and unparsed empty.
 
 Catalog ingredient names, exact spelling: {ingredients}
 Modes: compare, cook, eatOut
@@ -767,14 +849,18 @@ Exclusions: soy, egg, milk, wheat, peanut, tree nut, sesame, fish, shellfish
 Equipment: stove, pan, pot
 Map "peanuts" to the exclusion "peanut". Budget is USD per meal, from 0 to 1000.
 
+Recent chat, oldest first:
+{history_block(history)}
+
 Known memories:
 {memory_block}
 
-User request:
+User message:
 {text}
 
 Return this object and no other keys inside profile or context:
 {{
+  "intent": "meal_request",
   "mode": null,
   "sort": null,
   "passed": null,
@@ -815,7 +901,7 @@ async def interpret_constraints(request: RecipeRequest) -> dict:
                 item for item in request.memories if isinstance(item, str) and item.strip()
             ]
     names = catalog_ingredient_names()
-    prompt = interpreter_prompt(text, memories, names)
+    prompt = interpreter_prompt(text, memories, names, request.history)
     last_error = None
     for model in GEMINI_FALLBACKS:
         try:
@@ -826,6 +912,9 @@ async def interpret_constraints(request: RecipeRequest) -> dict:
                 config={"response_mime_type": "application/json"},
             )
             parsed = json.loads(response.text or "")
+            if isinstance(parsed, dict) and parsed.get("intent") == "conversation":
+                message = await conversational_reply(text, request.history)
+                return {"intent": "conversation", "message": message}
             try:
                 patch = validate_patch(parsed, names)
             except HTTPException:
@@ -835,6 +924,7 @@ async def interpret_constraints(request: RecipeRequest) -> dict:
                 print(
                     f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)"
                 )
+            patch["intent"] = "meal_request"
             return redact_output(patch)
         except HTTPException:
             raise
