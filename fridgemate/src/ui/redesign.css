@@ -1,0 +1,2310 @@
+/* Compact, schedule-first shell. Food discovery is a separate workflow. */
+.header-inner {
+  min-height: 74px;
+  max-width: 1280px;
+  padding: 0 28px;
+  gap: 48px;
+}
+.brand {
+  font-size: 26px;
+}
+.brand-mark {
+  width: 38px;
+  height: 40px;
+  border-radius: 11px;
+}
+.header-inner nav button {
+  padding: 11px 16px;
+  font-size: 13px;
+}
+.header-right {
+  gap: 19px;
+}
+.redesigned-shell {
+  max-width: 1280px;
+  padding: 22px 28px 0;
+}
+.compact-page-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 21px;
+}
+.compact-page-title h1 {
+  font-family: inherit;
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.7px;
+}
+.compact-page-title p {
+  font-size: 12px;
+  color: #75816d;
+  margin-top: 4px;
+}
+.page-tools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.page-tools > .secondary {
+  font-size: 12px;
+  padding: 9px 13px;
+}
+.calendar-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #d9dfd1;
+  border-radius: 9px;
+  padding: 8px 11px;
+  background: #fffefb;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.calendar-status.connected {
+  background: #eef3e8;
+  border-color: #d6e3ca;
+}
+.connection-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  background: #b0b6a9;
+  border-radius: 50%;
+}
+.connected .connection-dot {
+  background: #668751;
+}
+.build-label {
+  background: none;
+  font-size: 10px;
+  color: #78846f;
+  padding: 6px 0;
+}
+.compact-notice {
+  padding: 8px 12px;
+  font-size: 11px;
+  margin-bottom: 16px;
+}
+.compact-notice > div {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+.compact-notice .text-button {
+  font-size: 11px;
+  white-space: nowrap;
+}
+.subtle {
+  font-size: 12px;
+  color: #79846f;
+}
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.panel-title h2 {
+  font-size: 16px;
+  font-weight: 550;
+}
+.panel-title > .text-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.today-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  gap: 24px;
+  align-items: start;
+}
+.today-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.today-agenda {
+  position: sticky;
+  top: 20px;
+  min-width: 0;
+}
+.coming-up {
+  padding: 22px 25px;
+  background: #e8efdd;
+  border: 1px solid #dbe4cd;
+  border-radius: 18px;
+  min-height: 223px;
+}
+.coming-up.workout {
+  background: #eeebf5;
+  border-color: #dfd9eb;
+}
+.coming-up.class,
+.coming-up.event {
+  background: #eef1e8;
+}
+.coming-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  letter-spacing: 1.25px;
+  color: #58734f;
+  font-weight: 600;
+}
+.coming-label > span:last-child {
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+.live-dot {
+  height: 6px;
+  width: 6px;
+  background: #547c49;
+  border-radius: 50%;
+}
+.coming-main {
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  margin: 21px 0 18px;
+}
+.coming-icon {
+  height: 52px;
+  width: 52px;
+  border-radius: 14px;
+  background: #ffffffa3;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.activity-kind {
+  text-transform: capitalize;
+  font-size: 11px;
+  color: #718367;
+  margin-bottom: 2px;
+}
+.coming-up h2 {
+  font-size: 26px;
+  line-height: 1.3;
+  letter-spacing: -0.7px;
+  margin: 0;
+}
+.coming-up p:not(.activity-kind) {
+  font-size: 12px;
+  color: #6a7c60;
+  line-height: 1.7;
+  margin-top: 7px;
+}
+.coming-up > h2 {
+  font-family: Georgia, serif;
+  font-size: 30px;
+  letter-spacing: -0.5px;
+  margin-top: 21px;
+}
+.coming-actions {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+.coming-actions .primary {
+  font-size: 12px;
+  padding: 10px 13px;
+}
+.coming-actions > span {
+  font-size: 10px;
+  color: #7b8a6e;
+}
+.coming-actions > .text-button {
+  font-size: 12px;
+}
+.meal-entry .panel-title {
+  margin-bottom: 13px;
+}
+.meal-paths {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.meal-path {
+  display: flex;
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #dee4d3;
+  border-radius: 15px;
+  min-height: 176px;
+  padding: 20px;
+  background: #fffefb;
+}
+.meal-path:hover {
+  border-color: #99b286;
+  background: #f0f4e8;
+}
+.school-path {
+  background: #f6f0e4;
+  border-color: #e8deca;
+}
+.school-path:hover {
+  background: #f2e8d5;
+  border-color: #cbb58f;
+}
+.path-copy {
+  z-index: 1;
+  width: 73%;
+}
+.path-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #edf2e4;
+  color: #56784a;
+  border-radius: 9px;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 10px;
+}
+.school-path .path-icon {
+  background: #eae0ca;
+  color: #8b734a;
+}
+.meal-path strong {
+  display: block;
+  font-size: 19px;
+  font-weight: 550;
+  line-height: 1.25;
+}
+.meal-path p {
+  font-size: 11px;
+  color: #76826c;
+  margin-top: 4px;
+}
+.path-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 550;
+  margin-top: 14px;
+}
+.meal-path img {
+  position: absolute;
+  right: -34px;
+  top: 15%;
+  width: 135px;
+  height: 135px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 6px 12px #523d2520;
+}
+.today-saved-meal {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #dde4d4;
+  border-radius: 13px;
+  background: #fffefb;
+}
+.today-saved-meal > img {
+  width: 53px;
+  height: 53px;
+  object-fit: cover;
+  border-radius: 11px;
+}
+.today-saved-meal > div:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+.today-saved-meal .eyebrow {
+  font-size: 8px;
+  letter-spacing: 1px;
+}
+.today-saved-meal strong {
+  font-size: 13px;
+  display: block;
+  margin-top: 2px;
+}
+.today-saved-meal p {
+  font-size: 10px;
+  color: #7a846f;
+  margin-top: 4px;
+}
+.today-saved-actions {
+  display: flex;
+  gap: 7px;
+  flex-shrink: 0;
+}
+.today-saved-actions button {
+  font-size: 10px;
+  padding: 9px 11px;
+}
+.nutrition-compact {
+  border: 1px solid #dfe4d8;
+  border-radius: 15px;
+  padding: 19px 22px;
+  background: #fffefb;
+}
+.nutrition-compact .panel-title > div {
+  display: flex;
+  gap: 17px;
+}
+.nutrition-compact .text-button {
+  font-size: 10px;
+}
+.nutrition-snapshot {
+  display: flex;
+  gap: 35px;
+  margin: 14px 0 12px;
+}
+.nutrition-snapshot > div {
+  display: flex;
+  flex-direction: column;
+}
+.nutrition-snapshot strong {
+  font-family: Georgia, serif;
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+.nutrition-snapshot strong small {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 15px;
+}
+.nutrition-snapshot span {
+  font-size: 10px;
+  color: #7e8874;
+  margin-top: 3px;
+}
+.nutrition-compact .fine-print {
+  font-size: 10px;
+}
+.agenda-panel {
+  padding: 20px 21px;
+  background: #fffefb;
+  border: 1px solid #dfe4d8;
+  border-radius: 17px;
+}
+.agenda-panel .panel-title h2 {
+  font-size: 17px;
+}
+.agenda-panel .icon-button {
+  font-size: 23px;
+  line-height: 1;
+  padding: 0 5px;
+  color: #6f8264;
+}
+.agenda-panel > .subtle {
+  font-size: 10px;
+  margin-top: 6px;
+}
+.agenda-list {
+  margin-top: 18px;
+  max-height: 555px;
+  overflow: auto;
+}
+.agenda-item {
+  display: grid;
+  grid-template-columns: 55px 8px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  background: none;
+  width: 100%;
+  padding: 13px 0;
+  text-align: left;
+  position: relative;
+  border-radius: 5px;
+}
+.agenda-item:hover {
+  background: #f5f6ef;
+}
+.agenda-time {
+  font-size: 10px;
+  color: #77846b;
+  white-space: nowrap;
+  padding-top: 2px;
+}
+.activity-dot {
+  width: 7px;
+  height: 7px;
+  display: inline-block;
+  border-radius: 50%;
+  background: #869b7a;
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+.activity-dot.meal {
+  background: #427558;
+}
+.activity-dot.class {
+  background: #ba9561;
+}
+.activity-dot.workout {
+  background: #9076ac;
+}
+.activity-dot.task {
+  background: #749aac;
+}
+.agenda-item strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+.agenda-item small {
+  display: block;
+  font-size: 9px;
+  color: #8a9281;
+  line-height: 1.6;
+  margin-top: 4px;
+}
+.agenda-item.past {
+  opacity: 0.66;
+}
+.agenda-item.complete strong {
+  text-decoration: line-through;
+}
+.agenda-all {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border-top: 1px solid #e5e9de;
+  padding-top: 14px;
+  margin-top: 10px;
+  font-size: 11px;
+}
+.agenda-empty {
+  padding: 26px 0 32px;
+  text-align: center;
+  color: #7b8b70;
+}
+.agenda-empty p {
+  font-size: 12px;
+  margin-top: 12px;
+}
+.agenda-empty small {
+  display: block;
+  font-size: 10px;
+  margin-top: 6px;
+  color: #9aa28e;
+}
+.schedule-sync-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 9px;
+  color: #8a947e;
+  padding: 8px 4px;
+}
+.schedule-sync-note > .text-button {
+  font-size: 9px;
+  margin-left: auto;
+}
+.compact-footer {
+  margin-top: 28px;
+  padding: 17px 0;
+  font-size: 10px;
+}
+.compact-footer .text-button {
+  font-size: 10px;
+}
+.connection-choice {
+  display: flex;
+  gap: 17px;
+  align-items: flex-start;
+  margin: 20px 0;
+}
+.connection-icon {
+  display: grid;
+  place-items: center;
+  width: 55px;
+  height: 55px;
+  border-radius: 13px;
+  flex-shrink: 0;
+  background: #e9efdf;
+}
+.connection-choice h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+.connection-choice p {
+  font-size: 13px;
+  color: #75836a;
+  line-height: 1.7;
+}
+.wide-button {
+  width: 100%;
+  margin-top: 16px;
+}
+.import-divider {
+  position: relative;
+  text-align: center;
+  margin: 24px 0;
+  color: #8c9482;
+  font-size: 11px;
+}
+.import-divider:before {
+  content: "";
+  height: 1px;
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  background: #e4e8da;
+}
+.import-divider > span {
+  background: #fffefb;
+  position: relative;
+  padding: 0 10px;
+}
+.file-drop {
+  padding: 18px;
+  border: 1px dashed #b7c5a9;
+  border-radius: 10px;
+  background: #f6f8ef;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+.file-drop input {
+  font-size: 11px;
+  padding: 8px;
+  background: none;
+  border: 0;
+}
+.success {
+  font-size: 12px;
+  padding: 12px;
+  margin-top: 15px;
+  border-radius: 9px;
+  background: #edf3e3;
+  color: #496b3d;
+}
+.spaced-label {
+  margin-top: 17px;
+}
+.event-readout p {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  margin: 15px 0;
+}
+.about-sections section {
+  padding: 15px 0;
+  border-top: 1px solid #e5e9dd;
+}
+.about-sections h3 {
+  margin: 0 0 8px;
+}
+.about-sections p {
+  font-size: 13px;
+  color: #758169;
+  line-height: 1.8;
+}
+/* Calendar */
+.plan-date-controls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+.plan-date-controls .text-button {
+  font-size: 11px;
+}
+.plan-date-controls input {
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.plan-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 270px;
+  gap: 20px;
+  align-items: start;
+}
+.calendar-board {
+  border: 1px solid #dce2d3;
+  background: #fffefb;
+  border-radius: 16px;
+  overflow: hidden;
+  min-width: 0;
+}
+.calendar-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e9dd;
+  gap: 15px;
+}
+.calendar-range {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+.calendar-range h2 {
+  font-size: 18px;
+}
+.calendar-range .icon-button {
+  font-size: 24px;
+  padding: 0 5px;
+  line-height: 1;
+}
+.calendar-views {
+  display: flex;
+  padding: 3px;
+  border: 1px solid #e1e5d9;
+  border-radius: 8px;
+}
+.calendar-views button {
+  font-size: 11px;
+  background: none;
+  border-radius: 5px;
+  padding: 5px 10px;
+}
+.calendar-views button[aria-pressed="true"] {
+  background: #e9efdf;
+  color: #3f6948;
+}
+.calendar-right > .wide-button {
+  font-size: 11px;
+}
+.week-head {
+  display: grid;
+  grid-template-columns: 46px repeat(7, minmax(0, 1fr));
+  border-bottom: 1px solid #e1e6d8;
+}
+.week-head button {
+  padding: 11px 5px;
+  background: none;
+  border-left: 1px solid #edf0e6;
+}
+.week-head small {
+  display: block;
+  text-transform: uppercase;
+  color: #8a947f;
+  font-size: 9px;
+}
+.week-head strong {
+  font-size: 18px;
+  font-weight: 500;
+  display: block;
+  margin: 1px auto 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+.week-head .active strong {
+  background: #315d47;
+  color: #fff;
+}
+.week-scroll {
+  overflow-y: auto;
+  height: 590px;
+  scrollbar-width: thin;
+}
+.week-grid {
+  display: grid;
+  grid-template-columns: 46px repeat(7, minmax(0, 1fr));
+  height: 780px;
+  position: relative;
+}
+.time-axis {
+  position: relative;
+  background: #fcfdf8;
+}
+.time-axis span {
+  position: absolute;
+  font-size: 9px;
+  color: #8e9784;
+  left: 10px;
+  transform: translateY(-5px);
+}
+.time-axis span:first-child {
+  transform: translateY(2px);
+}
+.week-day {
+  position: relative;
+  border-left: 1px solid #e9eddf;
+  min-width: 0;
+}
+.week-day.active {
+  background: #f8faf3;
+}
+.hour-line {
+  height: 52px;
+  border-top: 1px solid #edf0e6;
+}
+.week-event {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  border: 1px solid #dddccf;
+  border-left: 3px solid #a1916a;
+  background: #f2ecdb;
+  border-radius: 5px;
+  padding: 5px 4px;
+  text-align: left;
+  overflow: hidden;
+  min-height: 25px;
+}
+.week-event.meal {
+  background: #e2ecda;
+  border-color: #ccdbbf;
+  border-left-color: #6d9260;
+}
+.week-event.workout {
+  background: #eee5f7;
+  border-color: #e0d2ee;
+  border-left-color: #9675b6;
+}
+.week-event.task {
+  background: #e5f0f4;
+  border-color: #d1e4eb;
+  border-left-color: #749fad;
+}
+.week-event strong {
+  font-size: 9px;
+  font-weight: 550;
+  display: block;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.week-event small {
+  font-size: 8px;
+  color: #8e977e;
+  display: block;
+  margin-top: 3px;
+}
+.calendar-legend {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  font-size: 9px;
+  color: #7f8a72;
+  padding: 12px 18px;
+  flex-wrap: wrap;
+}
+.calendar-legend .activity-dot {
+  margin: 0 1px 0 9px;
+}
+.calendar-local-note {
+  font-size: 9px;
+  margin: 0 20px 15px;
+}
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.weekday {
+  padding: 11px 3px;
+  text-align: center;
+  font-size: 9px;
+  color: #8b957e;
+  border-bottom: 1px solid #e7ebdd;
+}
+.month-day {
+  min-height: 105px;
+  border-right: 1px solid #e7ebdd;
+  border-bottom: 1px solid #e7ebdd;
+  padding: 7px 5px;
+  min-width: 0;
+}
+.month-day:nth-child(7n) {
+  border-right: 0;
+}
+.month-day.outside {
+  background: #f7f8f1;
+  opacity: 0.6;
+}
+.month-day.active {
+  background: #f0f5e6;
+}
+.day-number {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: none;
+  font-size: 11px;
+  padding: 0;
+  margin-bottom: 6px;
+}
+.active .day-number {
+  background: #315d47;
+  color: white;
+}
+.calendar-chip {
+  display: block;
+  font-size: 8px;
+  width: 100%;
+  text-align: left;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 3px 4px;
+  border-radius: 4px;
+  background: #f0ead9;
+  margin-bottom: 4px;
+}
+.calendar-chip.meal {
+  background: #dfebd4;
+}
+.calendar-chip.workout {
+  background: #eee5f7;
+}
+.calendar-chip.task {
+  background: #e5f0f4;
+}
+.more-events {
+  font-size: 8px;
+  background: none;
+  padding: 1px;
+  color: #80906f;
+}
+/* One card at a time, with touch, pointer and keyboard choices. */
+.food-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 275px;
+  gap: 30px;
+  align-items: start;
+  max-width: 1130px;
+  margin: auto;
+}
+.food-discovery {
+  min-width: 0;
+  max-width: 730px;
+}
+.food-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.food-mode {
+  display: flex;
+  border-radius: 11px;
+  padding: 4px;
+  background: #e7eddd;
+  gap: 3px;
+}
+.food-mode button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: none;
+  padding: 9px 17px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.food-mode button[aria-pressed="true"] {
+  background: #fff;
+  box-shadow: 0 1px 4px #38432c13;
+  font-weight: 550;
+}
+.window-button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 10px;
+  background: transparent;
+  white-space: nowrap;
+  padding: 6px 0;
+}
+.window-button span {
+  margin-left: 5px;
+  color: #69865a;
+  text-decoration: underline;
+}
+.food-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin-top: 18px;
+}
+.food-filters label {
+  flex: 1;
+  font-size: 10px;
+  color: #7d8a71;
+}
+.food-filters select {
+  font-size: 11px;
+  background: #fffefb;
+  padding: 8px 10px;
+}
+.filter-link {
+  font-size: 10px;
+  white-space: nowrap;
+  background: none;
+  padding: 10px 0;
+  color: #4b7050;
+}
+.venue-filterbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  margin: 18px 0 4px;
+  color: #7a866f;
+}
+.venue-filterbar .check-label {
+  font-size: 10px;
+}
+.venue-filterbar input {
+  width: 14px;
+  height: 14px;
+}
+.deck-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 17px 0 10px;
+  font-size: 10px;
+  color: #7f8b73;
+}
+.deck-heading > span:last-child {
+  color: #92a084;
+}
+.swipe-card {
+  position: relative;
+  touch-action: pan-y;
+  outline-offset: 5px;
+  border-radius: 20px;
+}
+.swipe-moving {
+  position: relative;
+  border-radius: 19px;
+  border: 1px solid #dae3cf;
+  overflow: hidden;
+  background: #fffefb;
+  box-shadow: 0 12px 28px #3b4b2410;
+  transition: transform 0.16s ease;
+}
+.swipe-stamp {
+  position: absolute;
+  top: 70px;
+  left: 30px;
+  z-index: 5;
+  border: 3px solid #4e8b57;
+  padding: 6px 12px;
+  font-size: 24px;
+  font-weight: 700;
+  transform: rotate(-15deg);
+  color: #4e8b57;
+  pointer-events: none;
+  background: #ffffffce;
+  opacity: 0;
+}
+.swipe-stamp.pass {
+  color: #bd7855;
+  border-color: #bd7855;
+  left: auto;
+  right: 25px;
+  transform: rotate(15deg);
+}
+.flashcard-cover {
+  width: 100%;
+  height: 260px;
+  padding: 0;
+  border-radius: 0;
+  position: relative;
+  display: block;
+  background: #ede6d7;
+}
+.flashcard-cover > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 55%;
+  pointer-events: none;
+}
+.cover-tag {
+  position: absolute;
+  left: 16px;
+  top: 15px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  background: #fffefbe8;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #4c6c42;
+  box-shadow: 0 1px 5px #2e3a2220;
+}
+.photo-label {
+  position: absolute;
+  right: 9px;
+  bottom: 7px;
+  border-radius: 4px;
+  background: #fffefbd9;
+  padding: 3px 6px;
+  font-size: 8px;
+  color: #7a806e;
+}
+.flashcard-body {
+  padding: 21px 26px 13px;
+}
+.flashcard-body h2 {
+  font-size: 25px;
+  font-weight: 550;
+  line-height: 1.25;
+  letter-spacing: -0.7px;
+  margin-bottom: 7px;
+}
+.flashcard-body > p {
+  font-size: 12px;
+  color: #7b876e;
+  line-height: 1.65;
+}
+.flash-facts {
+  display: flex;
+  gap: 17px;
+  font-size: 11px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.flash-facts > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.fits-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #789166;
+  margin-top: 14px;
+}
+.swipe-actions {
+  display: flex;
+  gap: 22px;
+  justify-content: center;
+  align-items: center;
+  margin-top: 19px;
+}
+.decline-button,
+.accept-button {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.decline-button {
+  background: #fbf1e9;
+  border: 1px solid #ecd9cc;
+  color: #b5805f;
+  font-size: 30px;
+  font-weight: 300;
+}
+.decline-button:hover {
+  background: #f3e1d4;
+}
+.accept-button {
+  background: #315e46;
+  color: #fff;
+  box-shadow: 0 4px 8px #315e4620;
+}
+.accept-button:hover {
+  background: #234b35;
+}
+.detail-button {
+  font-size: 11px;
+  padding: 10px 12px;
+  border: 1px solid #dce3d2;
+  border-radius: 8px;
+  background: #fffefb;
+}
+.detail-button:hover {
+  background: #f0f4e8;
+}
+.flashcard-body > .swipe-hint {
+  font-size: 9px;
+  margin-top: 12px;
+  text-align: center;
+  color: #9aa38d;
+}
+.deck-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 9px;
+  color: #929d84;
+  padding: 12px 2px;
+}
+.deck-footer .text-button {
+  font-size: 10px;
+}
+.food-explainer {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  padding-top: 0;
+}
+.small-panel {
+  background: #fffefb;
+  border: 1px solid #e0e5d5;
+  border-radius: 13px;
+  padding: 17px 19px;
+}
+.small-panel h3 {
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+.small-panel dl {
+  font-size: 11px;
+  margin: 0;
+}
+.small-panel dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #eef0e6;
+}
+.small-panel dt {
+  color: #8b957e;
+}
+.small-panel dd {
+  margin: 0;
+  text-align: right;
+  max-width: 65%;
+  text-transform: capitalize;
+}
+.small-panel .text-button {
+  font-size: 10px;
+  margin-top: 8px;
+}
+.small-panel summary {
+  font-size: 12px;
+  font-weight: 550;
+}
+.small-panel p {
+  font-size: 11px;
+  color: #869077;
+  line-height: 1.8;
+  margin-top: 11px;
+}
+.small-panel .fine-print {
+  font-size: 10px;
+}
+.how-decisions {
+  background: #f0f2e9;
+  border-color: #e4e9d9;
+}
+.floating-groceries {
+  position: fixed;
+  right: 28px;
+  bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: #fffefb;
+  border: 1px solid #ced9c0;
+  box-shadow: 0 5px 20px #38502720;
+  border-radius: 30px;
+  padding: 12px 18px;
+  color: #3e6647;
+  font-size: 12px;
+  z-index: 8;
+}
+.floating-groceries:hover {
+  background: #eef4e4;
+}
+.deck-empty {
+  padding: 60px 25px;
+  text-align: center;
+  border: 1px solid #dde4d3;
+  border-radius: 18px;
+  min-height: 390px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  background: #fffefb;
+}
+.deck-empty h2 {
+  font-size: 23px;
+  margin: 20px 0 10px;
+}
+.deck-empty p {
+  font-size: 12px;
+  color: #859278;
+  margin-bottom: 22px;
+}
+.venue-card-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 9px;
+  margin-bottom: 10px;
+  gap: 10px;
+}
+.venue-card-status .open {
+  color: #4b7b41;
+}
+.venue-card-status .closed {
+  color: #af8455;
+}
+.venue-card-status > span:last-child {
+  color: #9a9f8e;
+}
+.flashcard-body .venue-address {
+  font-size: 11px;
+  margin-bottom: 8px;
+  color: #617954;
+}
+.published-offers {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 14px;
+}
+.published-offers > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  font-size: 10px;
+  color: #829072;
+}
+.published-offers strong {
+  font-weight: 550;
+  color: #4b6843;
+  white-space: nowrap;
+}
+.venue-detail-location {
+  font-size: 13px;
+  color: #79876c;
+}
+.venue-detail-metrics {
+  display: flex;
+  gap: 25px;
+  flex-wrap: wrap;
+  padding: 19px 0;
+  border-bottom: 1px solid #e3e8d9;
+  margin-bottom: 16px;
+}
+.venue-detail-metrics > span,
+.venue-detail-metrics > a {
+  font-size: 10px;
+  color: #8b957e;
+  text-decoration: none;
+}
+.venue-detail-metrics strong {
+  display: block;
+  color: #476b42;
+  font-size: 16px;
+  font-weight: 550;
+  margin-bottom: 4px;
+}
+.detail-offers > span {
+  padding: 10px 0;
+  border-bottom: 1px solid #e7ebde;
+  font-size: 12px;
+}
+.venue-links {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+.venue-links a {
+  font-size: 11px;
+}
+.venue-detail-metrics + .muted {
+  font-size: 12px;
+}
+.kitchen-panel {
+  border: 0;
+  padding: 0;
+}
+.kitchen-panel .section-heading {
+  display: none;
+}
+.kitchen-panel > .muted {
+  margin-top: 3px;
+}
+.kitchen-panel .pantry-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+@media (max-width: 1050px) {
+  .header-inner {
+    gap: 30px;
+  }
+  .today-layout {
+    grid-template-columns: minmax(0, 1fr) 270px;
+    gap: 20px;
+  }
+  .meal-path {
+    padding: 17px;
+    min-height: 167px;
+  }
+  .meal-path img {
+    width: 117px;
+    height: 117px;
+    right: -42px;
+    top: 23%;
+  }
+  .path-copy {
+    width: 90%;
+  }
+  .meal-path p {
+    max-width: 145px;
+  }
+  .today-saved-meal {
+    flex-wrap: wrap;
+  }
+  .today-saved-actions {
+    margin-left: 65px;
+  }
+  .coming-up h2 {
+    font-size: 24px;
+  }
+  .page-tools {
+    gap: 10px;
+  }
+  .food-layout {
+    grid-template-columns: minmax(0, 1fr) 240px;
+    gap: 20px;
+  }
+  .food-mode button {
+    padding: 9px 13px;
+  }
+  .window-button {
+    font-size: 9px;
+  }
+  .food-filters {
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .food-filters .filter-link {
+    width: 100%;
+    padding: 0;
+    text-align: left;
+    margin-top: -3px;
+  }
+  .flashcard-cover {
+    height: 245px;
+  }
+  .flashcard-body {
+    padding: 19px 21px 12px;
+  }
+  .flashcard-body h2 {
+    font-size: 23px;
+  }
+  .flash-facts {
+    gap: 12px;
+    font-size: 10px;
+  }
+  .plan-layout {
+    grid-template-columns: minmax(0, 1fr) 230px;
+    gap: 15px;
+  }
+  .calendar-toolbar {
+    padding: 14px;
+  }
+  .calendar-range {
+    gap: 7px;
+  }
+  .calendar-range h2 {
+    font-size: 16px;
+  }
+  .calendar-views button {
+    padding: 4px 7px;
+  }
+  .calendar-right .agenda-panel {
+    padding: 18px 15px;
+  }
+  .week-grid,
+  .week-head {
+    grid-template-columns: 35px repeat(7, minmax(0, 1fr));
+  }
+  .time-axis span {
+    left: 6px;
+  }
+  .week-event {
+    left: 2px;
+    right: 2px;
+    padding: 4px 2px;
+  }
+  .week-event strong {
+    font-size: 8px;
+  }
+  .week-event small {
+    font-size: 7px;
+  }
+  .today-agenda .agenda-panel {
+    padding: 18px;
+  }
+  .nutrition-snapshot {
+    gap: 28px;
+  }
+}
+@media (max-width: 760px) {
+  .header-inner {
+    gap: 18px;
+    padding: 0 20px;
+    min-height: 70px;
+    flex-wrap: nowrap;
+  }
+  .header-inner nav button {
+    padding: 10px 11px;
+  }
+  .brand {
+    font-size: 23px;
+  }
+  .header-right {
+    gap: 12px;
+  }
+  .header-right .avatar {
+    width: 33px;
+    height: 33px;
+    font-size: 10px;
+  }
+  .brand-dot {
+    display: none;
+  }
+  .redesigned-shell {
+    padding: 19px 20px 0;
+  }
+  .today-layout {
+    grid-template-columns: minmax(0, 1fr) 240px;
+    gap: 17px;
+  }
+  .today-main {
+    gap: 18px;
+  }
+  .coming-up {
+    padding: 20px;
+    min-height: 225px;
+  }
+  .coming-main {
+    gap: 12px;
+  }
+  .coming-icon {
+    width: 43px;
+    height: 43px;
+    border-radius: 11px;
+  }
+  .coming-up h2 {
+    font-size: 22px;
+  }
+  .coming-up > h2 {
+    font-size: 26px;
+  }
+  .coming-actions {
+    gap: 12px;
+  }
+  .coming-actions .primary {
+    font-size: 11px;
+  }
+  .meal-paths {
+    grid-template-columns: 1fr;
+  }
+  .meal-path {
+    min-height: 118px;
+    padding: 15px;
+  }
+  .meal-path img {
+    width: 112px;
+    height: 112px;
+    right: -3px;
+    top: 6%;
+  }
+  .path-copy {
+    width: 72%;
+  }
+  .path-icon {
+    display: none;
+  }
+  .path-link {
+    margin-top: 11px;
+  }
+  .meal-path strong {
+    font-size: 17px;
+  }
+  .today-saved-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+  .today-saved-actions button {
+    flex: 1;
+  }
+  .nutrition-compact {
+    padding: 16px;
+  }
+  .nutrition-compact .panel-title {
+    align-items: flex-start;
+  }
+  .nutrition-compact .panel-title > div {
+    flex-direction: column;
+    gap: 3px;
+  }
+  .nutrition-compact .panel-title .text-button {
+    font-size: 9px;
+    padding: 0;
+  }
+  .nutrition-snapshot {
+    gap: 20px;
+  }
+  .nutrition-snapshot strong {
+    font-size: 27px;
+  }
+  .nutrition-snapshot span {
+    font-size: 9px;
+  }
+  .food-layout {
+    grid-template-columns: minmax(0, 1fr) 220px;
+    gap: 18px;
+  }
+  .food-topbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .food-mode {
+    width: 100%;
+  }
+  .food-mode button {
+    flex: 1;
+    justify-content: center;
+  }
+  .window-button {
+    padding: 3px 2px;
+    font-size: 10px;
+    width: 100%;
+  }
+  .window-button span {
+    margin-left: auto;
+  }
+  .flashcard-cover {
+    height: 220px;
+  }
+  .flashcard-body {
+    padding: 17px;
+  }
+  .flashcard-body h2 {
+    font-size: 22px;
+  }
+  .small-panel {
+    padding: 16px;
+  }
+  .food-filters {
+    margin-top: 13px;
+  }
+  .deck-heading {
+    font-size: 9px;
+  }
+  .venue-filterbar {
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+  .venue-filterbar .check-label {
+    font-size: 9px;
+  }
+  .flash-facts {
+    gap: 9px;
+    font-size: 9px;
+  }
+  .swipe-actions {
+    gap: 16px;
+  }
+  .flashcard-body .swipe-hint {
+    font-size: 8px;
+  }
+  .cover-tag {
+    font-size: 9px;
+    left: 10px;
+    top: 10px;
+    padding: 5px 7px;
+  }
+  .photo-label {
+    font-size: 7px;
+  }
+  .plan-layout {
+    grid-template-columns: 1fr;
+  }
+  .calendar-right {
+    display: none;
+  }
+  .calendar-toolbar {
+    padding: 14px 17px;
+  }
+  .week-event strong {
+    font-size: 9px;
+  }
+  .week-event small {
+    font-size: 8px;
+  }
+  .calendar-board .week-scroll {
+    height: 560px;
+  }
+  .calendar-board .week-grid,
+  .calendar-board .week-head {
+    grid-template-columns: 38px repeat(7, minmax(0, 1fr));
+  }
+  .build-label {
+    display: none;
+  }
+  .page-tools .calendar-status {
+    font-size: 10px;
+  }
+  .compact-page-title h1 {
+    font-size: 24px;
+  }
+  .compact-page-title p {
+    font-size: 11px;
+  }
+  .agenda-item {
+    grid-template-columns: 48px 7px minmax(0, 1fr);
+    gap: 8px;
+  }
+  .agenda-time {
+    font-size: 9px;
+  }
+  .agenda-item strong {
+    font-size: 11px;
+  }
+  .agenda-item small {
+    font-size: 8px;
+  }
+  .compact-footer {
+    margin-top: 24px;
+  }
+  .compact-footer > span {
+    width: auto;
+  }
+}
+@media (max-width: 600px) {
+  .header-inner {
+    padding: 12px 17px 0;
+    min-height: 103px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .header-inner nav {
+    order: 2;
+    width: 100%;
+    padding: 0 0 9px;
+    gap: 6px;
+  }
+  .header-inner nav button {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+  .brand {
+    font-size: 23px;
+  }
+  .header-right {
+    order: 1;
+    margin-left: auto;
+  }
+  .header-right .assistant-nav span {
+    display: none;
+  }
+  .redesigned-shell {
+    padding: 17px 17px 0;
+  }
+  .compact-page-title {
+    margin-bottom: 17px;
+    align-items: center;
+  }
+  .compact-page-title h1 {
+    font-size: 24px;
+  }
+  .compact-page-title p {
+    font-size: 10px;
+  }
+  .page-tools {
+    gap: 8px;
+  }
+  .calendar-status {
+    padding: 7px 9px;
+  }
+  .calendar-status span:not(.connection-dot) {
+    max-width: 94px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .calendar-status .connection-dot {
+    display: none;
+  }
+  .page-tools > .secondary {
+    font-size: 9px;
+    padding: 8px 10px;
+  }
+  .compact-notice {
+    font-size: 10px;
+    gap: 8px;
+  }
+  .compact-notice > div {
+    gap: 6px;
+  }
+  .compact-notice .text-button {
+    font-size: 9px;
+  }
+  .today-layout {
+    grid-template-columns: 1fr;
+    gap: 18px;
+    display: flex;
+    flex-direction: column;
+  }
+  .today-main {
+    display: contents;
+  }
+  .coming-up {
+    order: 0;
+    width: 100%;
+    min-height: 207px;
+    padding: 20px;
+  }
+  .coming-label {
+    font-size: 9px;
+  }
+  .coming-main {
+    margin: 19px 0;
+  }
+  .coming-up h2 {
+    font-size: 24px;
+  }
+  .coming-up > h2 {
+    font-size: 27px;
+  }
+  .coming-up p:not(.activity-kind) {
+    font-size: 12px;
+  }
+  .coming-actions {
+    gap: 13px;
+  }
+  .coming-actions > span {
+    font-size: 9px;
+  }
+  .coming-actions .primary {
+    font-size: 11px;
+  }
+  .meal-entry {
+    order: 1;
+    width: 100%;
+    margin-top: 0;
+  }
+  .meal-entry .panel-title {
+    margin-bottom: 12px;
+  }
+  .meal-entry .panel-title h2 {
+    font-size: 15px;
+  }
+  .meal-entry .panel-title .text-button {
+    font-size: 10px;
+  }
+  .meal-paths {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .meal-path {
+    padding: 15px 13px;
+    min-height: 156px;
+  }
+  .meal-path img {
+    width: 93px;
+    height: 93px;
+    right: -38px;
+    top: 18px;
+  }
+  .path-copy {
+    width: 100%;
+  }
+  .path-icon {
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
+    margin-bottom: 9px;
+  }
+  .path-icon svg {
+    width: 18px;
+  }
+  .meal-path strong {
+    font-size: 17px;
+  }
+  .meal-path p {
+    font-size: 9px;
+    max-width: 128px;
+  }
+  .path-link {
+    font-size: 9px;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .today-agenda {
+    order: 2;
+    width: 100%;
+    position: static;
+  }
+  .agenda-panel {
+    padding: 18px 20px;
+  }
+  .agenda-list {
+    margin-top: 12px;
+    max-height: 355px;
+  }
+  .agenda-item {
+    grid-template-columns: 60px 8px minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px 0;
+  }
+  .agenda-time {
+    font-size: 10px;
+  }
+  .agenda-item strong {
+    font-size: 12px;
+  }
+  .agenda-item small {
+    font-size: 10px;
+  }
+  .agenda-empty {
+    padding: 18px 0;
+  }
+  .schedule-sync-note {
+    font-size: 9px;
+    padding-top: 6px;
+  }
+  .today-saved-meal {
+    order: 3;
+    width: 100%;
+    padding: 13px;
+    gap: 10px;
+    flex-wrap: nowrap;
+  }
+  .today-saved-meal > img {
+    width: 44px;
+    height: 44px;
+  }
+  .today-saved-meal strong {
+    font-size: 12px;
+  }
+  .today-saved-meal p {
+    font-size: 9px;
+  }
+  .today-saved-actions {
+    width: auto;
+    margin: 0;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .today-saved-actions button {
+    font-size: 9px;
+    padding: 7px 9px;
+  }
+  .nutrition-compact {
+    order: 4;
+    width: 100%;
+    padding: 18px 20px;
+  }
+  .nutrition-compact .panel-title {
+    align-items: center;
+  }
+  .nutrition-compact .panel-title > div {
+    flex-direction: row;
+    gap: 14px;
+  }
+  .nutrition-compact .panel-title .text-button {
+    font-size: 9px;
+  }
+  .nutrition-compact .panel-title h2 {
+    font-size: 14px;
+    max-width: 140px;
+  }
+  .nutrition-snapshot {
+    gap: 35px;
+    margin: 18px 0 13px;
+  }
+  .nutrition-snapshot strong {
+    font-size: 29px;
+  }
+  .nutrition-snapshot span {
+    font-size: 10px;
+  }
+  .compact-footer {
+    padding-bottom: 23px;
+    gap: 15px;
+  }
+  .compact-footer > span {
+    width: 100%;
+  }
+  .food-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .food-discovery {
+    width: 100%;
+  }
+  .food-explainer {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 13px;
+  }
+  .how-decisions {
+    order: 0;
+  }
+  .small-panel:not(.how-decisions) {
+    order: 1;
+  }
+  .food-topbar {
+    gap: 9px;
+  }
+  .food-mode {
+    width: auto;
+    flex: 1;
+  }
+  .food-mode button {
+    font-size: 11px;
+    padding: 9px 13px;
+  }
+  .window-button {
+    width: 100%;
+    font-size: 11px;
+    padding: 3px 2px;
+  }
+  .food-filters {
+    margin-top: 14px;
+    gap: 10px;
+  }
+  .food-filters label {
+    font-size: 10px;
+  }
+  .food-filters .filter-link {
+    font-size: 10px;
+  }
+  .deck-heading {
+    margin-top: 16px;
+    font-size: 9px;
+  }
+  .swipe-moving {
+    border-radius: 16px;
+  }
+  .flashcard-cover {
+    height: 245px;
+  }
+  .flashcard-body {
+    padding: 19px 20px 13px;
+  }
+  .flashcard-body h2 {
+    font-size: 24px;
+  }
+  .flashcard-body > p {
+    font-size: 12px;
+  }
+  .flash-facts {
+    font-size: 10px;
+    gap: 12px 16px;
+  }
+  .fits-line {
+    font-size: 9px;
+  }
+  .swipe-actions {
+    gap: 23px;
+    margin-top: 20px;
+  }
+  .flashcard-body > .swipe-hint {
+    font-size: 9px;
+    margin-top: 13px;
+  }
+  .cover-tag {
+    font-size: 9px;
+    left: 12px;
+    top: 12px;
+  }
+  .photo-label {
+    font-size: 7px;
+  }
+  .floating-groceries {
+    right: 16px;
+    bottom: 18px;
+    padding: 10px 14px;
+    font-size: 11px;
+  }
+  .deck-footer {
+    font-size: 8px;
+  }
+  .venue-filterbar {
+    font-size: 10px;
+    gap: 9px;
+    margin-top: 13px;
+  }
+  .venue-filterbar .check-label {
+    font-size: 10px;
+  }
+  .published-offers > span {
+    font-size: 10px;
+  }
+  .plan-date-controls {
+    margin-bottom: 13px;
+    gap: 15px;
+  }
+  .plan-date-controls .text-button {
+    font-size: 10px;
+  }
+  .plan-date-controls input {
+    font-size: 11px;
+    padding: 6px 8px;
+  }
+  .calendar-toolbar {
+    padding: 12px;
+  }
+  .calendar-range {
+    gap: 5px;
+  }
+  .calendar-range h2 {
+    font-size: 14px;
+  }
+  .calendar-views button {
+    font-size: 9px;
+    padding: 4px 6px;
+  }
+  .week-head small {
+    font-size: 8px;
+  }
+  .week-head strong {
+    font-size: 16px;
+    width: 25px;
+    height: 25px;
+  }
+  .week-head button {
+    padding: 9px 2px;
+  }
+  .calendar-board .week-grid,
+  .calendar-board .week-head {
+    grid-template-columns: 29px repeat(7, minmax(0, 1fr));
+  }
+  .week-event {
+    left: 1px;
+    right: 1px;
+    padding: 3px 2px;
+    border-left-width: 2px;
+  }
+  .week-event strong {
+    font-size: 7px !important;
+    line-height: 1.4;
+  }
+  .week-event small {
+    font-size: 6px !important;
+  }
+  .time-axis span {
+    font-size: 8px;
+    left: 4px;
+  }
+  .calendar-board .week-scroll {
+    height: 560px;
+  }
+  .calendar-legend {
+    padding: 10px 8px;
+    font-size: 8px;
+    gap: 5px;
+  }
+  .calendar-local-note {
+    font-size: 8px;
+    margin: 0 12px 12px;
+  }
+  .month-day {
+    min-height: 80px;
+    padding: 5px 3px;
+  }
+  .calendar-chip {
+    font-size: 7px;
+    padding: 3px 2px;
+  }
+  .weekday {
+    font-size: 7px;
+  }
+  .day-number {
+    font-size: 10px;
+    width: 20px;
+    height: 20px;
+  }
+  .more-events {
+    font-size: 7px;
+  }
+  .calendar-right {
+    display: block;
+  }
+  .calendar-right > .wide-button {
+    display: none;
+  }
+  .venue-detail-metrics {
+    gap: 17px;
+  }
+  .venue-detail-metrics strong {
+    font-size: 15px;
+  }
+  .venue-detail-metrics > span,
+  .venue-detail-metrics > a {
+    font-size: 9px;
+  }
+  .kitchen-panel .pantry-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .connection-choice {
+    gap: 13px;
+  }
+  .connection-icon {
+    width: 45px;
+    height: 45px;
+  }
+  .connection-choice h3 {
+    font-size: 16px;
+  }
+  .connection-choice p {
+    font-size: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .swipe-moving {
+    transition: none;
+  }
+}
+.calendar-week {
+  overflow-x: auto;
+}
+.all-day-row {
+  display: grid;
+  grid-template-columns: 45px repeat(7, minmax(0, 1fr));
+  border-bottom: 1px solid #e2e7da;
+  min-height: 30px;
+}
+.all-day-row > span {
+  font-size: 8px;
+  padding: 8px 4px;
+  color: #79846f;
+}
+.all-day-row > div {
+  min-width: 0;
+  border-left: 1px solid #e2e7da;
+  padding: 3px;
+}
+.all-day-row .calendar-chip {
+  width: 100%;
+  margin: 0 0 2px;
+}
+.week-event {
+  overflow: hidden;
+}
+.calendar-right {
+  min-width: 0;
+}
+@media (max-width: 1050px) {
+  .all-day-row {
+    grid-template-columns: 35px repeat(7, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .calendar-right {
+    display: block;
+  }
+  .calendar-week > .week-head,
+  .calendar-week > .all-day-row,
+  .calendar-week > .week-scroll {
+    min-width: 620px;
+  }
+  .calendar-board .week-grid,
+  .calendar-board .week-head,
+  .all-day-row {
+    grid-template-columns: 38px repeat(7, minmax(0, 1fr));
+  }
+  .week-event strong {
+    font-size: 10px !important;
+  }
+  .week-event small {
+    font-size: 9px !important;
+  }
+  .week-head small {
+    font-size: 10px;
+  }
+  .calendar-chip {
+    font-size: 9px;
+  }
+}
+
+.food-saved-slot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #d8e1ce;
+  background: #f4f7ee;
+  border-radius: 10px;
+  padding: 10px 13px;
+  margin-top: 14px;
+}
+.food-saved-slot > div {
+  min-width: 0;
+}
+.food-saved-slot span {
+  display: block;
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: #75836c;
+}
+.food-saved-slot strong {
+  font-size: 12px;
+  display: block;
+  margin-top: 3px;
+}
+.food-saved-slot .text-button {
+  font-size: 10px;
+}
+.food-saved-slot p {
+  font-size: 10px;
+  line-height: 1.5;
+  color: #89683f;
+  margin-top: 4px;
+}
+.food-saved-slot.needs-review {
+  background: #fcf5e9;
+  border-color: #e6d5b9;
+}
+.plan-undo {
+  font-size: 10px;
+  margin: 5px 0 0;
+  padding: 3px 0;
+}
+
+.nutrition-snapshot {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 15px;
+}
+.nutrition-snapshot > div {
+  min-width: 0;
+}
+.nutrition-snapshot span {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .compact-page-title {
+    flex-wrap: wrap;
+  }
+  .page-tools > .secondary {
+    white-space: nowrap;
+  }
+  .page-tools {
+    flex-wrap: wrap;
+  }
+  .nutrition-compact .panel-title {
+    flex-wrap: wrap;
+  }
+}
