@@ -33,6 +33,7 @@ import {
 } from "./domain/calendar";
 import { today, transition } from "./domain/state";
 import { storageAdapter } from "./adapters/storage";
+import { persistSavedMeal, savePantryItems } from "./adapters/database";
 import { directionsUrl } from "./data/uwDining";
 import "./App.css";
 import "./ui/redesign.css";
@@ -182,7 +183,12 @@ export default function App() {
       return;
     }
     if (await safe({ type: "choose", mealId: meal.id })) {
-      setNotice(`${meal.name} added to My Plan.`);
+      const saved = await persistSavedMeal(meal);
+      setNotice(
+        saved.status === "ok"
+          ? `${meal.name} added to My Plan and saved to Postgres.`
+          : `${meal.name} added to My Plan.`,
+      );
       setDialog({ type: "details", meal });
     }
   }
@@ -619,7 +625,7 @@ export default function App() {
             <CookStart
               key={`cook-start-${JSON.stringify(state.pantry)}`}
               state={state}
-              onSuggested={(meals, ingredients) => {
+              onSuggested={async (meals, ingredients) => {
                 rememberSuggestions(meals);
                 setGeminiMeals(meals);
                 setGroceryList(ingredients || []);
@@ -635,7 +641,10 @@ export default function App() {
                   }
                   for (const name of ingredients)
                     pantry[name] = Math.max(pantry[name] ?? 0, 500);
-                  safe({ type: "updatePantry", pantry });
+                  await safe({ type: "updatePantry", pantry });
+                  const remote = await savePantryItems(ingredients);
+                  if (remote.status === "ok")
+                    setNotice("Groceries saved to Postgres.");
                 }
                 setCookPhase("discover");
               }}

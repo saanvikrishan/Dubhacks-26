@@ -13,12 +13,27 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
+import db as store
+
 ROOT = Path(__file__).resolve().parent
 # Prefer backend/.env, fall back to fridgemate/.env
 load_dotenv(ROOT / ".env")
 load_dotenv(ROOT.parent / ".env")
 
 app = FastAPI(title="FridgeMate API")
+
+DEMO_USER_ID = os.getenv("DAYWELL_USER_ID", "demo").strip() or "demo"
+
+
+@app.on_event("startup")
+def on_startup():
+    try:
+        ready = store.init_db()
+        print(
+            f"[Startup] PostgreSQL/Tiger Data: {'connected' if ready else 'not configured (set DATABASE_URL)'}"
+        )
+    except Exception as e:
+        print(f"[Startup] Database init failed: {type(e).__name__}: {e}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -126,14 +141,105 @@ class PreferenceRequest(BaseModel):
     metadata: dict | None = None
 
 
+class PantryItemIn(BaseModel):
+    name: str
+    grams: float = 500
+    expires_on: str | None = None
+
+
+class PantryReplaceRequest(BaseModel):
+    items: list[PantryItemIn] = Field(default_factory=list)
+    user_id: str = DEMO_USER_ID
+
+
+class SavedMealRequest(BaseModel):
+    meal: dict
+    user_id: str = DEMO_USER_ID
+
+
 @app.get("/")
 def home():
     return {
         "message": "FridgeMate API is running!",
         "gemini": bool(client),
         "backboard": bool(backboard_client),
+        "database": store.SessionLocal is not None,
         "model": GEMINI_MODEL if client else None,
     }
+
+
+@app.get("/pantry")
+def get_pantry(user_id: str = DEMO_USER_ID):
+    if not store.SessionLocal:
+        return {"items": [], "status": "local_only"}
+    try:
+        return {"items": store.list_pantry(user_id), "status": "ok"}
+    except Exception as e:
+        print(f"Pantry list error: {e}")
+        raise HTTPException(status_code=502, detail=f"Pantry read failed: {e}") from e
+
+
+@app.put("/pantry")
+def put_pantry(request: PantryReplaceRequest):
+    if not store.SessionLocal:
+        return {
+            "items": [i.model_dump() for i in request.items],
+            "status": "local_only",
+            "message": "DATABASE_URL not set — pantry kept in the browser only.",
+        }
+    try:
+        items = store.replace_pantry(
+            [i.model_dump() for i in request.items],
+            user_id=request.user_id or DEMO_USER_ID,
+        )
+        return {"items": items, "status": "ok"}
+    except Exception as e:
+        print(f"Pantry save error: {e}")
+        raise HTTPException(status_code=502, detail=f"Pantry save failed: {e}") from e
+
+
+@app.get("/saved-meals")
+def get_saved_meals(user_id: str = DEMO_USER_ID):
+    if not store.SessionLocal:
+        return {"meals": [], "status": "local_only"}
+    try:
+        return {"meals": store.list_saved_meals(user_id), "status": "ok"}
+    except Exception as e:
+        print(f"Saved meals list error: {e}")
+        raise HTTPException(status_code=502, detail=f"Saved meals read failed: {e}") from e
+
+
+@app.post("/saved-meals")
+def post_saved_meal(request: SavedMealRequest):
+    if not store.SessionLocal:
+        return {
+            "status": "local_only",
+            "message": "DATABASE_URL not set — meal not persisted to Postgres.",
+            "meal": request.meal,
+        }
+    try:
+        saved = store.save_meal(request.meal, user_id=request.user_id or DEMO_USER_ID)
+        return {"status": "ok", "meal": saved}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        print(f"Saved meal error: {e}")
+        raise HTTPException(status_code=502, detail=f"Save meal failed: {e}") from e
+
+
+@app.delete("/saved-meals/{row_id}")
+def remove_saved_meal(row_id: int, user_id: str = DEMO_USER_ID):
+    if not store.SessionLocal:
+        return {"status": "local_only", "deleted": False}
+    try:
+        ok = store.delete_saved_meal(row_id, user_id=user_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Saved meal not found.")
+        return {"status": "ok", "deleted": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Delete failed: {e}") from e
 
 
 async def get_assistant_id():
