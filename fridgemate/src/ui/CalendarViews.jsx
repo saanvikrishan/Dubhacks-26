@@ -13,7 +13,7 @@ import {
   timeKey,
 } from "../domain/calendar";
 import { importIcs } from "../domain/calendar";
-import { byId } from "../data/catalog";
+import { byId } from "../data/suggestions";
 
 const timeLabel = (value) =>
   new Intl.DateTimeFormat("en-US", {

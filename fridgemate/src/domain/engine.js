@@ -58,18 +58,21 @@ export function evaluate(meal, state, c = config) {
     );
   if (meal.mode === "cook") {
     if (!p.cooking) reasons.push("Cooking access is off.");
-    const missingEquipment = meal.equipment.filter(
-      (item) => !p.equipment.includes(item),
-    );
-    if (missingEquipment.length)
-      reasons.push(`Needs equipment: ${missingEquipment.join(", ")}.`);
-    const missing = meal.ingredients.filter(
-      (item) => !(pantry[item.name] >= item.grams),
-    );
-    if (missing.length)
-      reasons.push(
-        `Not enough confirmed ingredients: ${missing.map((item) => `${item.name} (${item.grams} g needed)`).join(", ")}.`,
+    const gemini = meal.nutrition?.kind === "gemini_suggestion";
+    if (!gemini) {
+      const missingEquipment = meal.equipment.filter(
+        (item) => !p.equipment.includes(item),
       );
+      if (missingEquipment.length)
+        reasons.push(`Needs equipment: ${missingEquipment.join(", ")}.`);
+      const missing = meal.ingredients.filter(
+        (item) => !(pantry[item.name] >= item.grams),
+      );
+      if (missing.length)
+        reasons.push(
+          `Not enough confirmed ingredients: ${missing.map((item) => `${item.name} (${item.grams} g needed)`).join(", ")}.`,
+        );
+    }
   }
   const parts = timeParts(meal, ctx);
   const unknownTime = Object.values(parts).some(
@@ -276,6 +279,25 @@ export function validateInputs(profile, context, pantry) {
 
 export function assertMealAction(meal, state, c = config) {
   requireCapability(meal.mode, c);
+  if (meal.nutrition?.kind === "gemini_suggestion") {
+    if (!state.profile.cooking)
+      throw new Error("Cooking access is off.");
+    const parts = timeParts(meal, state.context);
+    const duration = Object.values(parts).reduce((a, b) => a + b, 0);
+    return {
+      mealId: meal.id,
+      feasible: true,
+      reasons: [],
+      duration,
+      parts,
+      window: state.context.available,
+      score: null,
+      assumptions: ["Gemini suggestion · estimates only"],
+      gaps: [
+        "Nutrition, cost, and allergens are AI estimates—verify before cooking.",
+      ],
+    };
+  }
   const result = evaluate(meal, state, c);
   if (!result.feasible) throw new Error(result.reasons.join(" "));
   return result;

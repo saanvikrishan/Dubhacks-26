@@ -1,6 +1,6 @@
 import { config, requireCapability } from "./config.js";
 import { assertMealAction, validateInputs } from "./engine.js";
-import { byId } from "../data/catalog.js";
+import { byId } from "../data/suggestions.js";
 import { normalizeCalendarState, validateEvent } from "./calendar.js";
 
 export const today = () =>

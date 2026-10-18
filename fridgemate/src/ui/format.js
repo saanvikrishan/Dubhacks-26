@@ -9,8 +9,10 @@ export const niceTime = (t) => {
   return `${Math.floor(m / 60) % 12 || 12}:${String(m % 60).padStart(2, "0")} ${m >= 720 ? "PM" : "AM"}`;
 };
 export const photoFor = (meal) =>
-  meal.id.includes("pasta")
-    ? "pasta"
-    : meal.id.includes("chickpea")
-      ? "chickpeas"
-      : "tofu";
+  meal.photo === "pasta" || meal.photo === "chickpeas" || meal.photo === "tofu"
+    ? meal.photo
+    : meal.id.includes("pasta")
+      ? "pasta"
+      : meal.id.includes("chickpea")
+        ? "chickpeas"
+        : "tofu";

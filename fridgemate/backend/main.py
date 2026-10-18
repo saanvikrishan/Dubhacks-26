@@ -1,39 +1,67 @@
 import asyncio
 import json
 import os
+import re
+from datetime import date
+from pathlib import Path
 
 from backboard import BackboardClient
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from google import genai
+from pydantic import BaseModel, Field
 
-load_dotenv()
+ROOT = Path(__file__).resolve().parent
+# Prefer backend/.env, fall back to fridgemate/.env
+load_dotenv(ROOT / ".env")
+load_dotenv(ROOT.parent / ".env")
 
 app = FastAPI(title="FridgeMate API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-api_key = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+# Prefer 3.8; fall back when free-tier quota/503 hits so Cook still works.
+GEMINI_FALLBACKS = [
+    m
+    for m in [
+        GEMINI_MODEL,
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+    ]
+    if m
+]
+# de-dupe preserving order
+_seen = set()
+GEMINI_FALLBACKS = [
+    m for m in GEMINI_FALLBACKS if not (m in _seen or _seen.add(m))
+]
+api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
 client = genai.Client(api_key=api_key) if api_key else None
 
-backboard_key = os.getenv("BACKBOARD_API_KEY")
+backboard_key = (os.getenv("BACKBOARD_API_KEY") or "").strip()
 backboard_client = BackboardClient(api_key=backboard_key) if backboard_key else None
 _assistant_id = None
 DEMO_ASSISTANT_NAME = "FridgeMate demo"
+PHOTOS = {"tofu", "pasta", "chickpeas"}
 
 
 class RecipeRequest(BaseModel):
-    ingredients: list[str]
-    diet: str = "Anything"
+    ingredients: list[str] = Field(default_factory=list)
+    diet: str = "anything"
     time: int = 30
+    exclusions: list[str] = Field(default_factory=list)
 
 
 class PreferenceRequest(BaseModel):
@@ -43,7 +71,12 @@ class PreferenceRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return {"message": "FridgeMate API is running!"}
+    return {
+        "message": "FridgeMate API is running!",
+        "gemini": bool(client),
+        "backboard": bool(backboard_client),
+        "model": GEMINI_MODEL if client else None,
+    }
 
 
 async def get_assistant_id():
@@ -75,7 +108,7 @@ def require_backboard_client():
     if backboard_client is None:
         raise HTTPException(
             status_code=500,
-            detail="BACKBOARD_API_KEY is missing from backend/.env",
+            detail="BACKBOARD_API_KEY is missing from backend/.env or fridgemate/.env",
         )
 
 
@@ -124,6 +157,8 @@ async def list_preferences():
 
 def memory_contents(result):
     contents = []
+    if hasattr(result, "model_dump"):
+        result = result.model_dump()
     memories = result.get("memories") if isinstance(result, dict) else []
     for memory in memories or []:
         content = memory.get("content") if isinstance(memory, dict) else None
@@ -132,15 +167,114 @@ def memory_contents(result):
     return contents
 
 
+def slug(name: str, index: int) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", (name or "meal").lower()).strip("-")[:40]
+    return f"gemini-{base or 'meal'}-{index}"
+
+
+def pick_photo(raw: str | None, name: str, blob: str) -> str:
+    if raw in PHOTOS:
+        return raw
+    text = f"{name} {blob}".lower()
+    if "pasta" in text or "noodle" in text:
+        return "pasta"
+    if "chickpea" in text or "hummus" in text or "bean" in text:
+        return "chickpeas"
+    return "tofu"
+
+
+def normalize_ingredient(item) -> dict:
+    if isinstance(item, str):
+        return {"name": item[:60], "grams": 100}
+    name = str(item.get("name") or "ingredient")[:60]
+    grams = item.get("grams")
+    try:
+        grams = max(1, min(2000, int(grams)))
+    except (TypeError, ValueError):
+        grams = 100
+    return {"name": name, "grams": grams}
+
+
+def normalize_meal(raw: dict, index: int, fallback_ingredients: list[str]) -> dict:
+    name = str(raw.get("name") or f"Suggested meal {index + 1}")[:80]
+    description = str(
+        raw.get("description") or "An AI suggestion based on your groceries."
+    )[:240]
+    total = raw.get("time")
+    try:
+        total = max(5, min(120, int(total)))
+    except (TypeError, ValueError):
+        total = 25
+    prep = max(0, total // 3)
+    cook = max(0, total - prep)
+
+    ingredients = raw.get("ingredients") or []
+    mapped = [normalize_ingredient(i) for i in ingredients[:12]]
+    if not mapped and fallback_ingredients:
+        mapped = [{"name": n, "grams": 100} for n in fallback_ingredients[:6]]
+
+    steps = [str(s)[:200] for s in (raw.get("steps") or []) if s][:8]
+    diets = raw.get("diets") or ["anything"]
+    if isinstance(diets, str):
+        diets = [diets]
+    diets = [d for d in diets if d in ("anything", "vegetarian", "vegan")] or [
+        "anything"
+    ]
+    note = str(raw.get("nutrition_note") or "").strip()
+
+    return {
+        "id": slug(name, index),
+        "name": name,
+        "description": description,
+        "ingredients": mapped,
+        "cost": 4.5,
+        "portionGrams": 400,
+        "portionLabel": "1 serving",
+        "nutrition": {
+            "values": {
+                "energy_kcal": raw.get("energy_kcal") or 450,
+                "protein_g": raw.get("protein_g") or 18,
+                "carbohydrate_g": raw.get("carbohydrate_g") or 45,
+                "fat_g": raw.get("fat_g") or 14,
+                "fiber_g": raw.get("fiber_g") or 6,
+                "sodium_mg": raw.get("sodium_mg") or 400,
+            },
+            "basis": "per_serving",
+            "yieldServings": 1,
+            "kind": "gemini_suggestion",
+            "source": "Gemini via FridgeMate API · estimates only.",
+            "checkedAt": date.today().isoformat(),
+            "preparation": note
+            or "AI-estimated; confirm ingredients and allergens yourself.",
+        },
+        "timing": {"prep": prep, "cook": cook, "outbound": 0},
+        "diets": diets,
+        "allergens": list(raw.get("allergens") or [])[:8],
+        "equipment": [],
+        "steps": steps
+        or [
+            "Prep your ingredients.",
+            "Cook according to the recipe description.",
+            "Taste and adjust seasoning.",
+        ],
+        "mode": "cook",
+        "photo": pick_photo(raw.get("photo"), name, " ".join(steps)),
+        "suggestion": True,
+    }
+
+
 @app.post("/recipes")
 async def generate_recipes(request: RecipeRequest):
     if not client:
         raise HTTPException(
             status_code=500,
-            detail="GEMINI_API_KEY is missing from backend/.env",
+            detail="GEMINI_API_KEY is missing from backend/.env or fridgemate/.env",
         )
 
-    ingredients = ", ".join(request.ingredients)
+    cleaned = [str(i).strip()[:60] for i in request.ingredients if str(i).strip()][
+        :30
+    ]
+    ingredients = ", ".join(cleaned) if cleaned else "common pantry staples"
     known_preferences = ""
     if backboard_client is not None:
         assistant_id = await get_assistant_id()
@@ -162,53 +296,96 @@ async def generate_recipes(request: RecipeRequest):
             except Exception as e:
                 print("Backboard error:", str(e))
 
+    exclusions = ", ".join(request.exclusions) if request.exclusions else "none"
     prompt = f"""
-    You are FridgeMate, a practical cooking assistant for college students.
+You are FridgeMate, a practical cooking assistant for college students.
 
-    Available ingredients: {ingredients}
-    Dietary preference: {request.diet}
-    Maximum cooking time: {request.time} minutes
-    """
+Available ingredients: {ingredients}
+Dietary preference: {request.diet}
+Avoid: {exclusions}
+Maximum cooking time: {request.time} minutes
+"""
     if known_preferences:
         prompt += f"""
-    Known preferences:
-    {known_preferences}
-    Follow these preferences. Do not suggest food that conflicts with them.
-    """
+Known preferences from memory:
+{known_preferences}
+Follow these preferences. Do not suggest food that conflicts with them.
+"""
     prompt += """
-    Suggest 3 realistic recipes using these ingredients.
-    Prioritize using ingredients that might otherwise go to waste.
-    Keep recipes affordable, beginner-friendly, and healthy.
-    Mention any extra ingredients needed rather than pretending
-    the user already has them.
+Suggest 6 realistic recipes using these ingredients when possible.
+Prioritize using ingredients that might otherwise go to waste.
+Keep recipes affordable, beginner-friendly, and healthy.
+Mention any extra ingredients needed rather than pretending the user already has them.
 
-    Return valid JSON only, in this format:
+Return valid JSON only:
+{
+  "recipes": [
     {
-      "recipes": [
-        {
-          "name": "Recipe name",
-          "description": "Short description",
-          "time": 20,
-          "ingredients": ["ingredient 1", "ingredient 2"],
-          "steps": ["Step 1", "Step 2"],
-          "nutrition_note": "Brief, cautious nutrition note"
-        }
-      ]
+      "name": "Recipe name",
+      "description": "Short description",
+      "time": 20,
+      "ingredients": ["ingredient 1", "ingredient 2"],
+      "steps": ["Step 1", "Step 2"],
+      "nutrition_note": "Brief, cautious nutrition note",
+      "photo": "tofu",
+      "diets": ["vegetarian"],
+      "allergens": [],
+      "energy_kcal": 450,
+      "protein_g": 20
     }
-    """
+  ]
+}
 
-    try:
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model="gemini-3.8-flash",
-            contents=prompt,
-            config={"response_mime_type": "application/json"},
-        )
-        return json.loads(response.text)
+photo must be one of: tofu, pasta, chickpeas (closest visual match).
+"""
 
-    except Exception as e:
-        print("Gemini error:", str(e))
+    last_error = None
+    for model in GEMINI_FALLBACKS:
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=model,
+                contents=prompt,
+                config={"response_mime_type": "application/json"},
+            )
+            parsed = json.loads(response.text or "{}")
+            recipes = parsed.get("recipes") if isinstance(parsed, dict) else None
+            if not isinstance(recipes, list) or not recipes:
+                raise ValueError("No recipes in model response")
+            meals = [
+                normalize_meal(r if isinstance(r, dict) else {}, i, cleaned)
+                for i, r in enumerate(recipes[:8])
+            ]
+            if model != GEMINI_MODEL:
+                print(f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)")
+            return {
+                "meals": meals,
+                "recipes": meals,
+                "ingredients": cleaned,
+                "model": model,
+            }
+        except Exception as e:
+            last_error = e
+            msg = str(e)
+            print(f"Gemini error ({model}):", msg)
+            # Try next model on quota / overload; otherwise stop.
+            if not any(
+                code in msg
+                for code in ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "high demand")
+            ):
+                break
+
+    err = str(last_error or "unknown error")
+    if "429" in err or "RESOURCE_EXHAUSTED" in err:
         raise HTTPException(
-            status_code=502,
-            detail="Recipe generation failed. Check the backend terminal.",
+            status_code=429,
+            detail=(
+                "Gemini free-tier quota for this key is used up "
+                f"(tried: {', '.join(GEMINI_FALLBACKS)}). "
+                "Wait for reset, enable billing, or use another GEMINI_API_KEY."
+            ),
         )
+    raise HTTPException(
+        status_code=502,
+        detail=f"Recipe generation failed: {err[:240]}",
+    )
