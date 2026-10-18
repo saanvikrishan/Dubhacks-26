@@ -1486,6 +1486,9 @@ async def vision_ingredients(photo: UploadFile = File(...)):
 _GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 _GCAL_REDIRECT = "http://localhost:8000/google-calendar/callback/"
 _gcal_tokens: dict = {}
+# One Flow per in-progress sign-in. The PKCE code_verifier lives on that
+# object and must be the same one used when the auth URL was built.
+_gcal_flows: dict = {}
 
 
 def _gcal_flow():
@@ -1518,19 +1521,36 @@ def _gcal_flow():
 @app.get("/google-calendar/auth-url")
 def gcal_auth_url():
     flow = _gcal_flow()
-    url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+    url, state = flow.authorization_url(access_type="offline", prompt="consent")
+    _gcal_flows[state] = flow
     return {"url": url}
 
 
+def _gcal_error(status: int, detail: str):
+    from fastapi.responses import JSONResponse  # type: ignore
+    return JSONResponse(status_code=status, content={"detail": detail})
+
+
 @app.get("/google-calendar/callback")
-def gcal_callback(code: str):
+def gcal_callback(code: str = "", state: str = ""):
     from fastapi.responses import HTMLResponse  # type: ignore
-    flow = _gcal_flow()
-    flow.fetch_token(code=code)
-    creds = flow.credentials
-    _gcal_tokens["access_token"] = creds.token
-    _gcal_tokens["refresh_token"] = creds.refresh_token
-    _gcal_tokens["connected"] = True
+    flow = _gcal_flows.pop(state, None) if state else None
+    if flow is None:
+        return _gcal_error(
+            400,
+            "Google sign-in expired or the state did not match. Start the connection again.",
+        )
+    try:
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        _gcal_tokens["access_token"] = creds.token
+        _gcal_tokens["refresh_token"] = creds.refresh_token
+        _gcal_tokens["connected"] = True
+    except Exception as e:
+        message = str(e)
+        if "secret" in message.lower():
+            message = type(e).__name__
+        return _gcal_error(400, message or type(e).__name__)
     return HTMLResponse("""<!doctype html><html><body><script>
 if(window.opener){window.opener.postMessage({type:'gcal-connected'},'http://localhost:5173');window.close();}
 else{document.write('<p>Connected! Close this tab.</p>');}
@@ -1733,3 +1753,72 @@ async def sync_meal_plans(request: SyncMealPlansRequest):
             pass  # photon_plans table may not exist until daemon runs ensureTables
 
     return {"status": "ok", "inserted": inserted}
+
+
+class SyncScheduleEventsRequest(BaseModel):
+    user_id: str = Field(default="demo")
+    events: list[dict]
+
+
+@app.post("/sync-schedule-events")
+async def sync_schedule_events(request: SyncScheduleEventsRequest):
+    """
+    Upsert calendar events into photon_plans so the reminder daemon can text
+    for any source, not only meal slots. Keyed by source:eventId:YYYY-MM-DD.
+    """
+    if not store.SessionLocal:
+        return {"status": "local_only", "upserted": 0,
+                "message": "DATABASE_URL not set — events not written to Postgres."}
+
+    from sqlalchemy import text as sql_text
+
+    upserted = 0
+    skipped = 0
+    with store.SessionLocal() as conn:
+        for event in request.events or []:
+            event_id = str(event.get("id") or "").strip()
+            name = str(event.get("name") or "").strip()
+            meal_date = str(event.get("date") or "").strip()
+            meal_time = str(event.get("time") or "").strip()
+            source = str(event.get("source") or "").strip()
+            if (
+                not event_id or not name or not source
+                or not re.match(r"^\d{4}-\d{2}-\d{2}$", meal_date)
+                or not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", meal_time)
+            ):
+                skipped += 1
+                continue
+            event_key = f"{source}:{event_id}:{meal_date}"
+            try:
+                conn.execute(
+                    sql_text(
+                        """
+                        INSERT INTO photon_plans
+                            (user_id, meal_name, meal_date, meal_time, meal_id, event_key)
+                        VALUES (:uid, :name, :date, :time, NULL, :key)
+                        ON CONFLICT (user_id, event_key) WHERE event_key IS NOT NULL
+                        DO UPDATE SET
+                            meal_name = EXCLUDED.meal_name,
+                            meal_time = EXCLUDED.meal_time
+                        """
+                    ),
+                    {
+                        "uid": request.user_id or "demo",
+                        "name": name,
+                        "date": meal_date,
+                        "time": meal_time,
+                        "key": event_key,
+                    },
+                )
+                upserted += 1
+            except Exception as e:
+                print(f"sync-schedule-events upsert error for {event_key}: {e}")
+                skipped += 1
+        try:
+            conn.commit()
+        except Exception as e:
+            print(f"sync-schedule-events commit error: {e}")
+            return {"status": "error", "upserted": 0, "skipped": skipped,
+                    "detail": "Could not save schedule events."}
+
+    return {"status": "ok", "upserted": upserted, "skipped": skipped}

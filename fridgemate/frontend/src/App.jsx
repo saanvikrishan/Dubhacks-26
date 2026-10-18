@@ -26,6 +26,7 @@ import { capabilities } from "./domain/config";
 import { clockTime, minutes } from "./domain/engine";
 import { dailyNutrition } from "./domain/nutrition";
 import {
+  dayKey,
   localInstant,
   nextMealWindow,
   prettyDate,
@@ -138,7 +139,36 @@ export default function App() {
       removeLog: "Meal log removed. Your intake has been recalculated.",
     };
     if (messages[action.type]) setNotice(messages[action.type]);
+    if (action.type === "saveEvent") {
+      const saved = next.events.find((e) => e.id === action.event.id);
+      if (saved) await syncScheduleEvents([saved]);
+    }
+    if (action.type === "importCalendar") {
+      await syncScheduleEvents(next.events.filter((e) => e.source === action.source));
+    }
     return next;
+  }
+  async function syncScheduleEvents(events) {
+    const payload = events
+      .filter((event) => event && !event.allDay && event.id && event.title?.trim())
+      .map((event) => ({
+        id: event.id,
+        name: event.title.trim(),
+        date: dayKey(event.start),
+        time: timeKey(event.start),
+        source: event.source || "manual",
+      }))
+      .filter((event) => /^([01]\d|2[0-3]):[0-5]\d$/.test(event.time));
+    if (!payload.length) return;
+    try {
+      await fetch("http://127.0.0.1:8000/sync-schedule-events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: "demo", events: payload }),
+      });
+    } catch {
+      /* backend unreachable — the calendar save itself already succeeded */
+    }
   }
   async function safe(action) {
     try {
