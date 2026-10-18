@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { catalog, byId, pantryItems } from "../data/catalog";
+import { catalog, pantryItems } from "../data/catalog";
+import { byId } from "../data/suggestions";
 import { capabilities, config } from "../domain/config";
 import { clockTime, evaluate, minutes, timeParts } from "../domain/engine";
 import {
@@ -11,7 +12,7 @@ import {
 import { money, num, niceTime } from "./format";
 import { today } from "../domain/state";
 
-import { interpretFoodRequest } from "../adapters/assistant";
+import { interpretFoodRequest, replyFromPatch } from "../adapters/assistant";
 
 const flags = capabilities();
 const modeName = (mode) => (mode === "cook" ? "Cook at home" : "Eat out");
@@ -209,6 +210,24 @@ function Confirm({ title, onClose, onConfirm, button, children }) {
   );
 }
 function ContextFields({ value, onChange }) {
+  // Helper to ensure time is in 24-hour HH:MM format
+  const normalizeTime = (timeStr) => {
+    if (!timeStr) return timeStr;
+    // If already in HH:MM format, return as-is
+    if (/^\d{2}:\d{2}$/.test(timeStr)) return timeStr;
+    // If has AM/PM, convert to 24-hour
+    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (match) {
+      let hours = parseInt(match[1]);
+      const minutes = match[2];
+      const period = match[3].toUpperCase();
+      if (period === 'PM' && hours !== 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
+      return `${hours.toString().padStart(2, '0')}:${minutes}`;
+    }
+    return timeStr;
+  };
+
   const field = (key, label, type = "number", min = 0, max = 240) => (
     <label>
       {label}
@@ -218,17 +237,38 @@ function ContextFields({ value, onChange }) {
         min={min}
         max={max}
         required={key !== "service"}
-        onChange={(e) =>
-          onChange({
-            ...value,
-            [key]:
-              type === "number"
-                ? e.target.value === "" && key === "service"
-                  ? null
-                  : Number(e.target.value)
-                : e.target.value,
-          })
-        }
+        onChange={(e) => {
+          let newValue = type === "number"
+            ? e.target.value === "" && key === "service"
+              ? null
+              : Number(e.target.value)
+            : e.target.value;
+          
+          // Normalize time values to 24-hour format
+          if (type === "time" && newValue) {
+            newValue = normalizeTime(newValue);
+          }
+          
+          const updated = { ...value, [key]: newValue };
+          
+          // Auto-adjust available window when start or commitment time changes
+          if ((key === "start" || key === "commitmentTime") && updated.start && updated.commitmentTime) {
+            const normalizedStart = normalizeTime(updated.start);
+            const normalizedCommitment = normalizeTime(updated.commitmentTime);
+            if (normalizedStart && normalizedCommitment) {
+              const startMinutes = parseInt(normalizedStart.split(':')[0]) * 60 + parseInt(normalizedStart.split(':')[1]);
+              const commitmentMinutes = parseInt(normalizedCommitment.split(':')[0]) * 60 + parseInt(normalizedCommitment.split(':')[1]);
+              const calculatedWindow = commitmentMinutes - startMinutes;
+              if (calculatedWindow > 0) {
+                updated.available = calculatedWindow;
+                updated.start = normalizedStart;
+                updated.commitmentTime = normalizedCommitment;
+              }
+            }
+          }
+          
+          onChange(updated);
+        }}
       />
     </label>
   );
@@ -284,12 +324,12 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
       wide
     >
       <form
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           try {
-            onSave(
+            await onSave(
               timeOnly
-                ? { type: "updateContext", context }
+                ? { type: "updateContext", context: { ...context, manuallySet: true } }
                 : flags.manualSchedule.available
                   ? { type: "configure", profile, context }
                   : { type: "updateProfile", profile },
@@ -781,10 +821,10 @@ function Kitchen({ state, onSave, onSaved }) {
         leaves inventory as entered.
       </p>
       <form
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           try {
-            onSave({ type: "updatePantry", pantry });
+            await onSave({ type: "updatePantry", pantry });
             setSaved(true);
             setError("");
             onSaved?.(pantry);
@@ -971,7 +1011,7 @@ function Assistant({ state, onAction, onClose }) {
   return (
     <Modal title="Your food assistant" onClose={onClose}>
       <p className="fine-print">
-        Simple local commands · AI and Photon are not connected.
+        Simple local commands · AI is connected. Photon is not connected.
       </p>
       <div className="chat-messages" aria-live="polite">
         {messages.map((msg, i) => (
@@ -1006,16 +1046,84 @@ function Assistant({ state, onAction, onClose }) {
       </div>
       <form
         className="chat-form"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
-          if (!text.trim()) return;
+          const sent = text.trim();
+          if (!sent) return;
+          let response;
           try {
-            const response = interpretFoodRequest(text, state, catalog);
-            setMessages([...messages, { user: true, message: text }, response]);
-            setText("");
-            setError("");
+            response = interpretFoodRequest(sent, state, catalog);
           } catch (err) {
             setError(err.message);
+            return;
+          }
+          if (!response.unrecognized) {
+            setMessages((prev) => [
+              ...prev,
+              { user: true, message: sent },
+              response,
+            ]);
+            setText("");
+            setError("");
+            return;
+          }
+          setMessages((prev) => [
+            ...prev,
+            { user: true, message: sent },
+            { message: "Checking that…", pending: true },
+          ]);
+          setText("");
+          setError("");
+          try {
+            const res = await fetch("/api/recipes", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: sent, memories: [] }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              const detail =
+                typeof data.detail === "string"
+                  ? data.detail
+                  : Array.isArray(data.detail)
+                    ? data.detail.map((item) => item.msg || item).join(" ")
+                    : data.error || "Could not interpret that request.";
+              setMessages((prev) => prev.filter((item) => !item.pending));
+              setError(detail);
+              return;
+            }
+            const reply = replyFromPatch(data, state, catalog);
+            setMessages((prev) => [
+              ...prev.filter((item) => !item.pending),
+              reply,
+            ]);
+            const summary = reply.message;
+            if (typeof summary === "string" && summary) {
+              try {
+                const phrased = await fetch("/api/recipes/phrase", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ summary }),
+                  signal: AbortSignal.timeout(25000),
+                });
+                const phraseData = await phrased.json().catch(() => ({}));
+                const text =
+                  phrased.ok && typeof phraseData.text === "string"
+                    ? phraseData.text.trim()
+                    : "";
+                if (text)
+                  setMessages((prev) =>
+                    prev.map((item) =>
+                      item === reply ? { ...item, message: text } : item,
+                    ),
+                  );
+              } catch {
+                // Keep the templated reply already on screen.
+              }
+            }
+          } catch (err) {
+            setMessages((prev) => prev.filter((item) => !item.pending));
+            setError(err.message || "Could not interpret that request.");
           }
         }}
       >
@@ -1054,10 +1162,10 @@ function Log({ data, onClose, onSave, onLogged }) {
       onClose={onClose}
     >
       <form
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           try {
-            onSave({
+            await onSave({
               type: data.log ? "editLog" : "log",
               id: data.id,
               mealId: data.meal.id,

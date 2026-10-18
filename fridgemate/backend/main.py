@@ -1,39 +1,207 @@
 import asyncio
 import json
 import os
+import re
+import time
+from datetime import date
+from pathlib import Path
 
 from backboard import BackboardClient
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from google import genai
+from google.genai import types
+from pydantic import BaseModel, Field
 
-load_dotenv()
+import db as store
+
+ROOT = Path(__file__).resolve().parent
+# Prefer backend/.env, fall back to fridgemate/.env
+load_dotenv(ROOT / ".env")
+load_dotenv(ROOT.parent / ".env")
 
 app = FastAPI(title="FridgeMate API")
 
+DEMO_USER_ID = os.getenv("DAYWELL_USER_ID", "demo").strip() or "demo"
+
+
+@app.on_event("startup")
+def on_startup():
+    try:
+        ready = store.init_db()
+        print(
+            f"[Startup] PostgreSQL/Tiger Data: {'connected' if ready else 'not configured (set DATABASE_URL)'}"
+        )
+    except Exception as e:
+        print(f"[Startup] Database init failed: {type(e).__name__}: {e}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-api_key = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+# Prefer 3.8; fall back when free-tier quota/503 hits so Cook still works.
+GEMINI_FALLBACKS = [
+    m
+    for m in [
+        GEMINI_MODEL,
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+    ]
+    if m
+]
+# de-dupe preserving order
+_seen = set()
+GEMINI_FALLBACKS = [
+    m for m in GEMINI_FALLBACKS if not (m in _seen or _seen.add(m))
+]
+api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
 client = genai.Client(api_key=api_key) if api_key else None
 
-backboard_key = os.getenv("BACKBOARD_API_KEY")
+backboard_key = (os.getenv("BACKBOARD_API_KEY") or "").strip()
 backboard_client = BackboardClient(api_key=backboard_key) if backboard_key else None
 _assistant_id = None
 DEMO_ASSISTANT_NAME = "FridgeMate demo"
+PHOTOS = {"tofu", "pasta", "chickpeas"}
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+}
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+def gemini_transient(msg: str) -> bool:
+    return any(
+        code in msg
+        for code in (
+            "429",
+            "RESOURCE_EXHAUSTED",
+            "503",
+            "UNAVAILABLE",
+            "high demand",
+        )
+    )
+
+
+def normalize_ingredient_names(raw_list) -> list[str]:
+    out = []
+    seen = set()
+    for item in raw_list or []:
+        name = str(item).strip().replace("\n", " ")[:60]
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+        if len(out) >= 30:
+            break
+    return out
+
+
+INJECTION_PATTERNS = (
+    "ignore previous instructions",
+    "ignore all previous",
+    "ignore all instructions",
+    "reveal your system prompt",
+    "system prompt",
+    "you are now",
+    "api key",
+    "api_key",
+)
+MEAL_ONLY = (
+    "I can only help with meal planning — try asking about ingredients, time, or budget."
+)
+RATE_LIMIT = 20
+RATE_WINDOW_SECONDS = 60
+_request_times: list[float] = []
+_LEAK = re.compile(
+    r"AIza[0-9A-Za-z_\-]{20,}|sk-[A-Za-z0-9]{16,}|"
+    r"system prompt|gemini|backboard|model:",
+    re.IGNORECASE,
+)
+
+
+def enforce_rate_limit():
+    now = time.monotonic()
+    cutoff = now - RATE_WINDOW_SECONDS
+    while _request_times and _request_times[0] < cutoff:
+        _request_times.pop(0)
+    if len(_request_times) >= RATE_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many meal requests. Please wait a minute and try again.",
+        )
+    _request_times.append(now)
+
+
+def blocked_user_text(text: str) -> bool:
+    lowered = text.lower()
+    return any(pattern in lowered for pattern in INJECTION_PATTERNS)
+
+
+def reject_blocked_text():
+    print("Blocked prompt injection; Gemini was not called.")
+    raise HTTPException(status_code=400, detail=MEAL_ONLY)
+
+
+def redact_text(value: str) -> str:
+    cleaned = _LEAK.sub("", value)
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+
+
+def redact_output(value):
+    if isinstance(value, str):
+        return redact_text(value)
+    if isinstance(value, list):
+        return [redact_output(item) for item in value]
+    if isinstance(value, dict):
+        return {key: redact_output(item) for key, item in value.items()}
+    return value
+
+
+def raise_gemini_failure(last_error, action: str):
+    err = str(last_error or "unknown error")
+    if "429" in err or "RESOURCE_EXHAUSTED" in err:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Gemini free-tier quota for this key is used up "
+                f"(tried: {', '.join(GEMINI_FALLBACKS)}). "
+                "Wait for reset, enable billing, or use another GEMINI_API_KEY."
+            ),
+        )
+    raise HTTPException(
+        status_code=502,
+        detail=f"{action} failed: {err[:240]}",
+    )
 
 
 class RecipeRequest(BaseModel):
-    ingredients: list[str]
-    diet: str = "Anything"
+    ingredients: list[str] = Field(default_factory=list)
+    diet: str = "anything"
     time: int = 30
+    exclusions: list[str] = Field(default_factory=list)
+    text: str | None = None
+    memories: list[str] = Field(default_factory=list)
+
+
+class PhraseRequest(BaseModel):
+    summary: str
 
 
 class PreferenceRequest(BaseModel):
@@ -41,9 +209,105 @@ class PreferenceRequest(BaseModel):
     metadata: dict | None = None
 
 
+class PantryItemIn(BaseModel):
+    name: str
+    grams: float = 500
+    expires_on: str | None = None
+
+
+class PantryReplaceRequest(BaseModel):
+    items: list[PantryItemIn] = Field(default_factory=list)
+    user_id: str = DEMO_USER_ID
+
+
+class SavedMealRequest(BaseModel):
+    meal: dict
+    user_id: str = DEMO_USER_ID
+
+
 @app.get("/")
 def home():
-    return {"message": "FridgeMate API is running!"}
+    return {
+        "message": "FridgeMate API is running!",
+        "gemini": bool(client),
+        "backboard": bool(backboard_client),
+        "database": store.SessionLocal is not None,
+        "model": GEMINI_MODEL if client else None,
+    }
+
+
+@app.get("/pantry")
+def get_pantry(user_id: str = DEMO_USER_ID):
+    if not store.SessionLocal:
+        return {"items": [], "status": "local_only"}
+    try:
+        return {"items": store.list_pantry(user_id), "status": "ok"}
+    except Exception as e:
+        print(f"Pantry list error: {e}")
+        raise HTTPException(status_code=502, detail=f"Pantry read failed: {e}") from e
+
+
+@app.put("/pantry")
+def put_pantry(request: PantryReplaceRequest):
+    if not store.SessionLocal:
+        return {
+            "items": [i.model_dump() for i in request.items],
+            "status": "local_only",
+            "message": "DATABASE_URL not set — pantry kept in the browser only.",
+        }
+    try:
+        items = store.replace_pantry(
+            [i.model_dump() for i in request.items],
+            user_id=request.user_id or DEMO_USER_ID,
+        )
+        return {"items": items, "status": "ok"}
+    except Exception as e:
+        print(f"Pantry save error: {e}")
+        raise HTTPException(status_code=502, detail=f"Pantry save failed: {e}") from e
+
+
+@app.get("/saved-meals")
+def get_saved_meals(user_id: str = DEMO_USER_ID):
+    if not store.SessionLocal:
+        return {"meals": [], "status": "local_only"}
+    try:
+        return {"meals": store.list_saved_meals(user_id), "status": "ok"}
+    except Exception as e:
+        print(f"Saved meals list error: {e}")
+        raise HTTPException(status_code=502, detail=f"Saved meals read failed: {e}") from e
+
+
+@app.post("/saved-meals")
+def post_saved_meal(request: SavedMealRequest):
+    if not store.SessionLocal:
+        return {
+            "status": "local_only",
+            "message": "DATABASE_URL not set — meal not persisted to Postgres.",
+            "meal": request.meal,
+        }
+    try:
+        saved = store.save_meal(request.meal, user_id=request.user_id or DEMO_USER_ID)
+        return {"status": "ok", "meal": saved}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        print(f"Saved meal error: {e}")
+        raise HTTPException(status_code=502, detail=f"Save meal failed: {e}") from e
+
+
+@app.delete("/saved-meals/{row_id}")
+def remove_saved_meal(row_id: int, user_id: str = DEMO_USER_ID):
+    if not store.SessionLocal:
+        return {"status": "local_only", "deleted": False}
+    try:
+        ok = store.delete_saved_meal(row_id, user_id=user_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Saved meal not found.")
+        return {"status": "ok", "deleted": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Delete failed: {e}") from e
 
 
 async def get_assistant_id():
@@ -67,7 +331,9 @@ async def get_assistant_id():
         _assistant_id = str(created.assistant_id)
         return _assistant_id
     except Exception as e:
-        print("Backboard error:", str(e))
+        print(f"Backboard error (detailed): {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -75,55 +341,62 @@ def require_backboard_client():
     if backboard_client is None:
         raise HTTPException(
             status_code=500,
-            detail="BACKBOARD_API_KEY is missing from backend/.env",
+            detail="BACKBOARD_API_KEY is missing from backend/.env or fridgemate/.env",
         )
 
 
 @app.post("/preferences")
 async def store_preference(request: PreferenceRequest):
-    require_backboard_client()
+    if backboard_client is None:
+        # Return success but don't actually store to Backboard
+        print("[Warning] Backboard client not available, preference not stored")
+        return {"status": "local_only", "message": "Saved locally only"}
+    
     assistant_id = await get_assistant_id()
     if not assistant_id:
-        raise HTTPException(
-            status_code=502,
-            detail="Preference storage failed. Check the backend terminal.",
-        )
+        print("[Warning] Could not get assistant ID, preference not stored")
+        return {"status": "local_only", "message": "Saved locally only"}
+    
     try:
-        return await backboard_client.add_memory(
+        result = await backboard_client.add_memory(
             assistant_id,
             request.content,
             metadata=request.metadata,
         )
+        print(f"[Success] Preference stored to Backboard")
+        return result
     except Exception as e:
-        print("Backboard error:", str(e))
-        raise HTTPException(
-            status_code=502,
-            detail="Preference storage failed. Check the backend terminal.",
-        )
+        print(f"Backboard add_memory error (detailed): {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # Don't raise an error - just return that it's saved locally
+        return {"status": "local_only", "message": "Saved locally only", "error": str(e)}
 
 
 @app.get("/preferences")
 async def list_preferences():
-    require_backboard_client()
+    if backboard_client is None:
+        # Return empty memories if Backboard not available
+        return {"memories": []}
+    
     assistant_id = await get_assistant_id()
     if not assistant_id:
-        raise HTTPException(
-            status_code=502,
-            detail="Preference lookup failed. Check the backend terminal.",
-        )
+        # Return empty memories if can't get assistant ID
+        return {"memories": []}
+    
     try:
         memories = await backboard_client.get_memories(assistant_id)
         return memories.model_dump()
     except Exception as e:
-        print("Backboard error:", str(e))
-        raise HTTPException(
-            status_code=502,
-            detail="Preference lookup failed. Check the backend terminal.",
-        )
+        print(f"Backboard get_memories error: {type(e).__name__}: {str(e)}")
+        # Return empty memories on error
+        return {"memories": []}
 
 
 def memory_contents(result):
     contents = []
+    if hasattr(result, "model_dump"):
+        result = result.model_dump()
     memories = result.get("memories") if isinstance(result, dict) else []
     for memory in memories or []:
         content = memory.get("content") if isinstance(memory, dict) else None
@@ -132,15 +405,450 @@ def memory_contents(result):
     return contents
 
 
-@app.post("/recipes")
-async def generate_recipes(request: RecipeRequest):
+def slug(name: str, index: int) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", (name or "meal").lower()).strip("-")[:40]
+    return f"gemini-{base or 'meal'}-{index}"
+
+
+def pick_photo(raw: str | None, name: str, blob: str) -> str:
+    if raw in PHOTOS:
+        return raw
+    text = f"{name} {blob}".lower()
+    if "pasta" in text or "noodle" in text:
+        return "pasta"
+    if "chickpea" in text or "hummus" in text or "bean" in text:
+        return "chickpeas"
+    return "tofu"
+
+
+def normalize_ingredient(item) -> dict:
+    if isinstance(item, str):
+        return {"name": item[:60], "grams": 100}
+    name = str(item.get("name") or "ingredient")[:60]
+    grams = item.get("grams")
+    try:
+        grams = max(1, min(2000, int(grams)))
+    except (TypeError, ValueError):
+        grams = 100
+    return {"name": name, "grams": grams}
+
+
+def normalize_meal(raw: dict, index: int, fallback_ingredients: list[str]) -> dict:
+    name = str(raw.get("name") or f"Suggested meal {index + 1}")[:80]
+    description = str(
+        raw.get("description") or "An AI suggestion based on your groceries."
+    )[:240]
+    total = raw.get("time")
+    try:
+        total = max(5, min(120, int(total)))
+    except (TypeError, ValueError):
+        total = 25
+    prep = max(0, total // 3)
+    cook = max(0, total - prep)
+
+    ingredients = raw.get("ingredients") or []
+    mapped = [normalize_ingredient(i) for i in ingredients[:12]]
+    if not mapped and fallback_ingredients:
+        mapped = [{"name": n, "grams": 100} for n in fallback_ingredients[:6]]
+
+    steps = [str(s)[:200] for s in (raw.get("steps") or []) if s][:8]
+    diets = raw.get("diets") or ["anything"]
+    if isinstance(diets, str):
+        diets = [diets]
+    diets = [d for d in diets if d in ("anything", "vegetarian", "vegan")] or [
+        "anything"
+    ]
+    note = str(raw.get("nutrition_note") or "").strip()
+
+    return {
+        "id": slug(name, index),
+        "name": name,
+        "description": description,
+        "ingredients": mapped,
+        "cost": 4.5,
+        "portionGrams": 400,
+        "portionLabel": "1 serving",
+        "nutrition": {
+            "values": {
+                "energy_kcal": raw.get("energy_kcal") or 450,
+                "protein_g": raw.get("protein_g") or 18,
+                "carbohydrate_g": raw.get("carbohydrate_g") or 45,
+                "fat_g": raw.get("fat_g") or 14,
+                "fiber_g": raw.get("fiber_g") or 6,
+                "sodium_mg": raw.get("sodium_mg") or 400,
+            },
+            "basis": "per_serving",
+            "yieldServings": 1,
+            "kind": "gemini_suggestion",
+            "source": "Gemini via FridgeMate API · estimates only.",
+            "checkedAt": date.today().isoformat(),
+            "preparation": note
+            or "AI-estimated; confirm ingredients and allergens yourself.",
+        },
+        "timing": {"prep": prep, "cook": cook, "outbound": 0},
+        "diets": diets,
+        "allergens": list(raw.get("allergens") or [])[:8],
+        "equipment": [],
+        "steps": steps
+        or [
+            "Prep your ingredients.",
+            "Cook according to the recipe description.",
+            "Taste and adjust seasoning.",
+        ],
+        "mode": "cook",
+        "photo": pick_photo(raw.get("photo"), name, " ".join(steps)),
+        "suggestion": True,
+    }
+
+
+MODES = {"compare", "cook", "eatOut"}
+SORTS = {"catalog", "time", "cost", "protein"}
+DIETS = {"anything", "vegetarian", "vegan"}
+EXCLUSIONS = {
+    "soy",
+    "egg",
+    "milk",
+    "wheat",
+    "peanut",
+    "tree nut",
+    "sesame",
+    "fish",
+    "shellfish",
+}
+EQUIPMENT = {"stove", "pan", "pot"}
+PATCH_KEYS = ("mode", "sort", "passed", "profile", "context", "pantry", "unparsed")
+PROFILE_KEYS = ("diet", "exclusions", "preferred", "budget", "cooking", "equipment")
+CATALOG_PATH = ROOT.parent / "src" / "data" / "catalog.js"
+
+
+def reject_patch(detail: str):
+    raise HTTPException(status_code=502, detail=detail)
+
+
+def catalog_ingredient_names() -> set[str]:
+    text = CATALOG_PATH.read_text(encoding="utf-8")
+    return set(re.findall(r'ingredient\(\s*"([^"]+)"', text))
+
+
+def is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def pantry_grams(value):
+    if isinstance(value, dict):
+        value = value.get("grams")
+    if isinstance(value, str):
+        cleaned = value.strip().lower().removesuffix("g").strip()
+        try:
+            value = float(cleaned) if "." in cleaned else int(cleaned)
+        except ValueError:
+            return None
+    if is_number(value) and value >= 0:
+        return value
+    return None
+
+
+def string_list(value, label: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        reject_patch(f"Gemini returned an invalid {label} list.")
+    return value
+
+
+def validate_patch(raw, names: set[str]) -> dict:
+    if not isinstance(raw, dict):
+        reject_patch("Gemini returned a non-object patch.")
+    for key in PATCH_KEYS:
+        if key not in raw:
+            reject_patch(f"Gemini omitted {key}.")
+    mode, sort = raw["mode"], raw["sort"]
+    if mode is not None and mode not in MODES:
+        reject_patch("Gemini returned an invalid mode.")
+    if sort is not None and sort not in SORTS:
+        reject_patch("Gemini returned an invalid sort.")
+    passed = string_list(raw["passed"], "passed")
+    unparsed = string_list(raw["unparsed"], "unparsed")
+
+    profile = raw["profile"]
+    if profile is None:
+        profile = {key: None for key in PROFILE_KEYS}
+    elif not isinstance(profile, dict):
+        reject_patch("Gemini returned an invalid profile.")
+    else:
+        profile = {key: profile.get(key) for key in PROFILE_KEYS}
+    diet = profile["diet"]
+    if diet is not None and diet not in DIETS:
+        reject_patch("Gemini returned an invalid diet.")
+    exclusions = profile["exclusions"]
+    if exclusions is not None:
+        if (
+            not isinstance(exclusions, list)
+            or not all(isinstance(item, str) and item in EXCLUSIONS for item in exclusions)
+        ):
+            reject_patch("Gemini returned an invalid exclusion.")
+    preferred = profile["preferred"]
+    if preferred is not None and not isinstance(preferred, str):
+        reject_patch("Gemini returned an invalid preferred value.")
+    budget = profile["budget"]
+    if budget is not None and (not is_number(budget) or budget < 0 or budget > 1000):
+        reject_patch("Gemini returned an invalid budget.")
+    cooking = profile["cooking"]
+    if cooking is not None and not isinstance(cooking, bool):
+        reject_patch("Gemini returned an invalid cooking value.")
+    equipment = profile["equipment"]
+    if equipment is not None and (
+        not isinstance(equipment, list)
+        or not all(isinstance(item, str) and item in EQUIPMENT for item in equipment)
+    ):
+        reject_patch("Gemini returned an invalid equipment list.")
+
+    context = raw["context"]
+    if context is None:
+        context = {"available": None}
+    elif not isinstance(context, dict):
+        reject_patch("Gemini returned an invalid context.")
+    else:
+        available = context.get("available")
+        if available is not None and (
+            isinstance(available, bool)
+            or not isinstance(available, int)
+            or available < 1
+            or available > 1440
+        ):
+            reject_patch("Gemini returned an invalid available window.")
+        context = {"available": available}
+
+    pantry = raw["pantry"]
+    if pantry is None:
+        pantry = None
+    elif isinstance(pantry, list):
+        # A bare name has no amount. Do not invent grams; unknown names are unparsed.
+        cleaned = {}
+        for item in pantry:
+            if isinstance(item, str):
+                if item not in names:
+                    unparsed.append(item)
+                continue
+            if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+                reject_patch("Gemini returned an invalid pantry.")
+            name = item["name"]
+            if name not in names:
+                unparsed.append(name)
+                continue
+            amount = pantry_grams(item)
+            if amount is None:
+                continue
+            cleaned[name] = amount
+        pantry = cleaned or None
+    elif not isinstance(pantry, dict):
+        reject_patch("Gemini returned an invalid pantry.")
+    else:
+        cleaned = {}
+        for name, grams in pantry.items():
+            if name not in names:
+                unparsed.append(str(name))
+                continue
+            amount = pantry_grams(grams)
+            if amount is None:
+                if grams is not None:
+                    reject_patch(f"Gemini returned an invalid amount for {name}.")
+                continue
+            cleaned[name] = amount
+        pantry = cleaned
+    unparsed = list(dict.fromkeys(unparsed))
+
+    return {
+        "mode": mode,
+        "sort": sort,
+        "passed": passed,
+        "profile": profile,
+        "context": context,
+        "pantry": pantry,
+        "unparsed": unparsed,
+    }
+
+
+def interpreter_prompt(text: str, memories: list[str], names: set[str]) -> str:
+    memory_block = "\n".join(f"- {item}" for item in memories) or "None."
+    ingredients = ", ".join(sorted(names))
+    return f"""You translate one meal request into a constraint patch for an existing catalog.
+Return JSON only. Use null for every field the user did not mention. Do not invent recipes.
+Do not invent pantry grams. If a food is not in the catalog ingredient list, leave it out of pantry and add the user's words to unparsed.
+
+Catalog ingredient names, exact spelling: {ingredients}
+Modes: compare, cook, eatOut
+Sorts: catalog, time, cost, protein
+Diets: anything, vegetarian, vegan
+Exclusions: soy, egg, milk, wheat, peanut, tree nut, sesame, fish, shellfish
+Equipment: stove, pan, pot
+Map "peanuts" to the exclusion "peanut". Budget is USD per meal, from 0 to 1000.
+
+Known memories:
+{memory_block}
+
+User request:
+{text}
+
+Return this object and no other keys inside profile or context:
+{{
+  "mode": null,
+  "sort": null,
+  "passed": null,
+  "profile": {{
+    "diet": null,
+    "exclusions": null,
+    "preferred": null,
+    "budget": null,
+    "cooking": null,
+    "equipment": null
+  }},
+  "context": {{"available": null}},
+  "pantry": null,
+  "unparsed": []
+}}
+"""
+
+
+async def interpret_constraints(request: RecipeRequest) -> dict:
     if not client:
         raise HTTPException(
             status_code=500,
-            detail="GEMINI_API_KEY is missing from backend/.env",
+            detail="GEMINI_API_KEY is missing from backend/.env or fridgemate/.env",
+        )
+    text = (request.text or "").strip()
+    if not text:
+        reject_patch("Enter a food request.")
+    memories = [item for item in request.memories if isinstance(item, str) and item.strip()]
+    if backboard_client is not None:
+        try:
+            assistant_id = await get_assistant_id()
+            if assistant_id:
+                found = await backboard_client.search_memories(assistant_id, text, limit=5)
+                memories.extend(memory_contents(found))
+        except Exception as e:
+            print("Backboard error:", str(e))
+            memories = [
+                item for item in request.memories if isinstance(item, str) and item.strip()
+            ]
+    names = catalog_ingredient_names()
+    prompt = interpreter_prompt(text, memories, names)
+    last_error = None
+    for model in GEMINI_FALLBACKS:
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=model,
+                contents=prompt,
+                config={"response_mime_type": "application/json"},
+            )
+            parsed = json.loads(response.text or "")
+            try:
+                patch = validate_patch(parsed, names)
+            except HTTPException:
+                print("Gemini patch rejected:", json.dumps(parsed)[:1000])
+                raise
+            if model != GEMINI_MODEL:
+                print(
+                    f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)"
+                )
+            return redact_output(patch)
+        except HTTPException:
+            raise
+        except Exception as e:
+            last_error = e
+            msg = str(e)
+            print(f"Gemini error ({model}):", msg)
+            if not any(
+                code in msg
+                for code in (
+                    "429",
+                    "RESOURCE_EXHAUSTED",
+                    "503",
+                    "UNAVAILABLE",
+                    "high demand",
+                )
+            ):
+                break
+    err = str(last_error or "unknown error")
+    if "429" in err or "RESOURCE_EXHAUSTED" in err:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Gemini free-tier quota for this key is used up "
+                f"(tried: {', '.join(GEMINI_FALLBACKS)}). "
+                "Wait for reset, enable billing, or use another GEMINI_API_KEY."
+            ),
+        )
+    raise HTTPException(status_code=502, detail=f"Recipe generation failed: {err[:240]}")
+
+
+@app.post("/recipes/phrase")
+async def phrase_reply(request: PhraseRequest):
+    enforce_rate_limit()
+    summary = request.summary.strip()
+    if not summary:
+        raise HTTPException(status_code=400, detail="Missing summary.")
+    if blocked_user_text(summary):
+        reject_blocked_text()
+    if not client:
+        raise HTTPException(
+            status_code=500,
+            detail="GEMINI_API_KEY is missing from backend/.env or fridgemate/.env",
+        )
+    prompt = f"""Rewrite the meal assistant summary below as one or two natural, conversational sentences.
+Vary the wording. Keep every fact exactly: meal names, durations, costs, reasons, and disclosure lines such as catalog misses and "for this reply only".
+Do not add meals, times, prices, reasons, or advice that are not in the summary.
+Return only the rewritten sentences.
+
+Summary:
+{summary}
+"""
+    last_error = None
+    for model in GEMINI_FALLBACKS:
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=model,
+                contents=prompt,
+            )
+            text = (response.text or "").strip()
+            if not text:
+                raise HTTPException(status_code=502, detail="Empty phrasing.")
+            return {"text": redact_text(text)}
+        except HTTPException:
+            raise
+        except Exception as e:
+            last_error = e
+            msg = str(e)
+            print(f"Gemini phrase error ({model}):", msg)
+            if not gemini_transient(msg):
+                break
+    raise_gemini_failure(last_error, "Reply phrasing")
+
+
+@app.post("/recipes")
+async def generate_recipes(request: RecipeRequest):
+    enforce_rate_limit()
+    user_text = (
+        request.text
+        if isinstance(request.text, str)
+        else " ".join(str(item) for item in request.ingredients)
+    )
+    if blocked_user_text(user_text):
+        reject_blocked_text()
+    if isinstance(request.text, str):
+        return await interpret_constraints(request)
+    if not client:
+        raise HTTPException(
+            status_code=500,
+            detail="GEMINI_API_KEY is missing from backend/.env or fridgemate/.env",
         )
 
-    ingredients = ", ".join(request.ingredients)
+    cleaned = [str(i).strip()[:60] for i in request.ingredients if str(i).strip()][
+        :30
+    ]
+    ingredients = ", ".join(cleaned) if cleaned else "common pantry staples"
     known_preferences = ""
     if backboard_client is not None:
         assistant_id = await get_assistant_id()
@@ -162,53 +870,251 @@ async def generate_recipes(request: RecipeRequest):
             except Exception as e:
                 print("Backboard error:", str(e))
 
+    exclusions = ", ".join(request.exclusions) if request.exclusions else "none"
     prompt = f"""
-    You are FridgeMate, a practical cooking assistant for college students.
+You are FridgeMate, a practical cooking assistant for college students.
 
-    Available ingredients: {ingredients}
-    Dietary preference: {request.diet}
-    Maximum cooking time: {request.time} minutes
-    """
+Available ingredients: {ingredients}
+Dietary preference: {request.diet}
+Avoid: {exclusions}
+Maximum cooking time: {request.time} minutes
+"""
     if known_preferences:
         prompt += f"""
-    Known preferences:
-    {known_preferences}
-    Follow these preferences. Do not suggest food that conflicts with them.
-    """
+Known preferences from memory:
+{known_preferences}
+Follow these preferences. Do not suggest food that conflicts with them.
+"""
     prompt += """
-    Suggest 3 realistic recipes using these ingredients.
-    Prioritize using ingredients that might otherwise go to waste.
-    Keep recipes affordable, beginner-friendly, and healthy.
-    Mention any extra ingredients needed rather than pretending
-    the user already has them.
+Suggest 6 realistic recipes using these ingredients when possible.
+Prioritize using ingredients that might otherwise go to waste.
+Keep recipes affordable, beginner-friendly, and healthy.
+Mention any extra ingredients needed rather than pretending the user already has them.
 
-    Return valid JSON only, in this format:
+Return valid JSON only:
+{
+  "recipes": [
     {
-      "recipes": [
-        {
-          "name": "Recipe name",
-          "description": "Short description",
-          "time": 20,
-          "ingredients": ["ingredient 1", "ingredient 2"],
-          "steps": ["Step 1", "Step 2"],
-          "nutrition_note": "Brief, cautious nutrition note"
-        }
-      ]
+      "name": "Recipe name",
+      "description": "Short description",
+      "time": 20,
+      "ingredients": ["ingredient 1", "ingredient 2"],
+      "steps": ["Step 1", "Step 2"],
+      "nutrition_note": "Brief, cautious nutrition note",
+      "photo": "tofu",
+      "diets": ["vegetarian"],
+      "allergens": [],
+      "energy_kcal": 450,
+      "protein_g": 20
     }
-    """
+  ]
+}
 
-    try:
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model="gemini-3.8-flash",
-            contents=prompt,
-            config={"response_mime_type": "application/json"},
-        )
-        return json.loads(response.text)
+photo must be one of: tofu, pasta, chickpeas (closest visual match).
+"""
 
-    except Exception as e:
-        print("Gemini error:", str(e))
+    last_error = None
+    for model in GEMINI_FALLBACKS:
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=model,
+                contents=prompt,
+                config={"response_mime_type": "application/json"},
+            )
+            parsed = json.loads(response.text or "{}")
+            recipes = parsed.get("recipes") if isinstance(parsed, dict) else None
+            if not isinstance(recipes, list) or not recipes:
+                raise ValueError("No recipes in model response")
+            meals = [
+                normalize_meal(r if isinstance(r, dict) else {}, i, cleaned)
+                for i, r in enumerate(recipes[:8])
+            ]
+            if model != GEMINI_MODEL:
+                print(f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)")
+            return redact_output(
+                {
+                    "meals": meals,
+                    "recipes": meals,
+                    "ingredients": cleaned,
+                    "model": model,
+                }
+            )
+        except Exception as e:
+            last_error = e
+            msg = str(e)
+            print(f"Gemini error ({model}):", msg)
+            if not gemini_transient(msg):
+                break
+
+    raise_gemini_failure(last_error, "Recipe generation")
+
+
+@app.post("/vision/ingredients")
+async def vision_ingredients(photo: UploadFile = File(...)):
+    if not client:
         raise HTTPException(
-            status_code=502,
-            detail="Recipe generation failed. Check the backend terminal.",
+            status_code=500,
+            detail="GEMINI_API_KEY is missing from backend/.env or fridgemate/.env",
         )
+
+    content_type = (photo.content_type or "").lower().split(";")[0].strip()
+    if content_type == "image/jpg":
+        content_type = "image/jpeg"
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload a JPEG, PNG, WebP, or HEIC fridge photo.",
+        )
+
+    data = await photo.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image upload.")
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="Photo is too large (max 8 MB). Try a smaller image.",
+        )
+
+    prompt = """
+You are FridgeMate. Look at this fridge / pantry photo and list edible ingredients
+you can clearly see (produce, proteins, dairy, leftovers in labeled containers, etc.).
+Ignore shelves, containers, brands, and non-food objects.
+Use short grocery-style names (e.g. "eggs", "spinach", "milk").
+Return valid JSON only:
+{"ingredients":["ingredient 1","ingredient 2"]}
+If nothing edible is visible, return {"ingredients":[]}.
+"""
+    image_part = types.Part.from_bytes(data=data, mime_type=content_type)
+    last_error = None
+    for model in GEMINI_FALLBACKS:
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=model,
+                contents=[prompt, image_part],
+                config={"response_mime_type": "application/json"},
+            )
+            parsed = json.loads(response.text or "{}")
+            ingredients = normalize_ingredient_names(
+                parsed.get("ingredients") if isinstance(parsed, dict) else []
+            )
+            if model != GEMINI_MODEL:
+                print(
+                    f"Gemini vision: used fallback model {model} "
+                    f"(primary {GEMINI_MODEL} unavailable)"
+                )
+            return {"ingredients": ingredients, "model": model}
+        except Exception as e:
+            last_error = e
+            msg = str(e)
+            print(f"Gemini vision error ({model}):", msg)
+            if not gemini_transient(msg):
+                break
+
+    raise_gemini_failure(last_error, "Fridge photo scan")
+
+
+# ── Google Calendar OAuth ────────────────────────────────────────────────────
+_GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+_GCAL_REDIRECT = "http://localhost:8000/google-calendar/callback/"
+_gcal_tokens: dict = {}
+
+
+def _gcal_flow():
+    cid = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
+    csec = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip()
+    if not cid or not csec:
+        raise HTTPException(
+            status_code=500,
+            detail="Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to backend/.env",
+        )
+    try:
+        from google_auth_oauthlib.flow import Flow  # type: ignore
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="pip install google-auth-oauthlib google-api-python-client",
+        )
+    return Flow.from_client_config(
+        {"web": {
+            "client_id": cid, "client_secret": csec,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [_GCAL_REDIRECT],
+        }},
+        scopes=_GCAL_SCOPES,
+        redirect_uri=_GCAL_REDIRECT,
+    )
+
+
+@app.get("/google-calendar/auth-url")
+def gcal_auth_url():
+    flow = _gcal_flow()
+    url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+    return {"url": url}
+
+
+@app.get("/google-calendar/callback")
+def gcal_callback(code: str):
+    from fastapi.responses import HTMLResponse  # type: ignore
+    flow = _gcal_flow()
+    flow.fetch_token(code=code)
+    creds = flow.credentials
+    _gcal_tokens["access_token"] = creds.token
+    _gcal_tokens["refresh_token"] = creds.refresh_token
+    _gcal_tokens["connected"] = True
+    return HTMLResponse("""<!doctype html><html><body><script>
+if(window.opener){window.opener.postMessage({type:'gcal-connected'},'http://localhost:5173');window.close();}
+else{document.write('<p>Connected! Close this tab.</p>');}
+</script></body></html>""")
+
+
+@app.get("/google-calendar/status")
+def gcal_status():
+    return {"connected": _gcal_tokens.get("connected", False)}
+
+
+@app.get("/google-calendar/events")
+async def gcal_events(from_: str | None = None, to: str | None = None):
+    if not _gcal_tokens.get("connected"):
+        raise HTTPException(status_code=401, detail="Google Calendar not connected.")
+    try:
+        from google.oauth2.credentials import Credentials  # type: ignore
+        from googleapiclient.discovery import build  # type: ignore
+    except ImportError:
+        raise HTTPException(status_code=500, detail="pip install google-api-python-client")
+    cid = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
+    csec = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip()
+    creds = Credentials(
+        token=_gcal_tokens["access_token"],
+        refresh_token=_gcal_tokens.get("refresh_token"),
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=cid, client_secret=csec, scopes=_GCAL_SCOPES,
+    )
+    service = await asyncio.to_thread(build, "calendar", "v3", credentials=creds, cache_discovery=False)
+    tmin = from_ or (date.today().isoformat() + "T00:00:00Z")
+    tmax = to or (date.today().isoformat() + "T23:59:59Z")
+    raw = await asyncio.to_thread(
+        lambda: service.events().list(
+            calendarId="primary", timeMin=tmin, timeMax=tmax,
+            maxResults=500, singleEvents=True, orderBy="startTime",
+        ).execute()
+    )
+    events = []
+    for item in raw.get("items", []):
+        s = item.get("start", {}); e = item.get("end", {})
+        events.append({
+            "id": item["id"],
+            "title": item.get("summary", "Untitled"),
+            "start": s.get("dateTime") or (s.get("date", "") + "T00:00:00Z"),
+            "end":   e.get("dateTime") or (e.get("date", "") + "T23:59:59Z"),
+            "allDay": "date" in s,
+            "location": item.get("location", ""),
+            "calendar": "Google Calendar",
+            "source": "ics",
+            "busy": item.get("transparency", "opaque") != "transparent",
+            "readOnly": True,
+            "completed": False,
+        })
+    return {"events": events, "authorized": True}
