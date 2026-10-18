@@ -153,6 +153,12 @@ def compact_record(record):
             'foodNutrients':[{k:r[k] for k in ['id','nutrient','amount'] if k in r} for r in record.get('foodNutrients',[]) if r.get('nutrient',{}).get('id') in ids]}
 
 
+def slim_record(record):
+    """Saved fallback copy: every nutrient value kept, USDA lab metadata (samples, min/max, derivation) dropped."""
+    return {**{k:record[k] for k in ['fdcId','description','dataType','foodCategory','publicationDate','retrievedAt','retrievalUrl','foodPortions'] if k in record},
+            'foodNutrients':[{k:r[k] for k in ['id','nutrient','amount'] if k in r} for r in record.get('foodNutrients',[])]}
+
+
 async def ingredient_reference():
     result = await fdc_client.details([m['fdcId'] for m in MATCHES.values()])
     records = {r['fdcId']: r for r in result['records']}

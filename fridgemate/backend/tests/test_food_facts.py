@@ -27,6 +27,19 @@ class UsdaParsingTests(unittest.TestCase):
         raw['foodNutrients']=raw['foodNutrients'][:1]
         self.assertEqual(usda.nutrient_values(raw)[0]['energy_kcal'],80)
 
+class SavedRecordTests(unittest.TestCase):
+    def test_slim_record_keeps_every_nutrient_value_and_drops_only_lab_metadata(self):
+        full={'fdcId':1,'description':'Tofu','dataType':'Foundation','foodCategory':{'description':'Legumes'},'foodPortions':[{'gramWeight':126}],
+              'inputFoods':[{'id':9}],'nutrientConversionFactors':[{'type':'x'}],
+              'foodNutrients':[{'id':5,'type':'FoodNutrient','amount':8.1,'dataPoints':3,'min':7,'max':9,'nutrientAnalysisDetails':[{'labMethod':'x'}],
+                                'nutrient':{'id':1003,'number':'203','name':'Protein','unitName':'g'}},
+                               {'id':6,'amount':0.01,'foodNutrientDerivation':{'code':'A'},'nutrient':{'id':1176,'number':'416','name':'Biotin','unitName':'µg'}}]}
+        slim=usda.slim_record(full)
+        self.assertEqual([(n['nutrient']['name'],n['amount']) for n in slim['foodNutrients']],[('Protein',8.1),('Biotin',0.01)])
+        self.assertNotIn('inputFoods',slim);self.assertNotIn('dataPoints',slim['foodNutrients'][0]);self.assertEqual(slim['foodCategory'],{'description':'Legumes'})
+        self.assertEqual(usda.compact_record(slim),usda.compact_record(full))
+
+
 class UsdaClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_batch_limit_cache_coalescing_and_detached_records(self):
         calls=[];clock=[1000]

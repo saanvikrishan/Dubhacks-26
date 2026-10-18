@@ -16,7 +16,7 @@ async def main():
     records={r['fdcId']:r for r in result['records']}
     if any(not usda.matched_record(records.get(m['fdcId']),m) for m in usda.MATCHES.values()):
         raise SystemExit('A reviewed source identity changed; review mappings before replacing snapshots.')
-    (usda.DATA/'usda-records.json').write_text(json.dumps({'records':result['records']},indent=2)+'\n')
+    (usda.DATA/'usda-records.json').write_text(json.dumps({'records':[usda.slim_record(r) for r in result['records']]},separators=(',',':'))+'\n')
     (usda.DATA/'usda-browser.json').write_text(json.dumps({'records':[usda.compact_record(r) for r in result['records']]},separators=(',',':'))+'\n')
     print('Retrieved and validated',len(result['records']),'USDA detail records. No fuzzy matches promoted.')
 
