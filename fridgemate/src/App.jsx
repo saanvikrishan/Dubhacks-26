@@ -160,7 +160,6 @@ export default function App() {
     }
     setTab("Food");
   }
-<<<<<<< Updated upstream
   function setFoodMode(nextMode) {
     setMode(nextMode);
     if (nextMode === "cook") {
@@ -169,10 +168,7 @@ export default function App() {
       setCookPhase("groceries");
     }
   }
-  function choose(meal) {
-=======
   async function choose(meal) {
->>>>>>> Stashed changes
     const existing = state.mealPlans.find(
       (p) => p.date === state.context.date && p.start === state.context.start,
     );
