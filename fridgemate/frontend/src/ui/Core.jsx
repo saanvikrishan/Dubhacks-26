@@ -351,12 +351,45 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
         onSubmit={async (e) => {
           e.preventDefault();
           try {
+            if (timeOnly) {
+              await onSave({
+                type: "updateContext",
+                context: { ...context, manuallySet: true },
+              });
+              onClose();
+              return;
+            }
+            const phone = (profile.phone || "").trim();
+            const previous = (state.profile.phone || "").trim();
+            if (phone && !/^\+[1-9]\d{6,14}$/.test(phone)) {
+              setError(
+                "Use international format, starting with + and the country code.",
+              );
+              return;
+            }
+            let nextProfile = { ...profile, phone };
+            if (phone && phone !== previous) {
+              const response = await fetch("/api/enroll-phone", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ user_id: "demo", phone }),
+              });
+              const data = await response.json().catch(() => ({}));
+              if (!response.ok) {
+                const detail =
+                  typeof data.detail === "string"
+                    ? data.detail
+                    : "Could not activate reminders for that number.";
+                throw new Error(detail);
+              }
+              const sender =
+                typeof data.sender === "string" ? data.sender.trim() : "";
+              if (sender) nextProfile = { ...nextProfile, reminderFrom: sender };
+            }
             await onSave(
-              timeOnly
-                ? { type: "updateContext", context: { ...context, manuallySet: true } }
-                : flags.manualSchedule.available
-                  ? { type: "configure", profile, context }
-                  : { type: "updateProfile", profile },
+              flags.manualSchedule.available
+                ? { type: "configure", profile: nextProfile, context }
+                : { type: "updateProfile", profile: nextProfile },
             );
             onClose();
           } catch (err) {
@@ -419,7 +452,25 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                 />
                 I have cooking access
               </label>
+              <label>
+                Reminder phone
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="+1XXXXXXXXXX"
+                  value={profile.phone || ""}
+                  onChange={(e) =>
+                    setProfile({ ...profile, phone: e.target.value })
+                  }
+                />
+              </label>
             </div>
+            <p className="muted">
+              {(profile.reminderFrom || "").trim()
+                ? `Text ${profile.reminderFrom.trim()} once to activate reminders.`
+                : "Use international format, like +1XXXXXXXXXX. Saving a number enrolls it for iMessage reminders."}
+            </p>
             <fieldset>
               <legend>Exclude these allergens</legend>
               <p className="muted">

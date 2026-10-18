@@ -141,6 +141,16 @@ export default function App() {
       removeLog: "Meal log removed. Your intake has been recalculated.",
     };
     if (messages[action.type]) setNotice(messages[action.type]);
+    if (
+      (action.type === "updateProfile" || action.type === "configure") &&
+      (action.profile?.phone || "").trim() &&
+      (action.profile.phone || "").trim() !== (state.profile.phone || "").trim() &&
+      (action.profile.reminderFrom || "").trim()
+    ) {
+      setNotice(
+        `Preferences saved. Text ${action.profile.reminderFrom.trim()} once to activate reminders.`,
+      );
+    }
     if (action.type === "saveEvent") {
       const saved = next.events.find((e) => e.id === action.event.id);
       if (saved) await syncScheduleEvents([saved]);

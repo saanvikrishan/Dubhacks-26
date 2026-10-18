@@ -50,6 +50,8 @@ export function createDemoState() {
       equipment: ["stove", "pan", "pot"],
       goals: [],
       cuisines: [],
+      phone: "",
+      reminderFrom: "",
     },
     context: {
       date: today(),

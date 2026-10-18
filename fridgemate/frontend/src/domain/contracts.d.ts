@@ -52,6 +52,8 @@ export interface Profile {
   cooking: boolean;
   equipment: string[];
   goals: Goal[];
+  phone?: string;
+  reminderFrom?: string;
 }
 export interface Context {
   date: string;

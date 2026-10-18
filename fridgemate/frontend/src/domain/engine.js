@@ -229,6 +229,12 @@ export function validateInputs(profile, context, pantry) {
     typeof profile.cooking !== "boolean"
   )
     throw new Error("Invalid profile.");
+  const phone = profile.phone == null ? "" : profile.phone;
+  if (typeof phone !== "string") throw new Error("Invalid profile.");
+  if (phone.trim() && !/^\+[1-9]\d{6,14}$/.test(phone.trim()))
+    throw new Error(
+      "Use international format, starting with + and the country code.",
+    );
   if (
     profile.exclusions.some(
       (v) =>

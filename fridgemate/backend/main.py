@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import os
 import re
@@ -1918,3 +1919,149 @@ async def sync_schedule_events(request: SyncScheduleEventsRequest):
                     "detail": "Could not save schedule events."}
 
     return {"status": "ok", "upserted": upserted, "skipped": skipped}
+
+
+_E164 = re.compile(r"^\+[1-9]\d{6,14}$")
+
+
+class EnrollPhoneRequest(BaseModel):
+    user_id: str = Field(default="demo")
+    phone: str
+
+
+def _spectrum_creds():
+    project_id = (os.getenv("SPECTRUM_PROJECT_ID") or "").strip()
+    secret = (os.getenv("SPECTRUM_PROJECT_SECRET") or "").strip()
+    if not project_id or not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Spectrum is not configured on the server.",
+        )
+    token = base64.b64encode(f"{project_id}:{secret}".encode()).decode()
+    return project_id, {"Authorization": f"Basic {token}"}
+
+
+def _spectrum_error(status: int, payload) -> None:
+    message = ""
+    if isinstance(payload, dict):
+        message = str(payload.get("message") or payload.get("code") or "")
+    secret = os.getenv("SPECTRUM_PROJECT_SECRET") or ""
+    if secret and secret in message:
+        message = ""
+    if "secret" in message.lower():
+        message = ""
+    raise HTTPException(
+        status_code=400 if status < 500 else 502,
+        detail=(message or "Spectrum rejected the enrollment.").strip()[:300],
+    )
+
+
+async def _spectrum_data(method: str, path: str, body: dict | None = None):
+    project_id, headers = _spectrum_creds()
+    if body is not None:
+        headers = {**headers, "Content-Type": "application/json"}
+    url = f"https://spectrum.photon.codes/projects/{project_id}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.request(method, url, headers=headers, json=body)
+    except httpx.HTTPError:
+        raise HTTPException(
+            status_code=502,
+            detail="Could not reach Spectrum to enroll that number.",
+        )
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
+    if response.status_code >= 400 or (
+        isinstance(payload, dict) and payload.get("succeed") is False
+    ):
+        _spectrum_error(response.status_code, payload)
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=502,
+            detail="Spectrum returned an unexpected response.",
+        )
+    return data
+
+
+@app.post("/enroll-phone")
+async def enroll_phone(request: EnrollPhoneRequest):
+    """
+    Enroll a profile phone with Spectrum, then store it for the reminder poller.
+    Shared projects send only the user's number. Dedicated projects also send
+    one of the project's own iMessage lines.
+    """
+    phone = (request.phone or "").strip()
+    if not _E164.match(phone):
+        raise HTTPException(
+            status_code=400,
+            detail="Enter a phone number in international format, like +12065551212.",
+        )
+    user_id = (request.user_id or "demo").strip() or "demo"
+
+    info = await _spectrum_data("GET", "/imessage/")
+    kind = info.get("type")
+    if kind == "shared":
+        body = {"type": "shared", "phoneNumber": phone}
+    elif kind == "dedicated":
+        lines = await _spectrum_data("GET", "/lines/?platform=imessage")
+        numbers = [
+            str(line.get("phoneNumber") or "").strip()
+            for line in (lines.get("lines") or [])
+            if isinstance(line, dict)
+        ]
+        assigned = next((number for number in numbers if _E164.match(number)), "")
+        if not assigned:
+            raise HTTPException(
+                status_code=502,
+                detail="This project has no iMessage line to assign.",
+            )
+        body = {
+            "type": "dedicated",
+            "phoneNumber": phone,
+            "assignedPhoneNumber": assigned,
+        }
+    else:
+        raise HTTPException(
+            status_code=502,
+            detail="Spectrum did not say whether reminders use a shared or dedicated line.",
+        )
+
+    created = await _spectrum_data("POST", "/users/", body)
+    sender = str(created.get("assignedPhoneNumber") or "").strip()
+    if not _E164.match(sender):
+        raise HTTPException(
+            status_code=502,
+            detail="Spectrum enrolled the number but did not return a line to text.",
+        )
+
+    if not store.SessionLocal:
+        raise HTTPException(
+            status_code=503,
+            detail="Spectrum accepted the number, but the reminder database is not configured.",
+        )
+    from sqlalchemy import text as sql_text
+
+    try:
+        with store.SessionLocal() as conn:
+            conn.execute(
+                sql_text(
+                    """
+                    INSERT INTO photon_contacts (user_id, phone)
+                    VALUES (:uid, :phone)
+                    ON CONFLICT (user_id) DO UPDATE SET phone = EXCLUDED.phone
+                    """
+                ),
+                {"uid": user_id, "phone": phone},
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"enroll-phone contact save error: {type(e).__name__}")
+        raise HTTPException(
+            status_code=500,
+            detail="Spectrum accepted the number, but it could not be saved for reminders.",
+        )
+
+    return {"status": "ok", "phone": phone, "sender": sender}

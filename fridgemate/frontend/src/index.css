@@ -143,6 +143,11 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgba(23, 138, 100, 0.16);
   outline: none;
 }
+input::placeholder,
+textarea::placeholder {
+  color: #7a9186;
+  opacity: 1;
+}
 input[type="checkbox"] {
   width: 17px;
   height: 17px;
