@@ -16,6 +16,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 import db as store
+import substitutions as swaps
 import usda
 
 ROOT = Path(__file__).resolve().parent
@@ -207,6 +208,13 @@ class RecipeRequest(BaseModel):
 
 class PhraseRequest(BaseModel):
     summary: str
+
+
+class SubstituteRequest(BaseModel):
+    ingredient: str
+    available: list[str] = Field(default_factory=list)
+    recipe_name: str = ""
+    meal: dict | None = None
 
 
 class PreferenceRequest(BaseModel):
@@ -541,6 +549,10 @@ def normalize_meal(raw: dict, index: int, fallback_ingredients: list[str]) -> di
         "anything"
     ]
     note = str(raw.get("nutrition_note") or "").strip()
+    raw_swaps = raw.get("substitutions") if isinstance(raw.get("substitutions"), list) else []
+    image_search = str(
+        raw.get("image_search") or raw.get("imageSearch") or name
+    ).strip()[:80]
 
     return {
         "id": slug(name, index),
@@ -580,7 +592,10 @@ def normalize_meal(raw: dict, index: int, fallback_ingredients: list[str]) -> di
         "mode": "cook",
         "photo": None,
         "imageUrl": None,
+        "imageSearch": image_search,
         "suggestion": True,
+        "missingIngredients": [],
+        "substitutions": [s for s in raw_swaps if isinstance(s, dict)][:6],
     }
 
 
@@ -910,6 +925,33 @@ Summary:
     raise_gemini_failure(last_error, "Reply phrasing")
 
 
+@app.post("/recipes/substitute")
+async def substitute_ingredient(request: SubstituteRequest):
+    """Suggest a swap for one missing ingredient given what the user has."""
+    ingredient = (request.ingredient or "").strip()
+    if not ingredient:
+        raise HTTPException(status_code=400, detail="ingredient is required.")
+    available = [
+        str(x).strip() for x in (request.available or []) if str(x).strip()
+    ][:40]
+    if request.meal and isinstance(request.meal, dict):
+        annotated = swaps.attach_substitutions(dict(request.meal), available)
+        return {
+            "status": "ok",
+            "ingredient": ingredient,
+            "substitutions": annotated.get("substitutions") or [],
+            "missingIngredients": annotated.get("missingIngredients") or [],
+            "meal": annotated,
+        }
+    suggestion = swaps.suggest_swap(ingredient, available)
+    return {
+        "status": "ok",
+        "ingredient": ingredient,
+        "substitution": suggestion,
+        "substitutions": [suggestion] if suggestion else [],
+    }
+
+
 @app.post("/recipes")
 async def generate_recipes(request: RecipeRequest):
     enforce_rate_limit()
@@ -969,10 +1011,11 @@ Known preferences from memory:
 Follow these preferences. Do not suggest food that conflicts with them.
 """
     prompt += """
-Suggest 6 realistic recipes using these ingredients when possible.
-Prioritize using ingredients that might otherwise go to waste.
+Suggest 6 realistic recipes that prominently USE the available ingredients.
+If the user listed a protein (e.g. chicken), most recipes should include that protein — do not replace it with tofu or leave it out.
+Prioritize ingredients that might otherwise go to waste.
 Keep recipes affordable, beginner-friendly, and healthy.
-Mention any extra ingredients needed rather than pretending the user already has them.
+Extra grocery staples are ok; list them honestly in ingredients.
 
 Return valid JSON only:
 {
@@ -987,12 +1030,17 @@ Return valid JSON only:
       "diets": ["vegetarian"],
       "allergens": [],
       "energy_kcal": 450,
-      "protein_g": 20
+      "protein_g": 20,
+      "image_search": "simple common dish name for photo search"
     }
   ]
 }
 
-Do not invent a photo field — images are generated from the recipe name separately.
+image_search must be 2-5 plain words naming the dish for a stock photo search,
+including the main ingredients people would see (e.g. "egg vegetable fried rice",
+"chicken stir fry", "tomato penne pasta") — not a marketing title, and do not
+swap in a different protein than the recipe uses.
+Do not invent substitutions here — a separate substitution skill handles alternatives.
 """
 
     last_error = None
@@ -1014,7 +1062,26 @@ Do not invent a photo field — images are generated from the recipe name separa
             ]
             if usda.usda_configured():
                 meals = await usda.enrich_meals(meals)
-            await attach_dish_images(meals)
+            # Images resolve on the client (CDN lookup) so Suggest stays fast.
+
+            async def _sub_json(prompt_text: str) -> dict:
+                for sub_model in GEMINI_FALLBACKS:
+                    try:
+                        sub_resp = await asyncio.to_thread(
+                            client.models.generate_content,
+                            model=sub_model,
+                            contents=prompt_text,
+                            config={"response_mime_type": "application/json"},
+                        )
+                        parsed_sub = json.loads(sub_resp.text or "{}")
+                        return parsed_sub if isinstance(parsed_sub, dict) else {}
+                    except Exception as sub_err:
+                        print(f"Substitution skill error ({sub_model}):", sub_err)
+                        if not gemini_transient(str(sub_err)):
+                            break
+                return {}
+
+            meals = await swaps.enrich_with_agent(meals, cleaned, _sub_json)
             if model != GEMINI_MODEL:
                 print(f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)")
             return redact_output(
