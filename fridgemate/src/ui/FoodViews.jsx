@@ -1,28 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon, Modal } from "./Core";
 import {
-  MEAL_IMAGE_PLACEHOLDER,
   mealImage,
   money,
   num,
+  prefetchMealImages,
   resolveMealImage,
 } from "./format";
 
 function MealPhoto({ meal, alt, className }) {
-  const initial = mealImage(meal);
-  const [src, setSrc] = useState(initial);
+  const [src, setSrc] = useState(() => mealImage(meal));
   useEffect(() => {
-    const ready = mealImage(meal);
-    setSrc(ready);
-    if (ready !== MEAL_IMAGE_PLACEHOLDER) return undefined;
     let cancelled = false;
-    resolveMealImage(meal?.name).then((url) => {
+    setSrc(mealImage(meal));
+    resolveMealImage(meal).then((url) => {
       if (!cancelled && url) setSrc(url);
     });
     return () => {
       cancelled = true;
     };
-  }, [meal?.id, meal?.name, meal?.imageUrl, meal?.photo]);
+  }, [meal?.id, meal?.name, meal?.imageSearch, meal?.imageUrl, meal?.photo]);
   return (
     <img
       className={className}
@@ -31,6 +28,11 @@ function MealPhoto({ meal, alt, className }) {
       alt={alt || meal?.name || "Meal"}
       loading="eager"
       decoding="async"
+      onError={() =>
+        setSrc(
+          `https://loremflickr.com/768/768/food/all?lock=${String(meal?.name || "food").length}`,
+        )
+      }
     />
   );
 }
@@ -39,6 +41,10 @@ import { byId } from "../data/suggestions";
 import { config } from "../domain/config";
 import { recommend, clockTime, evaluate } from "../domain/engine";
 import { portionNutrition, usdaConfidenceExplain } from "../domain/nutrition";
+import {
+  mealSubstitutions,
+  substitutionLine,
+} from "../domain/substitutions";
 import { prettyDate } from "../domain/calendar";
 import {
   DEAL_SOURCE,
@@ -285,26 +291,9 @@ export function CookStart({ state, onSuggested, onEatOut }) {
             ))}
             {!items.length && (
               <span className="cook-start-empty">
-                No ingredients yet—upload a photo, type above, or tap a quick
-                add.
+                No ingredients yet—upload a photo or type what you have above.
               </span>
             )}
-          </div>
-          <div className="cook-start-chips cook-start-suggestions" role="group" aria-label="Quick add">
-            {pantryItems.slice(0, 10).map((item) => (
-              <button
-                key={item}
-                type="button"
-                className="cook-chip"
-                disabled={
-                  busy ||
-                  items.some((x) => x.toLowerCase() === item.toLowerCase())
-                }
-                onClick={() => addParts([item])}
-              >
-                + {item}
-              </button>
-            ))}
           </div>
           {items.length > 0 && (
             <p className="cook-start-count">
@@ -343,24 +332,45 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
   const point = useRef(null),
     swiped = useRef(false),
     [dx, setDx] = useState(0),
-    [flyingOff, setFlyingOff] = useState(null);
-  
+    [dy, setDy] = useState(0),
+    [flyingOff, setFlyingOff] = useState(null),
+    [entered, setEntered] = useState(false);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
+  }, [label]);
+
+  const lean =
+    dx > 28 ? "lean-accept" : dx < -28 ? "lean-pass" : flyingOff === "right"
+      ? "lean-accept"
+      : flyingOff === "left"
+        ? "lean-pass"
+        : "";
+  const rot = flyingOff
+    ? flyingOff === "right"
+      ? 18
+      : -18
+    : Math.max(-14, Math.min(14, dx / 14));
+  const lift = flyingOff ? 0 : Math.min(10, Math.abs(dx) / 20);
+
   return (
     <article
-      className="swipe-card"
+      className={`swipe-card ${lean} ${entered ? "is-in" : ""}`}
       aria-label={label}
       tabIndex={0}
+      style={{ "--swipe-progress": Math.min(1, Math.abs(dx) / 120) }}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget) return;
         if (e.key === "ArrowLeft") {
           e.preventDefault();
           setFlyingOff("left");
-          setTimeout(onPass, 300);
+          setTimeout(onPass, 320);
         }
         if (e.key === "ArrowRight") {
           e.preventDefault();
           setFlyingOff("right");
-          setTimeout(onAccept, 300);
+          setTimeout(onAccept, 320);
         }
         if (e.key === "Enter") onDetails();
       }}
@@ -373,35 +383,41 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
           return;
         point.current = { x: e.clientX, y: e.clientY };
         swiped.current = false;
+        e.currentTarget.classList.add("is-dragging");
       }}
       onPointerMove={(e) => {
         if (!point.current || flyingOff) return;
         const x = e.clientX - point.current.x,
           y = e.clientY - point.current.y;
-        if (Math.abs(x) > 12 && Math.abs(x) > Math.abs(y) * 1.2) {
+        if (Math.abs(x) > 10 && Math.abs(x) > Math.abs(y) * 1.1) {
           e.currentTarget.setPointerCapture(e.pointerId);
-          setDx(Math.max(-200, Math.min(200, x)));
+          setDx(Math.max(-220, Math.min(220, x)));
+          setDy(Math.max(-40, Math.min(40, y * 0.35)));
         }
       }}
       onPointerUp={(e) => {
+        e.currentTarget.classList.remove("is-dragging");
         if (!point.current || flyingOff) return;
         const x = e.clientX - point.current.x,
           y = e.clientY - point.current.y;
         point.current = null;
-        if (Math.abs(x) > 75 && Math.abs(x) > Math.abs(y) * 1.2) {
+        if (Math.abs(x) > 75 && Math.abs(x) > Math.abs(y) * 1.1) {
           swiped.current = true;
           setFlyingOff(x > 0 ? "right" : "left");
           setTimeout(() => {
             x > 0 ? onAccept() : onPass();
-          }, 300);
+          }, 320);
         } else {
           setDx(0);
+          setDy(0);
         }
       }}
-      onPointerCancel={() => {
+      onPointerCancel={(e) => {
+        e.currentTarget.classList.remove("is-dragging");
         if (flyingOff) return;
         point.current = null;
         setDx(0);
+        setDy(0);
       }}
       onClickCapture={(e) => {
         if (swiped.current) {
@@ -411,28 +427,41 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
         }
       }}
     >
+      <div className="swipe-stack-shadow" aria-hidden="true" />
       <div
         className="swipe-moving"
         style={{
-          transform: flyingOff 
-            ? `translateX(${flyingOff === "right" ? 1000 : -1000}px) translateY(${flyingOff === "right" ? -30 : 30}px) rotate(${flyingOff === "right" ? 15 : -15}deg)`
-            : `translateX(${dx}px)`,
-          transition: flyingOff 
-            ? "transform 0.3s cubic-bezier(0.4, 0, 1, 1), opacity 0.3s ease-out"
-            : dx ? "none" : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
-          opacity: flyingOff 
-            ? 0
-            : dx ? Math.max(0.7, 1 - Math.abs(dx) / 300) : 1,
+          transform: flyingOff
+            ? `translateX(${flyingOff === "right" ? 1100 : -1100}px) translateY(${flyingOff === "right" ? -48 : 48}px) rotate(${rot}deg) scale(0.94)`
+            : `translateX(${dx}px) translateY(${dy - lift}px) rotate(${rot}deg)`,
+          transition: flyingOff
+            ? "transform 0.32s cubic-bezier(0.4, 0, 1, 1), opacity 0.28s ease-out"
+            : dx
+              ? "none"
+              : "transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1)",
+          opacity: flyingOff ? 0 : dx ? Math.max(0.78, 1 - Math.abs(dx) / 340) : 1,
         }}
       >
         <div
+          className="swipe-tint"
+          style={{
+            opacity: flyingOff
+              ? 0.28
+              : Math.min(0.22, Math.abs(dx) / 380),
+            background:
+              dx > 0 || flyingOff === "right"
+                ? "rgba(78, 139, 87, 0.55)"
+                : "rgba(189, 120, 85, 0.5)",
+          }}
+        />
+        <div
           className={`swipe-stamp ${dx > 0 || flyingOff === "right" ? "accept" : "pass"}`}
-          style={{ 
-            opacity: flyingOff ? 1 : Math.min(1, Math.abs(dx) / 50),
-            transform: `scale(${flyingOff ? 1.2 : Math.min(1.2, 0.8 + Math.abs(dx) / 100)})`,
+          style={{
+            opacity: flyingOff ? 1 : Math.min(1, Math.abs(dx) / 42),
+            transform: `scale(${flyingOff ? 1.18 : Math.min(1.15, 0.75 + Math.abs(dx) / 110)}) rotate(${rot * -0.4}deg)`,
           }}
         >
-          {(dx > 0 || flyingOff === "right") ? "✓" : "✕"}
+          {dx > 0 || flyingOff === "right" ? "✓" : "✕"}
         </div>
         {children}
       </div>
@@ -454,7 +483,6 @@ export function FoodDiscovery({
   onVenue,
   onVenueDirections,
   onDetails,
-  onKitchen,
   onPreferences,
   onWindow,
   onUndoPlan,
@@ -467,6 +495,9 @@ export function FoodDiscovery({
     [sort, setSort] = useState("catalog"),
     [openOnly, setOpenOnly] = useState(true);
   const usingGemini = mode === "cook" && Array.isArray(geminiMeals);
+  useEffect(() => {
+    if (usingGemini) prefetchMealImages(geminiMeals);
+  }, [usingGemini, geminiMeals]);
   const all = recommend(
     catalog,
     state,
@@ -731,6 +762,39 @@ export function FoodDiscovery({
                   {usdaConfidenceExplain(meal.nutrition)}
                 </p>
               ) : null}
+              {(() => {
+                const alts = mealSubstitutions(
+                  meal,
+                  groceryList.length ? groceryList : state.pantry,
+                ).slice(0, 3);
+                if (!alts.length) return null;
+                return (
+                  <div className="substitution-callout">
+                    <strong>Alternatives</strong>
+                    <div className="substitution-chips">
+                      {alts.map((s) => (
+                        <button
+                          type="button"
+                          key={`${s.missing}-${s.useInstead || "omit"}`}
+                          className={`sub-chip ${s.fromPantry ? "from-pantry" : ""}`}
+                          title={s.note || substitutionLine(s)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.classList.toggle("is-open");
+                          }}
+                        >
+                          <span className="sub-chip-main">
+                            {substitutionLine(s)}
+                          </span>
+                          {s.note ? (
+                            <span className="sub-chip-note">{s.note}</span>
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="swipe-actions">
                 <button
                   className="decline-button"
@@ -754,7 +818,7 @@ export function FoodDiscovery({
                 </button>
               </div>
               <p className="swipe-hint">
-                Swipe left to pass, right to choose. Tap for details.
+                Drag the card · ← pass · choose → · tap photo for details
               </p>
             </div>
           </SwipeCard>
@@ -954,10 +1018,6 @@ export function FoodDiscovery({
             </details>
           )}
       </aside>
-      <button className="floating-groceries" onClick={onKitchen}>
-        <Icon name="kitchen" size={20} />
-        My groceries
-      </button>
     </div>
   );
 }

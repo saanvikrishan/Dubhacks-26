@@ -18,8 +18,7 @@ import {
   PlanCalendar,
 } from "./ui/CalendarViews";
 import { CookStart, FoodDiscovery, VenueDetails } from "./ui/FoodViews";
-import { money, mealImage, num } from "./ui/format";
-import { pantryItems } from "./data/catalog";
+import { money, mealImage, num, prefetchMealImages } from "./ui/format";
 import { byId, rememberSuggestions } from "./data/suggestions";
 import { capabilities } from "./domain/config";
 import { clockTime, minutes } from "./domain/engine";
@@ -303,12 +302,12 @@ export default function App() {
           </nav>
           <div className="header-right">
             <button
-              className="assistant-nav"
-              aria-label="Assistant"
-              onClick={() => setDialog({ type: "assistant" })}
+              className="groceries-nav"
+              aria-label="My groceries"
+              onClick={() => setDialog({ type: "kitchen" })}
             >
-              <Icon name="spark" />
-              <span>Assistant</span>
+              <Icon name="kitchen" />
+              <span>My groceries</span>
             </button>
             <button
               className="avatar"
@@ -628,19 +627,12 @@ export default function App() {
               onSuggested={async (meals, ingredients) => {
                 rememberSuggestions(meals);
                 setGeminiMeals(meals);
+                prefetchMealImages(meals);
                 setGroceryList(ingredients || []);
                 if (ingredients?.length) {
-                  const pantry = { ...state.pantry };
-                  for (const item of pantryItems) {
-                    if (
-                      !ingredients.some(
-                        (g) => g.toLowerCase() === item.toLowerCase(),
-                      )
-                    )
-                      pantry[item] = pantry[item] ?? 0;
-                  }
+                  const pantry = {};
                   for (const name of ingredients)
-                    pantry[name] = Math.max(pantry[name] ?? 0, 500);
+                    pantry[name] = Math.max(state.pantry[name] ?? 0, 500);
                   await safe({ type: "updatePantry", pantry });
                   const remote = await savePantryItems(ingredients);
                   if (remote.status === "ok")
@@ -664,7 +656,6 @@ export default function App() {
                 window.location.assign(directionsUrl(venue));
               }}
               onDetails={openDetails}
-              onKitchen={() => setDialog({ type: "kitchen" })}
               onPreferences={() => setDialog({ type: "profile" })}
               onWindow={() => setDialog({ type: "time" })}
               onUndoPlan={() => safe({ type: "undo" })}
@@ -691,6 +682,13 @@ export default function App() {
           </button>
         </footer>
       </main>
+      <button
+        className="floating-assistant"
+        aria-label="Open food assistant"
+        onClick={() => setDialog({ type: "assistant" })}
+      >
+        <Icon name="spark" size={22} />
+      </button>
       {dialog?.type === "calendar" && (
         <CalendarConnect
           state={state}

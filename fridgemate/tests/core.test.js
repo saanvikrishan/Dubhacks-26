@@ -8,7 +8,18 @@ import {
   dailyNutrition,
   goalStatus,
 } from "../src/domain/nutrition.js";
-import { createDemoState, transition, today } from "../src/domain/state.js";
+import {
+  createDemoState,
+  testPantry,
+  transition,
+  today,
+} from "../src/domain/state.js";
+
+function stockedState() {
+  const state = createDemoState();
+  state.pantry = { ...testPantry };
+  return state;
+}
 import { storageAdapter, STORAGE_KEY } from "../src/adapters/storage.js";
 import { interpretFoodRequest } from "../src/adapters/assistant.js";
 
@@ -21,13 +32,13 @@ test("catalog supports both modes and keeps demo provenance", () => {
   }
 });
 test("full cooking duration counts all components once", () => {
-  const result = evaluate(byId["tofu-bowl"], createDemoState());
+  const result = evaluate(byId["tofu-bowl"], stockedState());
   assert.equal(result.duration, 60);
   assert.equal(result.feasible, true);
   assert.equal(result.score, null);
 });
 test("hard time limits and next commitment take precedence", () => {
-  const state = createDemoState();
+  const state = stockedState();
   state.context.available = 59;
   assert.equal(evaluate(byId["tofu-bowl"], state).feasible, false);
   state.context.available = 120;
@@ -35,7 +46,7 @@ test("hard time limits and next commitment take precedence", () => {
   assert.equal(evaluate(byId["tofu-bowl"], state).feasible, false);
 });
 test("strict cost and unknown cost are rejected", () => {
-  const state = createDemoState();
+  const state = stockedState();
   state.profile.budget = 4;
   assert.match(evaluate(byId["tofu-bowl"], state).reasons.join(), /above/);
   assert.equal(
@@ -52,7 +63,7 @@ test("strict cost and unknown cost are rejected", () => {
   );
 });
 test("diet exclusions and unknown required allergens never enter shortlist", () => {
-  const state = createDemoState();
+  const state = stockedState();
   state.profile.exclusions = ["soy"];
   assert.equal(evaluate(byId["tofu-bowl"], state).feasible, false);
   assert.equal(evaluate(byId["market-salad"], state).feasible, false);
@@ -65,7 +76,7 @@ test("diet exclusions and unknown required allergens never enter shortlist", () 
   );
 });
 test("equipment, cooking access, missing and insufficient ingredients are hard constraints", () => {
-  const state = createDemoState();
+  const state = stockedState();
   state.pantry.tofu = 149;
   assert.match(
     evaluate(byId["tofu-bowl"], state).reasons.join(),
@@ -81,7 +92,7 @@ test("equipment, cooking access, missing and insufficient ingredients are hard c
   );
 });
 test("eat-out needs explicit service allowance and known open hours", () => {
-  const state = createDemoState();
+  const state = stockedState();
   state.context.service = null;
   assert.equal(evaluate(byId["campus-bowl"], state).duration, null);
   state.context.service = 10;
@@ -92,7 +103,7 @@ test("eat-out needs explicit service allowance and known open hours", () => {
   assert.match(evaluate(meal, state).reasons.join(), /hours are unknown/);
 });
 test("compare is diverse and individual modes filter correctly", () => {
-  const state = createDemoState();
+  const state = stockedState();
   const cards = recommend(catalog, state).cards;
   assert.ok(cards.some((r) => r.meal.mode === "cook"));
   assert.ok(cards.some((r) => r.meal.mode === "eatOut"));
@@ -103,7 +114,7 @@ test("compare is diverse and individual modes filter correctly", () => {
   );
 });
 test("simple cost ordering and unknown protein ordering are explicit", () => {
-  const state = createDemoState();
+  const state = stockedState();
   const cards = recommend(catalog, state, { mode: "cook", sort: "cost" }).cards;
   assert.equal(cards[0].meal.id, "chickpea-toast");
   const comparison = recommend(catalog, state, { sort: "time" }).cards;
@@ -125,8 +136,8 @@ test("changing dormant weights has no effect; activating them fails startup", ()
   const altered = structuredClone(config);
   altered.recommendation.weights = { nonsense: 9999 };
   assert.deepEqual(
-    recommend(catalog, createDemoState(), {}, config),
-    recommend(catalog, createDemoState(), {}, altered),
+    recommend(catalog, stockedState(), {}, config),
+    recommend(catalog, stockedState(), {}, altered),
   );
   altered.recommendation.weightedScoringEnabled = true;
   assert.throws(() => validateConfig(altered), /unvalidated/);
@@ -179,7 +190,7 @@ test("goals support minimum, maximum, and range without ranking", () => {
   );
 });
 test("core loop preserves original plan during delay, then replaces and logs half portion", () => {
-  let state = createDemoState();
+  let state = stockedState();
   state = transition(state, { type: "choose", mealId: "tofu-bowl" });
   assert.equal(state.logs.length, 0);
   assert.equal(state.pantry.tofu, 300);
@@ -214,7 +225,7 @@ test("core loop preserves original plan during delay, then replaces and logs hal
   assert.equal(state.pantry.chickpeas, 400);
 });
 test("confirmation retries do not duplicate consumption; editing and removal recalculate", () => {
-  let state = createDemoState();
+  let state = stockedState();
   const action = {
     type: "log",
     id: "same",
@@ -233,7 +244,7 @@ test("confirmation retries do not duplicate consumption; editing and removal rec
   assert.equal(state.logs.length, 0);
 });
 test("stale undo is rejected when previous plan no longer fits", () => {
-  let state = transition(createDemoState(), {
+  let state = transition(stockedState(), {
     type: "choose",
     mealId: "tofu-bowl",
   });
@@ -331,25 +342,25 @@ test("invalid quantities and schedule values cannot mutate state", () => {
     /upper bound/,
   );
 });
-test("storage roundtrip and damaged data preservation", () => {
+test("storage roundtrip and damaged data preservation", async () => {
   const records = new Map(),
     storage = {
       getItem: (key) => records.get(key),
       setItem: (k, v) => records.set(k, v),
       removeItem: (k) => records.delete(k),
     };
-  const state = transition(createDemoState(), {
+  const state = transition(stockedState(), {
     type: "choose",
     mealId: "tofu-bowl",
   });
-  storageAdapter.save(storage, state);
-  assert.deepEqual(storageAdapter.load(storage).state, state);
+  await storageAdapter.save(storage, state);
+  assert.deepEqual((await storageAdapter.load(storage)).state, state);
   storage.setItem(STORAGE_KEY, "{broken");
-  assert.ok(storageAdapter.load(storage).error);
+  assert.ok((await storageAdapter.load(storage)).error);
   assert.equal(storage.getItem(STORAGE_KEY), "{broken");
 });
 test("assistant proposes bounded commands and uses the same plan without mutation", () => {
-  const state = transition(createDemoState(), {
+  const state = transition(stockedState(), {
     type: "choose",
     mealId: "tofu-bowl",
   });

@@ -10,6 +10,24 @@ export const today = () =>
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+/** Stocked pantry for engine/unit tests only — UI starts empty. */
+export const testPantry = {
+  tofu: 300,
+  "cooked brown rice": 500,
+  "frozen vegetables": 300,
+  "olive oil": 100,
+  chickpeas: 400,
+  yogurt: 150,
+  cucumber: 200,
+  eggs: 200,
+  garlic: 50,
+  "soy sauce": 100,
+  "dry pasta": 200,
+  tomatoes: 300,
+  cheese: 100,
+  bread: 160,
+};
+
 /** @returns {import('./contracts').AppState} */
 export function createDemoState() {
   return {
@@ -36,22 +54,7 @@ export function createDemoState() {
       buffer: config.timing.defaultBufferMinutes,
       service: 10,
     },
-    pantry: {
-      tofu: 300,
-      "cooked brown rice": 500,
-      "frozen vegetables": 300,
-      "olive oil": 100,
-      chickpeas: 400,
-      yogurt: 150,
-      cucumber: 200,
-      eggs: 200,
-      garlic: 50,
-      "soy sauce": 100,
-      "dry pasta": 200,
-      tomatoes: 300,
-      cheese: 100,
-      bread: 160,
-    },
+    pantry: {},
     plan: null,
     previousPlan: null,
     logs: [],

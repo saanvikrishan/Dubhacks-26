@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { catalog, pantryItems } from "../data/catalog";
+import { catalog } from "../data/catalog";
 import { byId } from "../data/suggestions";
 import { capabilities, config } from "../domain/config";
 import { clockTime, evaluate, minutes, timeParts } from "../domain/engine";
@@ -10,6 +10,11 @@ import {
   portionNutrition,
   usdaConfidenceExplain,
 } from "../domain/nutrition";
+import {
+  mealSubstitutions,
+  pantryCovers,
+  substitutionLine,
+} from "../domain/substitutions";
 import { money, num, niceTime } from "./format";
 import { today } from "../domain/state";
 
@@ -152,22 +157,37 @@ function MealArt({ meal }) {
     </div>
   );
 }
-function Modal({ title, onClose, children, wide = false }) {
+function Modal({
+  title,
+  onClose,
+  children,
+  wide = false,
+  className = "",
+  leading = null,
+  subtitle = "",
+}) {
   const ref = useRef(null);
   useEffect(() => {
     const el = ref.current;
     el.showModal();
     return () => el.close();
   }, []);
+  const label = typeof title === "string" ? title : "Dialog";
   return (
     <dialog
       ref={ref}
-      className={wide ? "wide" : ""}
+      className={[wide ? "wide" : "", className].filter(Boolean).join(" ")}
       onCancel={onClose}
-      aria-label={title}
+      aria-label={label}
     >
       <div className="dialog-header">
-        <h2>{title}</h2>
+        <div className="dialog-heading">
+          {leading}
+          <div>
+            <h2>{title}</h2>
+            {subtitle ? <p className="dialog-subtitle">{subtitle}</p> : null}
+          </div>
+        </div>
         <button
           className="icon-button"
           aria-label="Close dialog"
@@ -652,12 +672,27 @@ function Details({ meal, state, onClose, onChoose, onLog }) {
               <li key={item.name}>
                 <span>{item.name}</span>
                 <span>
-                  {item.grams} g needed · {state.pantry[item.name] ?? 0} g on
-                  hand
+                  {item.grams} g needed ·{" "}
+                  {pantryCovers(item.name, state.pantry)
+                    ? "on hand"
+                    : `${state.pantry[item.name] ?? 0} g on hand`}
                 </span>
               </li>
             ))}
           </ul>
+          {mealSubstitutions(meal, state.pantry).length > 0 && (
+            <>
+              <h3>Alternatives for what you don’t have</h3>
+              <ul className="substitution-list">
+                {mealSubstitutions(meal, state.pantry).map((s) => (
+                  <li key={`${s.missing}-${s.useInstead || "omit"}`}>
+                    <strong>{substitutionLine(s)}</strong>
+                    {s.note ? <span className="muted"> — {s.note}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           <h3>Let’s make it</h3>
           <ol className="recipe">
             {meal.steps.map((step) => (
@@ -820,10 +855,47 @@ function Card({
     </article>
   );
 }
+function pantryEntries(pantry) {
+  return Object.entries(pantry || {})
+    .filter(([, grams]) => Number(grams) > 0)
+    .map(([name, grams]) => ({ name, grams: Number(grams) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function Kitchen({ state, onSave }) {
-  const [pantry, setPantry] = useState({ ...state.pantry }),
+  const [items, setItems] = useState(() => pantryEntries(state.pantry)),
+    [draft, setDraft] = useState(""),
+    [grams, setGrams] = useState("500"),
     [error, setError] = useState(""),
     [saved, setSaved] = useState(false);
+
+  function addItem() {
+    const name = draft.trim().replace(/\s+/g, " ").slice(0, 60);
+    if (!name) return;
+    const amount = Number(grams);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) {
+      setError("Enter a quantity above 0 g and up to 100000 g.");
+      return;
+    }
+    const key = name.toLowerCase();
+    setItems((list) => {
+      const existing = list.find((item) => item.name.toLowerCase() === key);
+      if (existing)
+        return list.map((item) =>
+          item.name.toLowerCase() === key
+            ? { ...item, grams: Math.max(item.grams, amount) }
+            : item,
+        );
+      return [...list, { name, grams: amount }].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+    });
+    setDraft("");
+    setGrams("500");
+    setError("");
+    setSaved(false);
+  }
+
   return (
     <section className="panel kitchen-panel">
       <div className="section-heading">
@@ -834,13 +906,105 @@ function Kitchen({ state, onSave }) {
         <Icon name="kitchen" size={30} />
       </div>
       <p className="muted">
-        Confirmed edible quantities in grams. Rice and chickpeas are already
-        cooked; pasta is dry. Sample pantry values are editable. Choosing a meal
-        leaves inventory as entered.
+        Add what you actually have. Quantities are in grams—rice and chickpeas
+        as cooked, pasta as dry. Choosing a meal leaves inventory as entered.
       </p>
       <form
-        onSubmit={async (e) => {
+        className="kitchen-add"
+        onSubmit={(e) => {
           e.preventDefault();
+          addItem();
+        }}
+      >
+        <label>
+          Ingredient
+          <input
+            type="text"
+            value={draft}
+            placeholder="e.g. spinach, chicken, tortillas"
+            aria-label="Ingredient name"
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setError("");
+            }}
+          />
+        </label>
+        <label>
+          Amount
+          <span className="input-unit">
+            <input
+              type="number"
+              min="1"
+              max="100000"
+              step="1"
+              value={grams}
+              aria-label="Amount in grams"
+              onChange={(e) => {
+                setGrams(e.target.value);
+                setError("");
+              }}
+            />
+            <span>g</span>
+          </span>
+        </label>
+        <button type="submit" className="secondary" disabled={!draft.trim()}>
+          Add
+        </button>
+      </form>
+      <div className="kitchen-list" role="list" aria-label="Groceries on hand">
+        {items.map((item) => (
+          <div className="kitchen-row" role="listitem" key={item.name}>
+            <span className="kitchen-name">{item.name}</span>
+            <span className="input-unit">
+              <input
+                type="number"
+                min="1"
+                max="100000"
+                step="1"
+                value={item.grams}
+                aria-label={`${item.name} grams`}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setItems((list) =>
+                    list.map((row) =>
+                      row.name === item.name
+                        ? { ...row, grams: Number.isFinite(next) ? next : 0 }
+                        : row,
+                    ),
+                  );
+                  setSaved(false);
+                }}
+              />
+              <span>g</span>
+            </span>
+            <button
+              type="button"
+              className="text-button"
+              aria-label={`Remove ${item.name}`}
+              onClick={() => {
+                setItems((list) => list.filter((row) => row.name !== item.name));
+                setSaved(false);
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+        {!items.length && (
+          <p className="kitchen-empty">
+            Nothing listed yet—type an ingredient above to start.
+          </p>
+        )}
+      </div>
+      <button
+        type="button"
+        className="primary"
+        onClick={async () => {
+          const pantry = Object.fromEntries(
+            items
+              .filter((item) => item.name && item.grams > 0)
+              .map((item) => [item.name, item.grams]),
+          );
           try {
             await onSave({ type: "updatePantry", pantry });
             setSaved(true);
@@ -850,41 +1014,17 @@ function Kitchen({ state, onSave }) {
           }
         }}
       >
-        <div className="pantry-grid">
-          {pantryItems.map((item) => (
-            <label key={item}>
-              {item}
-              <span className="input-unit">
-                <input
-                  type="number"
-                  min="0"
-                  max="100000"
-                  step="1"
-                  value={pantry[item] ?? 0}
-                  required
-                  onChange={(e) => {
-                    setPantry({ ...pantry, [item]: Number(e.target.value) });
-                    setSaved(false);
-                  }}
-                />
-                <span>g</span>
-              </span>
-            </label>
-          ))}
-        </div>
-        <button type="submit" className="primary">
-          Save ingredients
-          <Icon name="check" size={17} />
-        </button>
-        {saved && (
-          <p role="status">Ingredients saved. Meal options refreshed.</p>
-        )}
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-      </form>
+        Save ingredients
+        <Icon name="check" size={17} />
+      </button>
+      {saved && (
+        <p role="status">Ingredients saved. Meal options refreshed.</p>
+      )}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </section>
   );
 }
@@ -1016,147 +1156,212 @@ function Intake({ state, onEdit, onRemove }) {
     </section>
   );
 }
+const ASSISTANT_PROMPTS = [
+  "Compare meals for me",
+  "I have 45 minutes",
+  "What’s easy with my groceries?",
+  "Something lighter tonight",
+];
+
 function Assistant({ state, onAction, onClose }) {
   const [text, setText] = useState(""),
     [messages, setMessages] = useState([
       {
         message:
-          "A little help with your next meal. Try “compare meals” or “I have 45 minutes”.",
+          "Hi — I’m your food copilot. Ask in plain language, or tap a prompt below to start.",
       },
     ]),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  const listRef = useRef(null);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, busy]);
+
+  async function sendPrompt(raw) {
+    const sent = raw.trim();
+    if (!sent || busy) return;
+    let response;
+    try {
+      response = interpretFoodRequest(sent, state, catalog);
+    } catch (err) {
+      setError(err.message);
+      return;
+    }
+    if (!response.unrecognized) {
+      setMessages((prev) => [...prev, { user: true, message: sent }, response]);
+      setText("");
+      setError("");
+      return;
+    }
+    setBusy(true);
+    setMessages((prev) => [
+      ...prev,
+      { user: true, message: sent },
+      { message: "Thinking…", pending: true },
+    ]);
+    setText("");
+    setError("");
+    try {
+      const res = await fetch("/api/recipes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: sent, memories: [] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail =
+          typeof data.detail === "string"
+            ? data.detail
+            : Array.isArray(data.detail)
+              ? data.detail.map((item) => item.msg || item).join(" ")
+              : data.error || "Could not interpret that request.";
+        setMessages((prev) => prev.filter((item) => !item.pending));
+        setError(detail);
+        return;
+      }
+      const reply = replyFromPatch(data, state, catalog);
+      setMessages((prev) => [...prev.filter((item) => !item.pending), reply]);
+      const summary = reply.message;
+      if (typeof summary === "string" && summary) {
+        try {
+          const phrased = await fetch("/api/recipes/phrase", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ summary }),
+            signal: AbortSignal.timeout(25000),
+          });
+          const phraseData = await phrased.json().catch(() => ({}));
+          const phrasedText =
+            phrased.ok && typeof phraseData.text === "string"
+              ? phraseData.text.trim()
+              : "";
+          if (phrasedText)
+            setMessages((prev) =>
+              prev.map((item) =>
+                item === reply ? { ...item, message: phrasedText } : item,
+              ),
+            );
+        } catch {
+          // Keep the templated reply already on screen.
+        }
+      }
+    } catch (err) {
+      setMessages((prev) => prev.filter((item) => !item.pending));
+      setError(err.message || "Could not interpret that request.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <Modal title="Your food assistant" onClose={onClose}>
-      <p className="fine-print">
-        Simple local commands · AI is connected. Photon is not connected.
-      </p>
-      <div className="chat-messages" aria-live="polite">
+    <Modal
+      title="Daywell AI"
+      subtitle="Food copilot · live"
+      className="assistant-dialog"
+      onClose={onClose}
+      leading={
+        <span className="assistant-orb" aria-hidden="true">
+          <Icon name="spark" size={18} />
+        </span>
+      }
+    >
+      <div className="assistant-status">
+        <span className="assistant-pulse" aria-hidden="true" />
+        <span>Listening for meal help</span>
+      </div>
+      <div className="chat-messages" aria-live="polite" ref={listRef}>
         {messages.map((msg, i) => (
           <div
-            className={msg.user ? "chat-bubble user" : "chat-bubble"}
+            className={
+              msg.user
+                ? "chat-row user"
+                : msg.pending
+                  ? "chat-row pending"
+                  : "chat-row"
+            }
             key={i}
           >
-            {msg.message}
-            {msg.proposal && (
-              <button
-                className="secondary"
-                disabled={msg.applied}
-                onClick={() => {
-                  try {
-                    onAction(msg.proposal);
-                    setMessages((prev) =>
-                      prev.map((m, j) =>
-                        j === i ? { ...m, applied: true } : m,
-                      ),
-                    );
-                    setError("");
-                  } catch (err) {
-                    setError(err.message);
-                  }
-                }}
-              >
-                {msg.applied ? "Applied" : "Apply this change"}
-              </button>
+            {!msg.user && (
+              <span className="chat-avatar" aria-hidden="true">
+                <Icon name="spark" size={14} />
+              </span>
             )}
+            <div className={msg.user ? "chat-bubble user" : "chat-bubble"}>
+              {msg.pending ? (
+                <span className="chat-typing" aria-label="Thinking">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              ) : (
+                msg.message
+              )}
+              {msg.proposal && (
+                <button
+                  className="assistant-apply"
+                  disabled={msg.applied}
+                  onClick={() => {
+                    try {
+                      onAction(msg.proposal);
+                      setMessages((prev) =>
+                        prev.map((m, j) =>
+                          j === i ? { ...m, applied: true } : m,
+                        ),
+                      );
+                      setError("");
+                    } catch (err) {
+                      setError(err.message);
+                    }
+                  }}
+                >
+                  {msg.applied ? "Applied" : "Apply this change"}
+                </button>
+              )}
+            </div>
           </div>
         ))}
       </div>
+      {messages.length < 3 && (
+        <div className="assistant-prompts" role="group" aria-label="Try asking">
+          {ASSISTANT_PROMPTS.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              className="assistant-chip"
+              disabled={busy}
+              onClick={() => sendPrompt(prompt)}
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+      )}
       <form
-        className="chat-form"
-        onSubmit={async (e) => {
+        className="chat-form assistant-composer"
+        onSubmit={(e) => {
           e.preventDefault();
-          const sent = text.trim();
-          if (!sent) return;
-          let response;
-          try {
-            response = interpretFoodRequest(sent, state, catalog);
-          } catch (err) {
-            setError(err.message);
-            return;
-          }
-          if (!response.unrecognized) {
-            setMessages((prev) => [
-              ...prev,
-              { user: true, message: sent },
-              response,
-            ]);
-            setText("");
-            setError("");
-            return;
-          }
-          setMessages((prev) => [
-            ...prev,
-            { user: true, message: sent },
-            { message: "Checking that…", pending: true },
-          ]);
-          setText("");
-          setError("");
-          try {
-            const res = await fetch("/api/recipes", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text: sent, memories: [] }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) {
-              const detail =
-                typeof data.detail === "string"
-                  ? data.detail
-                  : Array.isArray(data.detail)
-                    ? data.detail.map((item) => item.msg || item).join(" ")
-                    : data.error || "Could not interpret that request.";
-              setMessages((prev) => prev.filter((item) => !item.pending));
-              setError(detail);
-              return;
-            }
-            const reply = replyFromPatch(data, state, catalog);
-            setMessages((prev) => [
-              ...prev.filter((item) => !item.pending),
-              reply,
-            ]);
-            const summary = reply.message;
-            if (typeof summary === "string" && summary) {
-              try {
-                const phrased = await fetch("/api/recipes/phrase", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ summary }),
-                  signal: AbortSignal.timeout(25000),
-                });
-                const phraseData = await phrased.json().catch(() => ({}));
-                const text =
-                  phrased.ok && typeof phraseData.text === "string"
-                    ? phraseData.text.trim()
-                    : "";
-                if (text)
-                  setMessages((prev) =>
-                    prev.map((item) =>
-                      item === reply ? { ...item, message: text } : item,
-                    ),
-                  );
-              } catch {
-                // Keep the templated reply already on screen.
-              }
-            }
-          } catch (err) {
-            setMessages((prev) => prev.filter((item) => !item.pending));
-            setError(err.message || "Could not interpret that request.");
-          }
+          sendPrompt(text);
         }}
       >
         <label className="sr-only" htmlFor="chat-input">
-          Food request
+          Ask Daywell AI
         </label>
         <input
           id="chat-input"
           value={text}
+          disabled={busy}
           onChange={(e) => setText(e.target.value)}
-          placeholder="What would help with your meal?"
+          placeholder="Ask anything about meals…"
+          autoComplete="off"
         />
         <button
-          className="primary"
+          className="primary assistant-send"
           type="submit"
-          aria-label="Send food request"
+          disabled={busy || !text.trim()}
+          aria-label="Send"
         >
           <Icon name="arrow" />
         </button>

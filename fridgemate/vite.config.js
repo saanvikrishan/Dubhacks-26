@@ -43,6 +43,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
+      // Openverse CC image search — match photos to dish names
+      "/api/openverse": {
+        target: "https://api.openverse.org/v1",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/openverse/, ""),
+      },
     },
   },
 });

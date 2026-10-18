@@ -9,7 +9,6 @@ export const niceTime = (t) => {
   return `${Math.floor(m / 60) % 12 || 12}:${String(m % 60).padStart(2, "0")} ${m >= 720 ? "PM" : "AM"}`;
 };
 
-/** Tiny inline placeholder — paints instantly while CDN photo resolves. */
 export const MEAL_IMAGE_PLACEHOLDER =
   "data:image/svg+xml," +
   encodeURIComponent(
@@ -22,60 +21,255 @@ export const MEAL_IMAGE_PLACEHOLDER =
   );
 
 const thumbCache = new Map();
+const inflight = new Map();
+const usedThumbs = new Set();
 
-function searchQueries(name) {
-  const base = String(name || "")
-    .replace(/\([^)]*\)/g, "")
+const STOP = new Set([
+  "a",
+  "an",
+  "the",
+  "and",
+  "or",
+  "with",
+  "in",
+  "of",
+  "style",
+  "homemade",
+  "easy",
+  "quick",
+  "bowl",
+  "plate",
+  "dish",
+  "recipe",
+  "meal",
+  "fresh",
+  "zesty",
+  "spicy",
+  "simple",
+  "classic",
+  "best",
+  "loaded",
+  "healthy",
+]);
+
+/** Strong food signals — if the photo has these and the dish doesn't, reject. */
+const CONFLICT_FOODS = new Set([
+  "shrimp",
+  "prawn",
+  "prawns",
+  "chicken",
+  "beef",
+  "pork",
+  "lamb",
+  "fish",
+  "salmon",
+  "tuna",
+  "bacon",
+  "sausage",
+  "crab",
+  "lobster",
+  "turkey",
+  "duck",
+  "steak",
+  "pepperoni",
+  "anchovy",
+  "clam",
+  "mussel",
+]);
+
+const SYNONYM = {
+  veggie: "vegetable",
+  veggies: "vegetable",
+  veg: "vegetable",
+  eggs: "egg",
+  tomatoes: "tomato",
+  peppers: "pepper",
+  noodles: "noodle",
+};
+
+function norm(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const parts = base.split(/[\s/]+/).filter(Boolean);
-  const list = [base, parts.slice(0, 3).join(" "), parts.slice(0, 2).join(" ")];
-  if (parts[0]) list.push(parts[0]);
-  const out = [];
-  const seen = new Set();
-  for (const q of list) {
-    const t = q.trim().slice(0, 60);
-    const key = t.toLowerCase();
-    if (t && !seen.has(key)) {
-      seen.add(key);
-      out.push(t);
-    }
-  }
-  return out;
 }
 
-/** Fast TheMealDB lookup (existing CDN photos, not AI generation). */
-export async function resolveMealImage(name) {
-  const key = String(name || "")
-    .trim()
-    .toLowerCase();
-  if (!key) return null;
-  if (thumbCache.has(key)) return thumbCache.get(key);
+function tokens(text) {
+  return norm(text)
+    .split(" ")
+    .map((t) => SYNONYM[t] || t)
+    .filter((t) => t && !STOP.has(t) && t.length > 2);
+}
 
-  for (const q of searchQueries(name)) {
-    try {
-      const res = await fetch(
-        `https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(q)}`,
-      );
-      if (!res.ok) continue;
-      const data = await res.json();
-      const thumb = data?.meals?.[0]?.strMealThumb;
-      if (thumb) {
-        thumbCache.set(key, thumb);
-        return thumb;
-      }
-    } catch {
-      // try next query
-    }
+function hashPick(seed, size) {
+  let h = 0;
+  const s = String(seed || "");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return size > 0 ? h % size : 0;
+}
+
+/** Prefer the full recipe title so "egg veggie fried rice" isn't shortened away. */
+function photoQuery(mealOrName) {
+  if (mealOrName && typeof mealOrName === "object") {
+    const name = String(mealOrName.name || "").trim();
+    const search = String(mealOrName.imageSearch || "").trim();
+    // Use the more specific string (usually the full name)
+    const primary =
+      name.length >= search.length ? name || search : search || name;
+    return primary.slice(0, 100) || "homemade meal";
   }
-  thumbCache.set(key, null);
-  return null;
+  return String(mealOrName || "homemade meal").trim().slice(0, 100);
+}
+
+function searchQuery(mealOrName) {
+  const q = photoQuery(mealOrName);
+  const toks = tokens(q);
+  // Expand veggie → vegetable already in tokens; keep egg + fried + rice etc.
+  const core = toks.slice(0, 6).join(" ");
+  return `${core || q} food -shrimp -prawn -seafood`.trim();
+}
+
+/** Immediate preview tagged with the dish's own words (not random stock). */
+export function taggedMealImage(name) {
+  const tags = tokens(name).slice(0, 5);
+  // Put distinctive ingredients first (egg, vegetable) before generic "fried"
+  const ordered = [...tags].sort((a, b) => {
+    const rank = (t) =>
+      CONFLICT_FOODS.has(t) || t === "egg" || t === "vegetable" || t === "tofu"
+        ? 0
+        : t === "rice" || t === "pasta" || t === "noodle"
+          ? 2
+          : 1;
+    return rank(a) - rank(b);
+  });
+  const tagStr = (ordered.length ? ordered : ["food"]).concat("food").join(",");
+  const lock = hashPick(name, 999999);
+  return `https://loremflickr.com/768/768/${encodeURIComponent(tagStr)}/all?lock=${lock}`;
 }
 
 /**
- * Sync URL for <img src>. Prefers backend imageUrl; catalog stock keys stay local.
- * Never hits a slow generative image API.
+ * Score a candidate photo against the dish.
+ * Shared ingredients help; conflicting proteins (shrimp on an egg dish) hurt a lot.
  */
+function scoreCandidate(query, title, tagText = "") {
+  const want = new Set(tokens(query));
+  const blob = `${title} ${tagText}`;
+  const gotList = tokens(blob);
+  const got = new Set(gotList);
+  if (!want.size) return -999;
+
+  let shared = 0;
+  for (const t of want) if (got.has(t)) shared += 1;
+
+  let score = shared * 120;
+
+  // Require at least one shared token or we don't trust it
+  if (shared === 0) score -= 400;
+
+  // Bonus when distinctive non-generic words match (egg, vegetable, …)
+  for (const t of want) {
+    if (got.has(t) && t !== "fried" && t !== "rice" && t !== "food") score += 80;
+  }
+
+  // Heavy penalty: photo mentions a protein the dish does not
+  for (const t of got) {
+    if (CONFLICT_FOODS.has(t) && !want.has(t)) score -= 500;
+  }
+
+  // Mild penalty for lots of extra unmatched food words
+  const extras = gotList.filter((t) => !want.has(t) && t !== "food").length;
+  score -= Math.min(80, extras * 10);
+
+  return score;
+}
+
+async function searchOpenverse(query, signal) {
+  const res = await fetch(
+    `/api/openverse/images/?q=${encodeURIComponent(query)}&page_size=20`,
+    { signal },
+  );
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => ({}));
+  return Array.isArray(data?.results) ? data.results : [];
+}
+
+function pickOpenverseUrl(dishQuery, results) {
+  if (!results?.length) return null;
+  const ranked = results
+    .map((r, index) => {
+      const tagText = Array.isArray(r.tags)
+        ? r.tags.map((t) => (typeof t === "string" ? t : t?.name || "")).join(" ")
+        : "";
+      return {
+        url: r.url || r.thumbnail,
+        score: scoreCandidate(dishQuery, r.title || "", tagText),
+        index,
+        title: r.title || "",
+      };
+    })
+    .filter((r) => r.url && /^https?:\/\//.test(r.url))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  if (!ranked.length) return null;
+
+  // Only accept photos that actually look related (and not conflicting protein)
+  const good = ranked.filter((r) => r.score >= 100);
+  if (!good.length) return null;
+
+  const fresh = good.filter((r) => !usedThumbs.has(r.url));
+  const choices = fresh.length ? fresh : good;
+  const top = choices[0].score;
+  const band = choices.filter((r) => r.score >= top - 60);
+  const chosen = band[hashPick(dishQuery, band.length)] || choices[0];
+  usedThumbs.add(chosen.url);
+  return chosen.url;
+}
+
+/**
+ * Resolve a photo that matches the dish name.
+ * Rejects conflicting proteins (e.g. shrimp when the dish is egg/veggie).
+ */
+export async function resolveMealImage(nameOrMeal) {
+  const dish = photoQuery(nameOrMeal);
+  const key = dish.toLowerCase();
+  if (!key) return taggedMealImage("food");
+  const hit = thumbCache.get(key);
+  if (hit) return hit;
+  if (inflight.has(key)) return inflight.get(key);
+
+  const job = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    try {
+      const q = searchQuery(nameOrMeal);
+      const results = await searchOpenverse(q, controller.signal);
+      const url = pickOpenverseUrl(dish, results);
+      const finalUrl = url || taggedMealImage(dish);
+      thumbCache.set(key, finalUrl);
+      return finalUrl;
+    } catch {
+      return taggedMealImage(dish);
+    } finally {
+      clearTimeout(timer);
+      inflight.delete(key);
+    }
+  })();
+
+  inflight.set(key, job);
+  return job;
+}
+
+export function prefetchMealImages(meals) {
+  usedThumbs.clear();
+  for (const meal of meals || []) {
+    if (!meal?.name && !meal?.imageSearch) continue;
+    const key = photoQuery(meal).toLowerCase();
+    if (key) thumbCache.delete(key);
+    void resolveMealImage(meal);
+  }
+}
+
 export function mealImage(meal) {
   if (!meal) return MEAL_IMAGE_PLACEHOLDER;
   if (typeof meal.imageUrl === "string" && /^https?:\/\//.test(meal.imageUrl))
@@ -97,14 +291,10 @@ export function mealImage(meal) {
     return `/food/${meal.photo}.png`;
   }
 
-  const cached = thumbCache.get(
-    String(meal.name || "")
-      .trim()
-      .toLowerCase(),
-  );
+  const key = photoQuery(meal).toLowerCase();
+  const cached = thumbCache.get(key);
   if (cached) return cached;
-  return MEAL_IMAGE_PLACEHOLDER;
+  return taggedMealImage(photoQuery(meal));
 }
 
-/** @deprecated use mealImage */
 export const photoFor = (meal) => mealImage(meal);
