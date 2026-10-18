@@ -1,30 +1,18 @@
 import asyncio
 import json
 import os
-<<<<<<< Updated upstream
 import re
-from datetime import date
-=======
->>>>>>> Stashed changes
-from pathlib import Path
-
-from backboard import BackboardClient
+from datetime import dateackboardClient
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from pydantic import BaseModel, Field
 
-<<<<<<< Updated upstream
 ROOT = Path(__file__).resolve().parent
 # Prefer backend/.env, fall back to fridgemate/.env
 load_dotenv(ROOT / ".env")
 load_dotenv(ROOT.parent / ".env")
-=======
-# Load .env from the same directory as this file
-env_path = Path(__file__).parent / '.env'
-load_dotenv(dotenv_path=env_path)
->>>>>>> Stashed changes
 
 app = FastAPI(title="FridgeMate API")
 
@@ -59,12 +47,7 @@ GEMINI_FALLBACKS = [
 api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
 client = genai.Client(api_key=api_key) if api_key else None
 
-<<<<<<< Updated upstream
 backboard_key = (os.getenv("BACKBOARD_API_KEY") or "").strip()
-=======
-backboard_key = os.getenv("BACKBOARD_API_KEY")
-print(f"[Startup] Backboard API key loaded: {backboard_key[:20] + '...' if backboard_key else 'MISSING'}")
->>>>>>> Stashed changes
 backboard_client = BackboardClient(api_key=backboard_key) if backboard_key else None
 _assistant_id = None
 DEMO_ASSISTANT_NAME = "FridgeMate demo"
