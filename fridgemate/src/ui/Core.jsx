@@ -1196,6 +1196,18 @@ function Assistant({ state, onAction, onClose }) {
       setError("");
       return;
     }
+    const history = messages
+      .filter(
+        (item) =>
+          !item.pending &&
+          typeof item.message === "string" &&
+          item.message.trim(),
+      )
+      .slice(-4)
+      .map((item) => ({
+        role: item.user ? "user" : "assistant",
+        text: item.message.slice(0, 500),
+      }));
     setBusy(true);
     setMessages((prev) => [
       ...prev,
@@ -1208,7 +1220,7 @@ function Assistant({ state, onAction, onClose }) {
       const res = await fetch("/api/recipes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: sent, memories: [] }),
+        body: JSON.stringify({ text: sent, memories: [], history }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1220,6 +1232,17 @@ function Assistant({ state, onAction, onClose }) {
               : data.error || "Could not interpret that request.";
         setMessages((prev) => prev.filter((item) => !item.pending));
         setError(detail);
+        return;
+      }
+      if (data.intent === "conversation") {
+        const message =
+          typeof data.message === "string" && data.message.trim()
+            ? data.message.trim()
+            : "Tell me what you're looking for — ingredients, time, or budget — and I'll find something.";
+        setMessages((prev) => [
+          ...prev.filter((item) => !item.pending),
+          { message },
+        ]);
         return;
       }
       const reply = replyFromPatch(data, state, catalog);
