@@ -1,0 +1,9 @@
+{
+  "name": "fridgemate-photon",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "pg": "^8.16.3",
+    "spectrum-ts": "12.11.0"
+  }
+}

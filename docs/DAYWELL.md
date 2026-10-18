@@ -7,7 +7,7 @@ A working React/Vite app for planning a day and finding food around UW. This imp
 Requires Node 22.12+ and npm. Apple Calendar additionally requires macOS and Apple Command Line Tools (`xcrun swiftc`).
 
 ```sh
-cd fridgemate
+cd fridgemate/frontend
 npm ci
 npm run dev -- --host 127.0.0.1
 ```
@@ -20,7 +20,7 @@ npm run build
 npm run lint
 ```
 
-The production bundle is in `fridgemate/dist/`. `vite preview` or static hosting serves the frontend only; the Apple Calendar API is currently attached to the local development server.
+The production bundle is in `fridgemate/frontend/dist/`. `vite preview` or static hosting serves the frontend only; the Apple Calendar API is currently attached to the local development server.
 
 ## Three distinct pages
 
@@ -63,10 +63,10 @@ Data lives in this origin's localStorage (`daywell.local-demo.v1`). `localhost` 
 
 ## Team handoff
 
-- UI: `fridgemate/src/App.jsx`, `src/ui/CalendarViews.jsx`, `src/ui/FoodViews.jsx`, shared dialogs in `src/ui/Core.jsx`, and `src/ui/redesign.css`.
+- UI: `fridgemate/frontend/src/App.jsx`, `src/ui/CalendarViews.jsx`, `src/ui/FoodViews.jsx`, shared dialogs in `src/ui/Core.jsx`, and `src/ui/redesign.css`.
 - Domain: explicit constraints, nutrition math, calendar logic and mutation service in `src/domain/`.
 - Data: Cook fixtures in `src/data/catalog.js`; sourced UW venue records in `src/data/uwDining.js`.
-- Mac bridge: `fridgemate/native/` and `fridgemate/server/calendar-bridge.js`.
+- Mac bridge: `fridgemate/frontend/native/` and `fridgemate/frontend/server/calendar-bridge.js`.
 - Verification: [test and browser report](docs/VERIFICATION.md).
 
 Gemini, Atlas and Photon remain unconnected. The assistant supports bounded local commands. The team still needs reviewed nutrition/recipe data; a live places provider for ratings/routed time; authenticated server ownership and storage; then server-side Gemini/Atlas/Photon credentials and actual adapters. See [architecture and configuration](docs/ARCHITECTURE.md). No orders, payments, messages or external calendar writes are implemented.

@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 1,
+  "product": {
+    "name": "WhatsCooking.ai",
+    "tagline": "Meals that fit your fridge, calendar, and appetite.",
+    "initialAudience": "Busy UW students",
+    "initialLocation": "University of Washington, Seattle",
+    "timezone": "America/Los_Angeles",
+    "currency": "USD",
+    "demoMode": true
+  },
+  "scope": {
+    "activeModule": "food",
+    "expansionPolicy": "Finish and verify the food loop before implementing optional modules.",
+    "coreBuildOrder": [
+      "profile_and_context",
+      "food_catalog",
+      "feasibility_and_ranking",
+      "meal_cards_and_details",
+      "selection_and_replanning",
+      "consumption_and_nutrition_summary",
+      "food_assistant"
+    ],
+    "nextFeatureCandidates": [
+      "calendarRead",
+      "calendarWrite",
+      "messaging",
+      "groceryList",
+      "reminders"
+    ],
+    "stopAfterCore": false,
+    "optionalFeatureBudgetMinutes": 60
+  },
+  "featureFlags": {
+    "cook": true,
+    "eatOut": true,
+    "nutritionDetails": true,
+    "nutritionGoals": true,
+    "mealLogging": true,
+    "dailyNutritionSummary": true,
+    "manualPantry": true,
+    "manualSchedule": true,
+    "foodAssistant": true,
+    "groceryList": false,
+    "authentication": false,
+    "calendarRead": false,
+    "calendarWrite": false,
+    "messaging": false,
+    "backgroundJobs": false,
+    "reminders": false,
+    "longTermMemory": false,
+    "pantryVision": false,
+    "fullCalendarPlanner": false,
+    "studyPlanning": false,
+    "fitnessPlanning": false,
+    "automaticMealRescheduling": false
+  },
+  "providers": {
+    "ai": "gemini",
+    "database": "mongodb-atlas",
+    "demoDatabaseFallback": "local-json",
+    "schedule": "manual",
+    "messaging": "photon",
+    "nutrition": "curated-sourced-records",
+    "vision": "perceptron",
+    "memory": "none"
+  },
+  "competition": {
+    "decisionStatus": "targets-decided",
+    "registrationStatus": "not-submitted",
+    "titleTrack": "Cook Smarter",
+    "sponsoredSideTracks": [
+      "SideShift",
+      "Photon",
+      "VEYZL"
+    ],
+    "nonSponsoredTracks": [
+      "Best Use of Gemini API",
+      "Best Use of MongoDB Atlas",
+      "DubHacks NEXT",
+      "Commit Fellowship"
+    ],
+    "committedIntegrationTargets": [
+      "gemini",
+      "mongodb-atlas",
+      "photon-2.0",
+      "veyzl-repository-audit"
+    ],
+    "photonPreferredChannel": "imessage",
+    "evidenceRequired": {
+      "SideShift": "Problem validation, iteration, business and distribution hypothesis.",
+      "Photon": "A real Photon 2.0 channel using the shared meal and nutrition state; verify category/channel eligibility.",
+      "VEYZL": "A visible PR audit and genuine finding that changed the implementation.",
+      "Gemini": "Actual model API use in the application.",
+      "Atlas": "Actual application persistence in MongoDB Atlas.",
+      "NEXT": "Real target user, learning, revenue potential and continuation intent.",
+      "Commit": "Working prototype, category selection and separate supplemental form."
+    },
+    "deliveryPolicy": "Finish the food core, then deliver the committed integrations. Keep runtime flags off until implementation, configuration and authorization are ready. Calendar remains optional.",
+    "fallbackPolicy": "Remove an unmet category before submission and document why; never claim mock or unfinished integration as real."
+  },
+  "recommendation": {
+    "maxCards": 3,
+    "weights": {
+      "preference": 0.25,
+      "nutritionFit": 0.25,
+      "timeConvenience": 0.2,
+      "cost": 0.15,
+      "pantryUse": 0.1,
+      "variety": 0.05
+    },
+    "uncertaintyPenaltyWeight": 0.1,
+    "missingSoftMetricPolicy": "Exclude unsupported dimensions from scoring, renormalize the remaining weights, disclose coverage, and apply the documented uncertainty policy.",
+    "hardConstraintPolicy": "Exclude confirmed conflicts; unresolved required facts cannot enter the confirmed shortlist.",
+    "allowShoppingAsAlternative": false
+  },
+  "timing": {
+    "defaultBufferMinutes": 10,
+    "editableEatingAllowanceMinutes": 20,
+    "editableCleanupAllowanceMinutes": 5,
+    "unknownServiceTimePolicy": "Ask for an allowance or show a provisional option; never claim a live queue estimate."
+  },
+  "nutrition": {
+    "displayNutrients": [
+      "energy_kcal",
+      "protein_g",
+      "carbohydrate_g",
+      "fat_g",
+      "fiber_g",
+      "sodium_mg"
+    ],
+    "optionalNutrients": [
+      "saturated_fat_g",
+      "sugar_g",
+      "iron_mg",
+      "calcium_mg",
+      "vitamin_d_ug",
+      "vitamin_b12_ug"
+    ],
+    "dailyTargetsDefault": null,
+    "targetSource": "Optional user-entered targets, editable or removable.",
+    "nutrientGoalModes": [
+      "target_range",
+      "minimum",
+      "maximum"
+    ],
+    "unknownValue": null,
+    "plannedMealsCountAsIntake": false,
+    "showSourceAndPortion": true,
+    "showIncompleteCoverage": true,
+    "calculateMedicalTargets": false,
+    "diagnoseDeficiencies": false
+  },
+  "permissions": {
+    "defaultMode": "ask-before-external-write",
+    "calendarWriteScope": "daywell-created-meal-blocks-only",
+    "notificationsRequireOptIn": true,
+    "messagesToOtherPeople": "out-of-scope",
+    "paymentsAndOrderPlacement": "out-of-scope"
+  },
+  "design": {
+    "preferredConcept": "Food-focused adaptation of the team demo",
+    "referenceImage": "Daywell-UI-Reference.png",
+    "referenceRole": "Use the visual style and spacious composition; the food-first scope overrides the original feature set.",
+    "style": "Calm cream background, sage/forest green, clear readable typography.",
+    "primaryNavigation": [
+      "Today",
+      "Meals",
+      "My Kitchen"
+    ],
+    "assistantPlacement": "Persistent entry point",
+    "todayMainSections": [
+      "Meal mode and context",
+      "One primary meal recommendation",
+      "Compact alternative meals"
+    ],
+    "todaySidebarSections": [
+      "Confirmed nutrition today",
+      "Next commitment and available time",
+      "Quick food adjustments"
+    ],
+    "mealCardNutritionFields": [
+      "energy_kcal",
+      "protein_g"
+    ],
+    "mealTimeLabel": "Complete meal activity time, with preparation shown separately when useful.",
+    "mobileSwiping": "Optional supplement to visible Choose, Pass, and Details buttons."
+  },
+  "validation": {
+    "minimumCuratedCandidatesPerEnabledMode": 4,
+    "criticalChecks": [
+      "dietary_exclusions",
+      "unknown_required_data",
+      "time_feasibility",
+      "strict_budget",
+      "portion_scaling",
+      "nutrition_coverage",
+      "planned_vs_eaten",
+      "replanning_stability",
+      "feature_dependencies",
+      "disabled_backend_actions",
+      "duplicate_action_prevention"
+    ]
+  },
+  "team": {
+    "saanvi": "UI/UX and food screens",
+    "mahika": "Frontend integration, deployment preparation, validation and positioning",
+    "saurav": "AI orchestration, backend and connectors",
+    "kevin": "Data contracts, feasibility, ranking and nutrition/replanning explanations"
+  }
+}

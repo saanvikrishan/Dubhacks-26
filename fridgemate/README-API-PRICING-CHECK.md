@@ -1,4 +1,8 @@
+> Latest main merge, nutrition, preference and calendar update: [README-MAIN-PREFERENCES-FIX.md](README-MAIN-PREFERENCES-FIX.md). Older counts and paths below are historical.
+
 # API, pricing and image checks — 2026-10-18
+
+**Current implementation:** see [README-FOOD-INTEGRATION.md](README-FOOD-INTEGRATION.md) and [FOOD-INTEGRATION-VERIFICATION.json](FOOD-INTEGRATION-VERIFICATION.json). The earlier observations below predate recipe costing.
 
 Evidence: [API-VERIFICATION.json](API-VERIFICATION.json). All values in that file are historical verification observations, not live promises. No keys or OAuth tokens are included.
 
@@ -16,7 +20,7 @@ The existing backend reads `KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET` exclusi
 - `GET /api/pricing/kroger/locations?zip_code=98105`: bounded public store lookup.
 - `GET /api/pricing/kroger/products?location_id=70500807&term=tofu`: store-scoped package quotes, cached up to 15 minutes.
 
-Unknown prices stay null. Promotions remain separate, including zero promotional fields. No product search result is silently matched to a recipe, converted from a pack count into grams, or applied as a meal price. Automatic SKU selection and recipe costing are not implemented. Generated recipe costs remain user-reviewed per-portion values; local catalog demo costs remain labeled illustrative.
+Unknown prices stay null. Promotions remain separate, including zero promotional fields. No product search result is silently matched to a recipe, converted from a pack count into grams, or applied as a meal price. This earlier quote-only check has been superseded by reviewed product matching and automatic ingredient-use costing for supported recipes. Ambiguous variants and package bases remain incomplete; see the current implementation report.
 
 ## Price checks
 
@@ -24,10 +28,10 @@ The strict engine rejects missing, nonfinite, negative and over-budget costs; an
 
 ## Image checks
 
-Random Flickr fallbacks and arbitrary remote image URLs no longer populate recipe cards. Curated local tofu, pasta and chickpea illustrations are used for their explicit catalog IDs. Other photos must match prepared-dish metadata and reject conflicting protein/ingredient closeups; they are labeled illustrative. Ambiguous, failed or unavailable images show a neutral photo-unavailable placeholder.
+Random Flickr fallbacks and arbitrary remote image URLs no longer populate recipe cards. Curated local tofu, pasta and chickpea illustrations are used for their explicit catalog IDs. Automatic photo search is disabled: keyword matches still produced a wrong tofu salad picture. Only the three explicit ID/name assignments may render bundled illustrations. All other dishes and failed images show a neutral photo-unavailable placeholder; supplied remote URLs and generated search phrases are ignored.
 
 ## Validation
 
-117 JavaScript tests, 23 backend tests, full lint and the production build pass. API tests use fake transports; the live checks above were explicit, bounded read-only requests. The existing bundle-size warning remains. No main-branch push or force push is part of this work.
+Before the photo-only follow-up, 117 JavaScript tests, 23 backend tests, full lint and the production build passed. The deterministic-photo follow-up passes three focused image/price regressions, lint on the touched code, and the production build. API tests use fake transports; the live checks above were explicit, bounded read-only requests. The existing bundle-size warning remains. No main-branch push or force push is part of this work.
 
 Reference contracts: [Google route matrix](https://developers.google.com/maps/documentation/routes/compute_route_matrix), [Kroger public API workspace](https://www.postman.com/kroger/the-kroger-co-s-public-workspace/documentation/ki6utqb/kroger-public-apis).

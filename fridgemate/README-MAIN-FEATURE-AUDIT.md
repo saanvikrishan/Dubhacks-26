@@ -1,4 +1,8 @@
+> Latest main merge, nutrition, preference and calendar update: [README-MAIN-PREFERENCES-FIX.md](README-MAIN-PREFERENCES-FIX.md). Older counts and paths below are historical.
+
 # Main feature audit — 2026-10-18
+
+The later food-data implementation and current service/test results are documented in [README-FOOD-INTEGRATION.md](README-FOOD-INTEGRATION.md).
 
 Compared the live checkout against freshly fetched `origin/main` commit `bd66e44`. The feature-branch integration preserves the main history. Real .env files are excluded; the earlier temporary stash remains as a recovery backup.
 
@@ -20,7 +24,7 @@ All main HTTP method/path combinations remain, including the new `/profile-patch
 - Daywell AI chat, conversation history, constraint interpretation and phrasing endpoints. The latest main profile preference proposals, explicit accept/dismiss controls and cuisine preference persistence are preserved; their new endpoint has a preview proxy.
 - Fridge-photo ingredient scanning, free-text groceries, editable quantities and used-up ingredient confirmation.
 - Postgres pantry and saved-meal routes; saved-meal write on selection.
-- Dynamic dish image matching and prefetch, nutrition detail/goal UI, and USDA lookup endpoint/module.
+- Nutrition detail/goal UI and USDA lookup endpoint/module. Automatic dish-photo matching was subsequently disabled after a user-reported mismatch; explicit bundled illustrations remain, and backend photo helper code is retained.
 - Substitution module, endpoint and existing substitution display.
 - Apple and Google Calendar connection interfaces, week/month calendar, activities and imported events.
 
@@ -30,7 +34,7 @@ Presence is not proof of provider connectivity. Provider contract tests use mock
 
 The earlier requested accuracy work changed the recipe pipeline before the main merge: Cook opens local discovery; the visible grocery/photo button opens recipe generation. Generated recipes require review and cannot bypass diet, allergy, budget, pantry or calendar checks.
 
-Main's automatic recipe-time Backboard memory retrieval, automatic live USDA macro enrichment and secondary AI-generated substitutions are **not wired into the bounded draft generator**. Their modules/endpoints have been preserved, but this is a remaining feature-parity gap, not a verified working integration. Restoring those calls requires reconciling the generation contract and source/portion matching; this audit did not alter Gemini or USDA matching to conceal the gap.
+The later integration calculates sourced USDA nutrition and Kroger ingredient-use costs outside Gemini, and uses read-only Backboard recall for preference ordering. Main's automatic memory injection into the recipe-generation prompt and secondary AI-generated substitutions remain outside the bounded generator; those Gemini behaviors were not changed.
 
 Logging no longer inserts extra planned-meal blocks. Empty/partial allergen lists do not establish absence. No fake/default official prices, nutrition or stock have been restored.
 
@@ -44,4 +48,4 @@ The latest pricing/image checks run 117 JavaScript tests and 23 backend tests; a
 
 Informational all-day festivals, including 重阳节, remain visible but no longer block meal eligibility or free-window discovery. Timed events and genuine all-day commitments remain protected. Imported event details now offer a Daywell-only busy/free control, retained across refresh and reload; source calendars are unchanged. Browser verification with an isolated, stocked test pantry showed nine available Cook options on the festival day.
 
-Runtime check: the active preview backend reports Gemini and Backboard configured, but database and USDA unavailable. These flags do not prove live provider calls. Postgres/USDA cannot be presented as connected in this environment.
+The earlier runtime check found USDA unconfigured. A key was subsequently supplied and live USDA batch retrieval passed; the current report distinguishes live USDA/Kroger/Google/Backboard reads from configuration-only flags. Database connectivity was not independently verified in this task.

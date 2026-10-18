@@ -1,6 +1,13 @@
 # Daywell / FridgeMate
 
-React + Vite frontend with a Python FastAPI backend for Gemini recipes (and optional Backboard memory).
+React frontend (`frontend/`) + Python FastAPI backend (`backend/`) for Gemini recipes (and optional Backboard memory).
+
+```
+fridgemate/
+  frontend/   # Vite + React (Daywell UI)
+  backend/    # FastAPI (recipes, vision, pantry, …)
+  .env        # shared secrets (also loaded from backend/.env)
+```
 
 ## Run locally
 
@@ -15,11 +22,10 @@ pip install -r requirements.txt
 python -c "from uvicorn import run; run('main:app', host='127.0.0.1', port=8000, reload=True)"
 ```
 
-
 **2. Frontend**
 
 ```sh
-cd fridgemate
+cd fridgemate/frontend
 npm ci
 npm run dev -- --host 127.0.0.1
 ```
@@ -35,6 +41,7 @@ Restart Vite after `vite.config.js` proxy changes.
 Apple Calendar still uses the local Mac Vite bridge; ICS import works without it.
 
 ```sh
+cd fridgemate/frontend
 npm test
 npm run build
 npm run lint

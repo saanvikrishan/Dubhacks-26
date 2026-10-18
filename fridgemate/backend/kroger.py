@@ -93,6 +93,8 @@ class KrogerClient:
                     self.token = None
                 return {"status": "rate_limited" if response.status_code == 429 else "api_rejected", "httpStatus": response.status_code}, None
             rows = response.json().get("data")
+            if isinstance(rows, dict) and path.startswith("/products/"):
+                rows = [rows]
             if not isinstance(rows, list):
                 return {"status": "invalid_response"}, None
             return None, rows
@@ -131,6 +133,25 @@ class KrogerClient:
             self.cache[key] = (checked, copy.deepcopy(result))
             if len(self.cache) > 64:
                 self.cache.pop(next(iter(self.cache)))
+            return result
+
+    def product(self, location_id, product_id):
+        if not isinstance(location_id, str) or not re.fullmatch(r"\d{8}", location_id):
+            raise ValueError("Choose an eight-digit Kroger location ID.")
+        if not isinstance(product_id, str) or not re.fullmatch(r"\d{10,14}", product_id):
+            raise ValueError("Use a valid product ID.")
+        key = (location_id, "product:" + product_id)
+        with self.lock:
+            previous = self.cache.get(key)
+            if previous and self.now()-previous[0] < QUOTE_TTL:
+                return {**copy.deepcopy(previous[1]), "cached": True}
+            error, rows = self._read("/products/"+product_id, {"filter.locationId":location_id})
+            if error:
+                return {**error,"locationId":location_id,"quotes":[]}
+            checked=self.now()
+            result={"status":"retrieved","locationId":location_id,"checkedAt":stamp(checked),"expiresAt":stamp(checked+QUOTE_TTL),"quotes":product_quotes(rows,location_id,checked),"cached":False}
+            self.cache[key]=(checked,copy.deepcopy(result))
+            if len(self.cache)>64:self.cache.pop(next(iter(self.cache)))
             return result
 
 
