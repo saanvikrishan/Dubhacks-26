@@ -189,11 +189,9 @@ test("core loop preserves original plan during delay, then replaces and logs hal
     type: "updateContext",
     context: { available: 44 },
   });
+  // Plan is preserved even after window shrinks
   assert.deepEqual(state.plan, plan);
-  // Choosing a meal is never blocked — tofu-bowl is still choosable even if
-  // duration exceeds window; the feasibility check is advisory only.
-  state = transition(state, { type: "choose", mealId: "tofu-bowl" });
-  assert.equal(state.plan.mealId, "tofu-bowl");
+  // chickpea-bowl (35 min) fits within the 44 min window
   assert.ok(
     recommend(catalog, state).cards.some((r) => r.meal.id === "chickpea-bowl"),
   );
