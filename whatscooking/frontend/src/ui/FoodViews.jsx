@@ -232,7 +232,7 @@ export function CookStart({ state, onSuggested, onEatOut, onBrowseLocal, onUnava
       const msg = err.message || "Could not read that photo.";
       setError(
         /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
-          ? "Start the FastAPI backend on port 8000 (see fridgemate/backend)."
+          ? "Start the FastAPI backend on port 8000 (see whatscooking/backend)."
           : msg,
       );
     } finally {
@@ -254,7 +254,7 @@ export function CookStart({ state, onSuggested, onEatOut, onBrowseLocal, onUnava
       if (err.name === "AbortError") return;
       const msg = err.name === "TimeoutError" ? "Recipe generation timed out. Try again or browse local recipes." : err.message || "Could not get meal suggestions.";
       const shown = /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
-          ? "Start the FastAPI backend on port 8000 (cd fridgemate/backend && uvicorn main:app --reload --port 8000)."
+          ? "Start the FastAPI backend on port 8000 (cd whatscooking/backend && uvicorn main:app --reload --port 8000)."
           : msg;
       if (onUnavailable) onUnavailable(shown);
       else setError(shown);
@@ -1102,7 +1102,7 @@ export function FoodDiscovery({
           </button>
         </section>
         <details className="small-panel how-decisions">
-          <summary>How Daywell chooses</summary>
+          <summary>How WhatsCooking chooses</summary>
           <p>
             Cook cards use {catalog.filter((m) => m.mode === "cook").length} curated recipes
             and reviewed Gemini drafts made from your groceries.

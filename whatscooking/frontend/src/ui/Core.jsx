@@ -2081,7 +2081,7 @@ async function analyzeGroceryOnBackend(items) {
         lastError =
           data?.detail ||
           (res.status === 503
-            ? "USDA_API_KEY is missing from fridgemate/.env"
+            ? "USDA_API_KEY is missing from whatscooking/.env"
             : `Lookup failed (${res.status})`);
         continue;
       }

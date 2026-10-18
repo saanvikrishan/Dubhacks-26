@@ -1,4 +1,4 @@
-"""Load Markdown skill briefs for FridgeMate agents."""
+"""Load Markdown skill briefs for WhatsCooking agents."""
 
 from functools import lru_cache
 from pathlib import Path

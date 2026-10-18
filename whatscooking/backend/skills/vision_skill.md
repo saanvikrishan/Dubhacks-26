@@ -1,4 +1,4 @@
-# Vision skill (FridgeMate fridge / pantry scan)
+# Vision skill (WhatsCooking fridge / pantry scan)
 
 Use this skill when reading a fridge or pantry photo for edible ingredients.
 

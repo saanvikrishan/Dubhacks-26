@@ -1,4 +1,4 @@
-# Substitution skill (FridgeMate cook agent)
+# Substitution skill (WhatsCooking cook agent)
 
 Use this skill when annotating recipes with ingredient alternatives.
 

@@ -1,4 +1,4 @@
-# Recipe skill (FridgeMate cook agent)
+# Recipe skill (WhatsCooking cook agent)
 
 Use this skill when suggesting recipes from the user's grocery list.
 

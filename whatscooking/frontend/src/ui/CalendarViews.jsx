@@ -364,7 +364,7 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
         <div>
           <h3>Integrate Calendar</h3>
           <p>
-            Load events from calendars connected to Apple Calendar, or connect Google Calendar. Connected calendars refresh every five minutes while Daywell is open and when you return. No
+              Load events from calendars connected to Apple Calendar, or connect Google Calendar. Connected calendars refresh every five minutes while WhatsCooking is open and when you return. No
             calendar events are changed.
           </p>
         </div>
@@ -509,7 +509,7 @@ export function EventDialog({
         </div>
         {isHolidayEvent(event) && <p className="success">Informational holiday · does not block meals unless you choose to mark it busy.</p>}
         <label className="check-label"><input type="checkbox" checked={busy} onChange={async e=>{const next=e.target.checked;try{await onSave({type:"setEventMealAvailability",id:event.id,busy:next});setBusy(next);setError("");}catch(err){setError(err.message);}}}/>Block meal planning during this event</label>
-        <p className="fine-print">This setting only affects Daywell. The original calendar event stays unchanged.</p>
+        <p className="fine-print">This setting only affects WhatsCooking. The original calendar event stays unchanged.</p>
         <button className="text-button" onClick={async()=>{try{await onSave({type:"setEventMealAvailability",id:event.id,busy:null});setBusy(blocksMealPlanning({...event,mealBusyOverride:undefined}));setError("");}catch(err){setError(err.message);}}}>Use automatic setting</button>
         {error && <p className="error" role="alert">{error}</p>}
         <p className="muted">Edit the event’s title and times in its source calendar.</p>
@@ -885,7 +885,7 @@ export function PlanCalendar({
         </div>
         <p className="fine-print calendar-local-note">
           Drag an empty period to add an activity. Imported events are read-only. Meals and activities you add here stay
-          in Daywell. Week shows 7 AM–10 PM; the day list includes all times.
+          in WhatsCooking. Week shows 7 AM–10 PM; the day list includes all times.
         </p>
       </section>
       <div className="calendar-right">

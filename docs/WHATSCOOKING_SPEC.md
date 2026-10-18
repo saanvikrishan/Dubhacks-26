@@ -1,4 +1,4 @@
-# FridgeMate Specification
+# WhatsCooking Specification
 ## An Agentic Culinary Assistant for University Students
 
 **Version:** 1.0  
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-FridgeMate is an intelligent, context-aware AI cooking agent designed to help university students manage their food, budget, and time. It combines social media recipe transcription, smart inventory management, context-aware meal scheduling, AI-driven meal planning, dynamic cooking assistance, and fallback takeout routing into a unified platform.
+WhatsCooking is an intelligent, context-aware AI cooking agent designed to help university students manage their food, budget, and time. It combines social media recipe transcription, smart inventory management, context-aware meal scheduling, AI-driven meal planning, dynamic cooking assistance, and fallback takeout routing into a unified platform.
 
 **Migration Context:** This spec outlines the migration from the current React + Vite "Daywell" application to a production-ready Next.js application with significantly expanded AI agent capabilities.
 

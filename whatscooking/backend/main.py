@@ -23,7 +23,7 @@ from kroger import kroger_client
 from skills.loader import load_skill
 
 ROOT = Path(__file__).resolve().parent
-# Prefer backend/.env, fall back to fridgemate/.env
+# Prefer backend/.env, fall back to whatscooking/.env
 load_dotenv(ROOT / ".env")
 load_dotenv(ROOT.parent / ".env")
 
@@ -36,7 +36,7 @@ from food_reference import food_reference
 from food_memory import MealFeedback, record_feedback, learned_preferences
 
 
-app = FastAPI(title="FridgeMate API")
+app = FastAPI(title="WhatsCooking API")
 
 DEMO_USER_ID = os.getenv("DAYWELL_USER_ID", "demo").strip() or "demo"
 
@@ -89,7 +89,7 @@ client = genai.Client(api_key=api_key) if api_key else None
 backboard_key = (os.getenv("BACKBOARD_API_KEY") or "").strip()
 backboard_client = BackboardClient(api_key=backboard_key) if backboard_key else None
 _assistant_id = None
-DEMO_ASSISTANT_NAME = "FridgeMate demo"
+DEMO_ASSISTANT_NAME = "WhatsCooking demo"
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg",
     "image/jpg",
@@ -262,7 +262,7 @@ class SavedMealRequest(BaseModel):
 @app.get("/")
 def home():
     return {
-        "message": "FridgeMate API is running!",
+        "message": "WhatsCooking API is running!",
         "gemini": bool(client),
         "backboard": bool(backboard_client),
         "database": store.SessionLocal is not None,
@@ -278,7 +278,7 @@ async def nutrition_lookup(q: str):
     if not usda.usda_configured():
         raise HTTPException(
             status_code=503,
-            detail="USDA_API_KEY is missing from backend/.env or fridgemate/.env",
+            detail="USDA_API_KEY is missing from backend/.env or whatscooking/.env",
         )
     query = (q or "").strip()
     if not query:
@@ -326,7 +326,7 @@ async def nutrition_analyze_list(request: GroceryAnalyzeRequest):
     if not usda.usda_configured():
         raise HTTPException(
             status_code=503,
-            detail="USDA_API_KEY is missing from backend/.env or fridgemate/.env",
+            detail="USDA_API_KEY is missing from backend/.env or whatscooking/.env",
         )
     if not request.items:
         raise HTTPException(status_code=400, detail="Add at least one grocery item.")
@@ -490,7 +490,7 @@ def require_backboard_client():
     if backboard_client is None:
         raise HTTPException(
             status_code=500,
-            detail="BACKBOARD_API_KEY is missing from backend/.env or fridgemate/.env",
+            detail="BACKBOARD_API_KEY is missing from backend/.env or whatscooking/.env",
         )
 
 
@@ -977,7 +977,7 @@ def normalize_meal(raw: dict, index: int, fallback_ingredients: list[str]) -> di
             "basis": "per_serving",
             "yieldServings": 1,
             "kind": "gemini_suggestion",
-            "source": "Gemini via FridgeMate API · estimates only.",
+            "source": "Gemini via WhatsCooking API · estimates only.",
             "checkedAt": date.today().isoformat(),
             "preparation": note
             or "AI-estimated; confirm ingredients and allergens yourself.",
@@ -1267,7 +1267,7 @@ async def interpret_constraints(request: IntentRequest) -> dict:
     if not client:
         raise HTTPException(
             status_code=500,
-            detail="GEMINI_API_KEY is missing from backend/.env or fridgemate/.env",
+            detail="GEMINI_API_KEY is missing from backend/.env or whatscooking/.env",
         )
     text = (request.text or "").strip()
     if not text:
@@ -1351,7 +1351,7 @@ async def phrase_reply(request: PhraseRequest):
     if not client:
         raise HTTPException(
             status_code=500,
-            detail="GEMINI_API_KEY is missing from backend/.env or fridgemate/.env",
+            detail="GEMINI_API_KEY is missing from backend/.env or whatscooking/.env",
         )
     skill = load_skill("phrase_skill")
     prompt = f"""You are Daywell's reply phrasing skill.
@@ -1441,7 +1441,7 @@ async def vision_ingredients(photo: UploadFile = File(...)):
     if not client:
         raise HTTPException(
             status_code=500,
-            detail="GEMINI_API_KEY is missing from backend/.env or fridgemate/.env",
+            detail="GEMINI_API_KEY is missing from backend/.env or whatscooking/.env",
         )
 
     content_type = (photo.content_type or "").lower().split(";")[0].strip()
@@ -1463,7 +1463,7 @@ async def vision_ingredients(photo: UploadFile = File(...)):
         )
 
     skill = load_skill("vision_skill")
-    prompt = f"""You are FridgeMate's fridge / pantry vision skill.
+    prompt = f"""You are WhatsCooking's fridge / pantry vision skill.
 {skill}
 """
     image_part = types.Part.from_bytes(data=data, mime_type=content_type)
@@ -1693,7 +1693,7 @@ async def meal_reminder_message(request: MealReminderRequest):
             else "No specific preferences on file."
         )
         slot_hint = f" ({request.slot_label})" if request.slot_label else ""
-        prompt = f"""You are FridgeMate, a supportive meal-planning assistant for college students.
+        prompt = f"""You are WhatsCooking, a supportive meal-planning assistant for college students.
 The user is about to cook: {meal_name}{slot_hint}.
 Known preferences / goals:
 {pref_block}

@@ -12,7 +12,7 @@ let compiling;
 export async function ensureCalendarBridge() {
   if (process.platform !== "darwin")
     throw new Error(
-      "Apple Calendar connection is available on a Mac running the local Daywell server. Import .ics on other systems.",
+      "Apple Calendar connection is available on a Mac running the local WhatsCooking server. Import .ics on other systems.",
     );
   if (!compiling)
     compiling = (async () => {

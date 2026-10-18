@@ -4,7 +4,7 @@
 
 | Layer | Location | Responsibility |
 | --- | --- | --- |
-| Shell | `fridgemate/frontend/src/App.jsx` | Today / My Plan / Food, shared state, dialogs, persistence errors |
+| Shell | `whatscooking/frontend/src/App.jsx` | Today / My Plan / Food, shared state, dialogs, persistence errors |
 | Calendar UI | `src/ui/CalendarViews.jsx` | Agenda, coming up, calendar grids, connection/import, activity editing |
 | Food UI | `src/ui/FoodViews.jsx` | Gesture/keyboard decks, moods/priorities, recipes versus real venues |
 | Shared dialogs | `src/ui/Core.jsx` | Preferences, groceries, portion confirmation, nutrition and assistant |

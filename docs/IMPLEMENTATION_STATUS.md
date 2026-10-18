@@ -1,7 +1,7 @@
-# FridgeMate Implementation Status
+# WhatsCooking Implementation Status
 
 **Current State:** Daywell (React + Vite)  
-**Target State:** FridgeMate (Next.js + Sanity CMS)  
+**Target State:** WhatsCooking (Next.js + Sanity CMS)  
 **Date:** October 17, 2026
 
 ---
