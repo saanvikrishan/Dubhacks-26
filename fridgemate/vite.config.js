@@ -22,6 +22,7 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
+<<<<<<< Updated upstream
       "/api/pantry": {
         target: "http://127.0.0.1:8000",
         changeOrigin: true,
@@ -37,6 +38,8 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
+=======
+>>>>>>> Stashed changes
       "/api/google-calendar": {
         target: "http://127.0.0.1:8000",
         changeOrigin: true,
