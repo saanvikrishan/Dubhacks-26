@@ -12,7 +12,7 @@ import {
 import { money, num, niceTime } from "./format";
 import { today } from "../domain/state";
 
-import { interpretFoodRequest } from "../adapters/assistant";
+import { interpretFoodRequest, replyFromPatch } from "../adapters/assistant";
 
 const flags = capabilities();
 const modeName = (mode) => (mode === "cook" ? "Cook at home" : "Eat out");
@@ -1003,7 +1003,7 @@ function Assistant({ state, onAction, onClose }) {
   return (
     <Modal title="Your food assistant" onClose={onClose}>
       <p className="fine-print">
-        Simple local commands · AI and Photon are not connected.
+        Simple local commands · AI is connected. Photon is not connected.
       </p>
       <div className="chat-messages" aria-live="polite">
         {messages.map((msg, i) => (
@@ -1038,16 +1038,84 @@ function Assistant({ state, onAction, onClose }) {
       </div>
       <form
         className="chat-form"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
-          if (!text.trim()) return;
+          const sent = text.trim();
+          if (!sent) return;
+          let response;
           try {
-            const response = interpretFoodRequest(text, state, catalog);
-            setMessages([...messages, { user: true, message: text }, response]);
-            setText("");
-            setError("");
+            response = interpretFoodRequest(sent, state, catalog);
           } catch (err) {
             setError(err.message);
+            return;
+          }
+          if (!response.unrecognized) {
+            setMessages((prev) => [
+              ...prev,
+              { user: true, message: sent },
+              response,
+            ]);
+            setText("");
+            setError("");
+            return;
+          }
+          setMessages((prev) => [
+            ...prev,
+            { user: true, message: sent },
+            { message: "Checking that…", pending: true },
+          ]);
+          setText("");
+          setError("");
+          try {
+            const res = await fetch("/api/recipes", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: sent, memories: [] }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              const detail =
+                typeof data.detail === "string"
+                  ? data.detail
+                  : Array.isArray(data.detail)
+                    ? data.detail.map((item) => item.msg || item).join(" ")
+                    : data.error || "Could not interpret that request.";
+              setMessages((prev) => prev.filter((item) => !item.pending));
+              setError(detail);
+              return;
+            }
+            const reply = replyFromPatch(data, state, catalog);
+            setMessages((prev) => [
+              ...prev.filter((item) => !item.pending),
+              reply,
+            ]);
+            const summary = reply.message;
+            if (typeof summary === "string" && summary) {
+              try {
+                const phrased = await fetch("/api/recipes/phrase", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ summary }),
+                  signal: AbortSignal.timeout(25000),
+                });
+                const phraseData = await phrased.json().catch(() => ({}));
+                const text =
+                  phrased.ok && typeof phraseData.text === "string"
+                    ? phraseData.text.trim()
+                    : "";
+                if (text)
+                  setMessages((prev) =>
+                    prev.map((item) =>
+                      item === reply ? { ...item, message: text } : item,
+                    ),
+                  );
+              } catch {
+                // Keep the templated reply already on screen.
+              }
+            }
+          } catch (err) {
+            setMessages((prev) => prev.filter((item) => !item.pending));
+            setError(err.message || "Could not interpret that request.");
           }
         }}
       >
