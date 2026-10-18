@@ -229,8 +229,12 @@ export default function App() {
     }
     setMode(nextMode);
     if (nextMode === "cook") {
-      setGeminiMeals(null);
-      setGroceryList([]);
+      // Preserve an active grocery session (Gemini meals already generated).
+      // If no session is active, only go to groceries screen when pantry is empty.
+      if (!(geminiMeals && geminiMeals.length > 0)) {
+        setGeminiMeals(null);
+        setGroceryList([]);
+      }
       setCookPhase("discover");
     }
     setTab("Let's eat");
@@ -238,8 +242,10 @@ export default function App() {
   function setFoodMode(nextMode) {
     setMode(nextMode);
     if (nextMode === "cook") {
-      setGeminiMeals(null);
-      setGroceryList([]);
+      if (!(geminiMeals && geminiMeals.length > 0)) {
+        setGeminiMeals(null);
+        setGroceryList([]);
+      }
       setCookPhase("discover");
     }
   }
@@ -381,7 +387,10 @@ export default function App() {
         },
       }).then(() => {
         setMode("cook");
-        setCookPhase("groceries");
+        // Only send to the grocery input screen if the pantry is empty.
+        // Users with a stocked pantry should land directly on meal discovery.
+        const hasPantry = Object.values(stateRef.current.pantry ?? {}).some(g => g > 0);
+        setCookPhase(hasPantry || (geminiMeals && geminiMeals.length > 0) ? "discover" : "groceries");
         setTab("Let's eat");
       });
       return;

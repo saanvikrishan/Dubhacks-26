@@ -1,5 +1,6 @@
 import { buildUwDiningCatalog, prepareUwDiningMeal, currentWalking } from "../domain/uwDining.js";
 import { sourcedCookCandidate, enrichCookFacts, recipeFingerprint } from "../domain/foodFacts.js";
+import { TASTES, preferenceFit } from "../domain/preferences.js";
 import { useFoodReference, refreshFoodReference } from "../adapters/foodReference.js";
 import { withSourcedWalking } from "../domain/uwDining.js";
 import { useUwWalking, refreshWalking } from "../adapters/uwWalking.js";
@@ -372,7 +373,7 @@ export function CookStart({ state, onSuggested, onEatOut, onBrowseLocal, onUnava
               </button>
             ))}
           </div>
-          {items.length>0 && <div className="pantry-grid">{items.map(name=><label key={name}>{name}<input aria-label={`Grams available: ${name}`} type="number" min="0" max="100000" step="any" disabled={busy} placeholder="Optional" value={amounts[name]??''} onChange={e=>setAmounts({...amounts,[name]:e.target.value})}/><small>Available edible grams · optional until review</small></label>)}</div>}
+          {items.length>0 && <div className="pantry-grid">{items.map(name=><label key={name}>{name}<input aria-label={`Grams available: ${name}`} type="number" min="0" max="100000" step="any" disabled={busy} placeholder="Optional" value={amounts[name]??''} onChange={e=>setAmounts({...amounts,[name]:e.target.value})}/><small>Available edible grams · optional until cooking time</small></label>)}</div>}
           {items.length > 0 && (
             <p className="cook-start-count">
               {items.length} ingredient{items.length === 1 ? "" : "s"}
@@ -566,13 +567,18 @@ export function FoodDiscovery({
   groceryList = [],
   onMoreIdeas = null,
   onPrepareMore = null,
+  onFlavorChange = null,
 }) {
   const [passed, setPassed] = useState([]),
     [mood, setMood] = useState("any"),
     [sort, setSort] = useState("catalog"),
+    [flavorFilter, setFlavorFilter] = useState("any"),
     [openOnly, setOpenOnly] = useState(true),
     [moreLoading, setMoreLoading] = useState(false),
     [moreError, setMoreError] = useState("");
+
+  // Notify parent whenever flavorFilter changes so moreIdeas/prepareMore can use it.
+  useEffect(() => { onFlavorChange?.(flavorFilter); }, [flavorFilter]);
   // On success the parent swaps in the new batch, which starts a fresh deck.
   async function getMoreIdeas() {
     setMoreLoading(true);
@@ -609,7 +615,11 @@ export function FoodDiscovery({
     const candidate=base.suggestion&&!base.review?.confirmed?enrichCookFacts(base,food.reference):sourcedCookCandidate(base,food.reference);
     unique.set(recipeFingerprint(candidate),candidate);
   }
-  const all=discoverCookMeals([...unique.values()],state,{sort,mood,passed,preferences:food.preferences});
+  const allRaw=discoverCookMeals([...unique.values()],state,{sort,mood,passed,preferences:food.preferences});
+  const all = flavorFilter === "any" ? allRaw : (() => {
+    const keep = r => preferenceFit(r.meal, {tastes:[flavorFilter]}).taste;
+    return {...allRaw, display: allRaw.display.filter(keep), cards: allRaw.cards.filter(keep)};
+  })();
   const cookGate=usePhotoGate(mode==='cook'?all.display:[], mode==='cook'?[...unique.values()]:[]);
   const meals=cookGate.ordered;
   const uwMenu=buildUwDiningCatalog().filter(m=>m.dining.recordType==='menu').map(m=>prepareUwDiningMeal(m,state,walking.routes).meal);
@@ -706,6 +716,21 @@ export function FoodDiscovery({
                 <option value="protein">More protein</option>
                 <option value="cost">Lower cost</option>
                 <option value="time">Faster prep</option>
+              </select>
+            </label>
+            <label>
+              Flavors
+              <select
+                aria-label="No Opinion"
+                value={flavorFilter}
+                onChange={(e) => setFlavorFilter(e.target.value)}
+              >
+                <option value="any">Taste preference</option>
+                {TASTES.map((taste) => (
+                  <option key={taste} value={taste}>
+                    {taste}
+                  </option>
+                ))}
               </select>
             </label>
             <button className="filter-link" onClick={onPreferences}>
