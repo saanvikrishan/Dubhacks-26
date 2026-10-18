@@ -870,6 +870,20 @@
   border-color: #ccdbbf;
   border-left-color: #6d9260;
 }
+/* Open meal slot — dashed border, lighter fill, shows "choose a meal" prompt */
+.week-event.meal.open-slot {
+  background: #f4f8f1;
+  border-color: #a8c99a;
+  border-left-color: #6d9260;
+  border-style: dashed;
+  opacity: 0.85;
+}
+.calendar-chip.meal.open-slot {
+  background: #f4f8f1;
+  border: 1px dashed #6d9260;
+  color: #4a6e40;
+  opacity: 0.9;
+}
 .week-event.workout {
   background: #eee5f7;
   border-color: #e0d2ee;

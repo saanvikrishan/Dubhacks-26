@@ -122,20 +122,27 @@ export function normalizeCalendarState(state) {
 }
 export function scheduledItems(state, meals) {
   const s = normalizeCalendarState(state);
-  const plans = s.mealPlans.map((plan) => ({
-    id: plan.id,
-    title: meals[plan.mealId]?.name ?? "Planned meal",
-    start: localInstant(plan.date, plan.start),
-    end: new Date(
-      Date.parse(localInstant(plan.date, plan.start)) + plan.duration * 60000,
-    ).toISOString(),
-    kind: "meal",
-    source: "daywell",
-    location: meals[plan.mealId]?.venue?.name ?? "Cook at home",
-    busy: true,
-    readOnly: false,
-    plan,
-  }));
+  const plans = s.mealPlans.map((plan) => {
+    const meal = meals[plan.mealId];
+    return {
+      id: plan.id,
+      title: plan.openSlot
+        ? `${plan.slotLabel ? plan.slotLabel.charAt(0).toUpperCase() + plan.slotLabel.slice(1) : "Meal"} slot — choose a meal`
+        : (meal?.name ?? "Planned meal"),
+      start: localInstant(plan.date, plan.start),
+      end: new Date(
+        Date.parse(localInstant(plan.date, plan.start)) + (plan.duration ?? 60) * 60000,
+      ).toISOString(),
+      kind: "meal",
+      source: plan.openSlot ? "daywell" : "daywell",
+      location: meal?.venue?.name ?? (plan.openSlot ? "" : "Cook at home"),
+      busy: true,
+      readOnly: false,
+      openSlot: plan.openSlot ?? false,
+      slotLabel: plan.slotLabel ?? null,
+      plan,
+    };
+  });
   return [...s.events, ...plans].sort(
     (a, b) => Date.parse(a.start) - Date.parse(b.start),
   );
@@ -218,6 +225,91 @@ export function layoutDayEvents(events, date) {
   flush();
   return result;
 }
+/**
+ * Auto-schedule breakfast, lunch, and dinner for a given day, avoiding
+ * calendar conflicts (class, workout, event — anything busy).
+ *
+ * Meal windows (all times in HH:MM, America/Los_Angeles):
+ *   breakfast  07:00 – 11:00  (need at least 45 min gap)
+ *   lunch      12:00 – 15:00
+ *   dinner     17:00 – 21:00
+ *
+ * Returns an array of { slot: "breakfast"|"lunch"|"dinner", start, available, commitmentTime }
+ * Skips a slot when no free window ≥ 45 min exists within the constraint.
+ */
+export function scheduleMealsForDay(events, date) {
+  const MEAL_WINDOWS = [
+    { slot: "breakfast", windowStart: "07:00", windowEnd: "11:00" },
+    { slot: "lunch",     windowStart: "12:00", windowEnd: "15:00" },
+    { slot: "dinner",    windowStart: "17:00", windowEnd: "21:00" },
+  ];
+  const MIN_WINDOW = 45; // minutes
+
+  // Busy events for the day (class, workout, event, meal — anything with busy:true)
+  const busy = eventsForDay(events, date)
+    .filter((e) => e.busy && !e.completed && e.kind !== "task")
+    .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+
+  const result = [];
+
+  for (const { slot, windowStart, windowEnd } of MEAL_WINDOWS) {
+    const wStart = Date.parse(localInstant(date, windowStart));
+    const wEnd   = Date.parse(localInstant(date, windowEnd));
+
+    // Walk the busy events to find the first free gap of ≥ MIN_WINDOW minutes
+    // within the constraint window.
+    let cursor = wStart;
+    let found = null;
+
+    const sentinel = { start: new Date(wEnd).toISOString(), end: new Date(wEnd).toISOString(), title: "End of window" };
+    for (const item of [...busy, sentinel]) {
+      const itemStart = Date.parse(item.start);
+      const itemEnd   = Date.parse(item.end);
+
+      // Skip events that end before our cursor or start after the window
+      if (itemEnd <= cursor) continue;
+      if (itemStart >= wEnd) {
+        // Gap from cursor to window end
+        const gapMs = wEnd - cursor;
+        if (gapMs >= MIN_WINDOW * 60000) {
+          const available = Math.floor(gapMs / 60000);
+          found = {
+            slot,
+            start: timeKey(cursor),
+            available: Math.min(available, 90), // cap at 90 min for planning
+            commitmentTime: windowEnd,
+            commitment: "End of meal window",
+          };
+        }
+        break;
+      }
+
+      // Gap from cursor to this event
+      const gapEnd = Math.min(wEnd, itemStart);
+      const gapMs  = gapEnd - cursor;
+      if (gapMs >= MIN_WINDOW * 60000) {
+        const available = Math.floor(gapMs / 60000);
+        found = {
+          slot,
+          start: timeKey(cursor),
+          available: Math.min(available, 90),
+          commitmentTime: timeKey(gapEnd),
+          commitment: item.title ?? "Event",
+        };
+        break;
+      }
+
+      // Advance cursor past this busy event
+      cursor = Math.max(cursor, itemEnd);
+      if (cursor >= wEnd) break;
+    }
+
+    if (found) result.push(found);
+  }
+
+  return result;
+}
+
 export function nextMealWindow(events, date, now = new Date(), desired = 60) {
   const dayStart = Date.parse(localInstant(date, "08:00")),
     dayEnd = Date.parse(localInstant(date, "23:59"));

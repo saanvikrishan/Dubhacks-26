@@ -685,7 +685,7 @@ export function PlanCalendar({
                   .slice(0, 3)
                   .map((e) => (
                     <button
-                      className={`calendar-chip ${e.kind}`}
+                      className={`calendar-chip ${e.kind}${e.openSlot ? " open-slot" : ""}`}
                       key={e.id}
                       onClick={() => {
                         onDate(day);
@@ -783,7 +783,7 @@ export function PlanCalendar({
                         return (
                           <button
                             key={e.id}
-                            className={`week-event ${e.kind}`}
+                            className={`week-event ${e.kind}${e.openSlot ? " open-slot" : ""}`}
                             style={{
                               top: (start - 7) * 52,
                               height: Math.max(

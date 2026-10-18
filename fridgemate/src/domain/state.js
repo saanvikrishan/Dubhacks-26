@@ -1,7 +1,7 @@
 import { config, requireCapability } from "./config.js";
 import { assertMealAction, validateInputs, clockTime } from "./engine.js";
 import { byId } from "../data/suggestions.js";
-import { normalizeCalendarState, validateEvent, timeKey, dayKey } from "./calendar.js";
+import { normalizeCalendarState, validateEvent, timeKey, dayKey, scheduleMealsForDay, localInstant } from "./calendar.js";
 
 export const today = () =>
   new Intl.DateTimeFormat("en-CA", {
@@ -342,6 +342,79 @@ function applyAction(state, action, c = config) {
   }
   if (action.type === "clearGeminiMeals") {
     return { ...state, geminiMeals: null, groceryList: [] };
+  }
+  if (action.type === "scheduleDayMeals") {
+    // Auto-schedule breakfast / lunch / dinner slots for the given date,
+    // respecting calendar busy events. Each slot gets a placeholder plan entry
+    // so it appears in My Plan. The user still picks the actual meal in Food.
+    const targetDate = action.date ?? state.context.date;
+    // Include already-planned meals as busy blocks when finding free windows
+    const mealBusyEvents = state.mealPlans
+      .filter((p) => p.date === targetDate && !p.openSlot)
+      .map((p) => {
+        try {
+          const s = Date.parse(localInstant(p.date, p.start));
+          return {
+            id: p.id, title: "Planned meal", busy: true, completed: false,
+            kind: "meal",
+            start: localInstant(p.date, p.start),
+            end: new Date(s + p.duration * 60000).toISOString(),
+          };
+        } catch { return null; }
+      })
+      .filter(Boolean);
+    const slots = scheduleMealsForDay(
+      [...state.events, ...mealBusyEvents],
+      targetDate,
+    );
+    if (!slots.length) return state; // no slots fit — no change
+    const newPlans = slots
+      .map((slot) => {
+        const slotId = `slot:${targetDate}:${slot.start}:${slot.slot}`;
+        // Don't overwrite an existing confirmed plan for this date+start
+        if (state.mealPlans.some((p) => p.date === targetDate && p.start === slot.start)) return null;
+        return {
+          id: slotId,
+          mealId: null,           // null = open slot, not yet chosen
+          slotLabel: slot.slot,   // "breakfast" | "lunch" | "dinner"
+          servings: 1,
+          date: targetDate,
+          start: slot.start,
+          duration: slot.available,
+          available: slot.available,
+          commitment: slot.commitment,
+          commitmentTime: slot.commitmentTime,
+          openSlot: true,
+        };
+      })
+      .filter(Boolean);
+    if (!newPlans.length) return state;
+    return {
+      ...state,
+      mealPlans: [...state.mealPlans, ...newPlans],
+      scheduledSlots: {
+        ...(state.scheduledSlots ?? {}),
+        [targetDate]: slots.map((s) => s.slot),
+      },
+    };
+  }
+  if (action.type === "fillMealSlot") {
+    // When a user picks a meal for an open slot (mealId: null),
+    // replace it with a real plan entry.
+    const { slotId, mealId } = action;
+    const slot = state.mealPlans.find((p) => p.id === slotId && p.openSlot);
+    if (!slot) throw new Error("This meal slot no longer exists.");
+    const meal = byId[mealId];
+    if (!meal) throw new Error("Meal not found.");
+    const filledPlan = {
+      ...slot,
+      mealId,
+      openSlot: false,
+    };
+    return {
+      ...state,
+      mealPlans: state.mealPlans.map((p) => (p.id === slotId ? filledPlan : p)),
+    };
   }
   // No external operation is implemented. A flag cannot authorize one.
   requireCapability(action.type, c);

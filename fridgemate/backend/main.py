@@ -1585,3 +1585,151 @@ async def gcal_events(from_: str | None = None, to: str | None = None):
             "completed": False,
         })
     return {"events": events, "authorized": True}
+
+
+# ── Meal reminder message (Photon / iMessage) ────────────────────────────────
+
+class MealReminderRequest(BaseModel):
+    meal_name: str
+    meal_id: str | None = None
+    user_id: str = Field(default="demo")
+    slot_label: str | None = None  # "breakfast" | "lunch" | "dinner"
+
+
+@app.post("/meal-reminder-message")
+async def meal_reminder_message(request: MealReminderRequest):
+    """
+    Generate a short, personalized iMessage to send alongside "Let's Get Cooking!"
+    5 minutes before a planned meal. Pulls user preferences from Backboard memory
+    and crafts a 1–2 sentence hype/tip from Gemini.
+    Falls back to a plain string when Gemini or Backboard is unavailable.
+    """
+    enforce_rate_limit()
+
+    meal_name = (request.meal_name or "").strip()
+    if not meal_name:
+        raise HTTPException(status_code=400, detail="meal_name is required.")
+
+    # Gather user preferences from Backboard memory if available
+    user_prefs: list[str] = []
+    if backboard_client is not None:
+        assistant_id = await get_assistant_id()
+        if assistant_id:
+            try:
+                found = await backboard_client.search_memories(
+                    assistant_id,
+                    f"meal preference diet macro goal {meal_name}",
+                    limit=5,
+                )
+                user_prefs = memory_contents(found)
+            except Exception as e:
+                print(f"Backboard reminder lookup error: {e}")
+
+    # Try Gemini for a personalized message
+    if client:
+        pref_block = (
+            "\n".join(f"- {p}" for p in user_prefs)
+            if user_prefs
+            else "No specific preferences on file."
+        )
+        slot_hint = f" ({request.slot_label})" if request.slot_label else ""
+        prompt = f"""You are FridgeMate, a supportive meal-planning assistant for college students.
+The user is about to cook: {meal_name}{slot_hint}.
+Known preferences / goals:
+{pref_block}
+
+Write exactly 1–2 short, warm, encouraging sentences (max 160 characters total) to send as an
+iMessage right before they cook. Reference the meal by name. Keep it casual and upbeat.
+Do NOT start with "Let's Get Cooking" — that prefix is already included.
+Do NOT include hashtags, emojis beyond one, or nutritional disclaimers.
+Return only the message text, nothing else."""
+
+        last_error = None
+        for model in GEMINI_FALLBACKS:
+            try:
+                response = await asyncio.to_thread(
+                    client.models.generate_content,
+                    model=model,
+                    contents=prompt,
+                )
+                msg = (response.text or "").strip()
+                # Safety: strip any Gemini self-references or long output
+                msg = re.sub(r"(?i)(gemini|model:|system prompt|api[_\s]key)", "", msg).strip()
+                msg = msg[:200]  # hard cap
+                if msg:
+                    return {"message": msg, "source": "gemini"}
+                break
+            except Exception as e:
+                last_error = e
+                if not gemini_transient(str(e)):
+                    break
+
+        if last_error:
+            print(f"Gemini reminder message error: {last_error}")
+
+    # Graceful fallback — plain encouragement based on slot
+    fallbacks = {
+        "breakfast": f"Start your morning right with {meal_name}. You've got this! ☀️",
+        "lunch":     f"Midday fuel loading — {meal_name} incoming. Enjoy every bite!",
+        "dinner":    f"Wrap up your day with a solid {meal_name}. Well earned! 🌙",
+    }
+    fallback = fallbacks.get(request.slot_label or "", f"Time to make {meal_name}. Enjoy!")
+    return {"message": fallback, "source": "fallback"}
+
+
+# ── Auto-schedule meal plans endpoint (used by Photon daemon) ────────────────
+
+class SyncMealPlansRequest(BaseModel):
+    user_id: str = Field(default="demo")
+    plans: list[dict]
+
+
+@app.post("/sync-meal-plans")
+async def sync_meal_plans(request: SyncMealPlansRequest):
+    """
+    Called by the frontend after scheduling meal slots. Upserts photon_plans
+    rows so the reminder daemon picks them up without manual CLI intervention.
+
+    Each plan dict should have:
+      { meal_name, meal_date (YYYY-MM-DD), meal_time (HH:MM), meal_id (str|null) }
+    """
+    if not store.SessionLocal:
+        return {"status": "local_only", "inserted": 0,
+                "message": "DATABASE_URL not set — plans not written to Postgres."}
+
+    from sqlalchemy import text as sql_text  # avoid shadowing the 'text' import above
+
+    inserted = 0
+    with store.SessionLocal() as conn:
+        for plan in request.plans or []:
+            meal_date = (plan.get("meal_date") or "").strip()
+            meal_time = (plan.get("meal_time") or "").strip()
+            meal_name = (plan.get("meal_name") or "").strip()
+            meal_id   = plan.get("meal_id") or None
+            if (
+                not meal_date or not meal_time or not meal_name
+                or not re.match(r"^\d{4}-\d{2}-\d{2}$", meal_date)
+                or not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", meal_time)
+            ):
+                continue
+            try:
+                conn.execute(
+                    sql_text(
+                        """
+                        INSERT INTO photon_plans (user_id, meal_name, meal_date, meal_time, meal_id)
+                        VALUES (:uid, :name, :date, :time, :mid)
+                        ON CONFLICT DO NOTHING
+                        """
+                    ),
+                    {"uid": request.user_id or "demo", "name": meal_name,
+                     "date": meal_date, "time": meal_time, "mid": meal_id},
+                )
+                inserted += 1
+            except Exception as e:
+                print(f"sync-meal-plans insert error for {meal_name}: {e}")
+        try:
+            conn.commit()
+        except Exception:
+            pass  # photon_plans table may not exist until daemon runs ensureTables
+
+    return {"status": "ok", "inserted": inserted}

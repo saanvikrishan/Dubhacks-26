@@ -29,6 +29,7 @@ import {
   nextMealWindow,
   prettyDate,
   scheduledItems,
+  scheduleMealsForDay,
   timeKey,
 } from "./domain/calendar";
 import { today, transition } from "./domain/state";
@@ -171,6 +172,43 @@ export default function App() {
     }
   }
   async function choose(meal) {
+    // Check if the current context matches an open slot and fill it
+    const openSlot = state.mealPlans.find(
+      (p) =>
+        p.openSlot &&
+        p.date === state.context.date &&
+        p.start === state.context.start,
+    );
+    if (openSlot) {
+      // Fill the open slot with the chosen meal
+      if (await safe({ type: "fillMealSlot", slotId: openSlot.id, mealId: meal.id })) {
+        const saved = await persistSavedMeal(meal);
+        setNotice(
+          saved.status === "ok"
+            ? `${meal.name} added to My Plan (${openSlot.slotLabel ?? "meal"} slot).`
+            : `${meal.name} added to My Plan.`,
+        );
+        // Update the photon_plans row so the reminder says "Let's Get Cooking!"
+        // instead of the generic 5-min browse prompt.
+        try {
+          await fetch("http://127.0.0.1:8000/sync-meal-plans", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_id: "demo",
+              plans: [{
+                meal_name: meal.name,
+                meal_date: openSlot.date,
+                meal_time: openSlot.start,
+                meal_id:   meal.id,
+              }],
+            }),
+          });
+        } catch { /* backend unreachable — continue */ }
+        setDialog({ type: "details", meal });
+      }
+      return;
+    }
     const existing = state.mealPlans.find(
       (p) => p.date === state.context.date && p.start === state.context.start,
     );
@@ -225,7 +263,29 @@ export default function App() {
   }
   const openLog = (meal, log = null) =>
     setDialog({ type: "log", meal, log, id: log?.id ?? crypto.randomUUID() });
-  const openEvent = (event) => setDialog({ type: "event", event });
+  const openEvent = (event) => {
+    // Open slots should navigate to Food → Cook with the right date/time context
+    if (event.openSlot && event.plan) {
+      const plan = event.plan;
+      safe({
+        type: "updateContext",
+        context: {
+          date: plan.date,
+          start: plan.start,
+          available: plan.available ?? plan.duration,
+          commitment: plan.commitment ?? "End of meal window",
+          commitmentTime: plan.commitmentTime ?? "23:59",
+          manuallySet: false,
+        },
+      }).then(() => {
+        setMode("cook");
+        setCookPhase("groceries");
+        setTab("Food");
+      });
+      return;
+    }
+    setDialog({ type: "event", event });
+  };
   const openDetails = (meal) => setDialog({ type: "details", meal });
   const addEvent = (eventDate) => setDialog({ type: "event", date: eventDate });
   const latest = logs.toSorted((a, b) =>
@@ -602,6 +662,40 @@ export default function App() {
                   onChange={(e) => e.target.value && setDate(e.target.value)}
                 />
               </label>
+              <button
+                className="secondary"
+                style={{ marginLeft: "auto" }}
+                onClick={async () => {
+                  const ok = await safe({ type: "scheduleDayMeals", date });
+                  if (ok !== false) {
+                    setNotice(`Meal slots scheduled for ${date}. Tap a slot to choose a meal.`);
+                    // Push the open slots to the backend so the Photon daemon can
+                    // send iMessage reminders 5 minutes before each one.
+                    try {
+                      const slots = scheduleMealsForDay(items, date);
+                      if (slots.length) {
+                        await fetch("http://127.0.0.1:8000/sync-meal-plans", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            user_id: "demo",
+                            plans: slots.map((s) => ({
+                              meal_name: `${s.slot.charAt(0).toUpperCase() + s.slot.slice(1)} slot`,
+                              meal_date: date,
+                              meal_time: s.start,
+                              meal_id:   null,
+                            })),
+                          }),
+                        });
+                      }
+                    } catch {
+                      // backend unreachable — reminders won't fire, but local plan is saved
+                    }
+                  }
+                }}
+              >
+                🗓 Plan meals for this day
+              </button>
             </div>
             <PlanCalendar
               items={items}
