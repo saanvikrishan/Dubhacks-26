@@ -40,6 +40,7 @@ export function createDemoState() {
       cooking: true,
       equipment: ["stove", "pan", "pot"],
       goals: [],
+      cuisines: [],
     },
     context: {
       date: today(),
@@ -426,6 +427,7 @@ export function validateState(state) {
       goals: Array.isArray(state.profile?.goals) ? state.profile.goals : [],
       exclusions: Array.isArray(state.profile?.exclusions) ? state.profile.exclusions : [],
       equipment: Array.isArray(state.profile?.equipment) ? state.profile.equipment : [],
+      cuisines: Array.isArray(state.profile?.cuisines) ? state.profile.cuisines : [],
     },
   };
 
