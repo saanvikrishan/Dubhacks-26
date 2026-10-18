@@ -130,11 +130,15 @@ export function FoodDiscovery({
   const meals = all.cards.filter(
     (r) =>
       mood === "any" ||
-      (mood === "fresh"
-        ? fresh.has(r.meal.id)
+      (mood === "comfort"
+        ? !fresh.has(r.meal.id)
         : mood === "quick"
           ? r.meal.timing.prep + r.meal.timing.cook <= 10
-          : !fresh.has(r.meal.id)),
+          : mood === "hungry"
+            ? r.meal.nutrition.values.energy_kcal >= 550
+            : mood === "fancy"
+              ? r.meal.timing.prep + r.meal.timing.cook >= 15
+              : false),
   );
   const venues = uwDining
     .filter(
@@ -199,9 +203,10 @@ export function FoodDiscovery({
                 }}
               >
                 <option value="any">Anything sounds good</option>
-                <option value="fresh">Fresh & light</option>
                 <option value="comfort">Comforting</option>
-                <option value="quick">Quick & simple</option>
+                <option value="quick">Quick & Simple</option>
+                <option value="hungry">Hungry as a beast</option>
+                <option value="fancy">Feeling fancy</option>
               </select>
             </label>
             <label>
@@ -214,7 +219,7 @@ export function FoodDiscovery({
                 <option value="catalog">My preferences</option>
                 <option value="protein">More protein</option>
                 <option value="cost">Lower cost</option>
-                <option value="time">More time left</option>
+                <option value="time">Faster prep</option>
               </select>
             </label>
             <button className="filter-link" onClick={onPreferences}>
