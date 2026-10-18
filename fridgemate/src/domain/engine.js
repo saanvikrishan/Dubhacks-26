@@ -17,15 +17,11 @@ export function timeParts(meal, context) {
         Cooking: meal.timing.cook,
         Eating: context.eating,
         Cleanup: context.cleanup,
-        "Onward travel": context.onward,
-        Buffer: context.buffer,
       }
     : {
         "Travel to venue": meal.timing.outbound,
         "Service allowance": context.service,
         Eating: context.eating,
-        "Onward travel": context.onward,
-        Buffer: context.buffer,
       };
 }
 
@@ -67,9 +63,29 @@ export function evaluate(meal, state, c = config) {
       );
       if (missingEquipment.length)
         reasons.push(`Needs equipment: ${missingEquipment.join(", ")}.`);
-      const missing = meal.ingredients.filter(
-        (item) => !(pantry[item.name] >= item.grams),
-      );
+      const missing = meal.ingredients.filter((item) => {
+        // Strip leading amounts/units AND trailing parenthetical notes so that
+        // "1/2 block firm tofu" → "tofu",
+        // "1 tbsp cooking oil (extra needed)" → "cooking oil",
+        // "1 cup cooked brown rice" → "cooked brown rice"
+        const stripped = item.name
+          .replace(/\s*\(.*?\)\s*/g, "")          // remove (extra needed), (optional), etc.
+          .replace(
+            /^[\d\s\/\u00BC-\u00BE\u2150-\u215E]*(?:cup|tbsp?|tsp?|oz|g|ml|lb|block|can|clove|head|bunch|slice|piece|sprig|handful|pinch|dash|package|pkg|bag)s?\s+(?:of\s+)?/i,
+            "",
+          )
+          .replace(/^[\d\s\/\u00BC-\u00BE\u2150-\u215E]+/, "")
+          .trim()
+          .toLowerCase();
+        // Check pantry: exact → stripped → substring
+        const pantryKey =
+          Object.keys(pantry).find((k) => k.toLowerCase() === item.name.toLowerCase()) ??
+          Object.keys(pantry).find((k) => k.toLowerCase() === stripped) ??
+          Object.keys(pantry).find(
+            (k) => stripped.includes(k.toLowerCase()) || k.toLowerCase().includes(stripped),
+          );
+        return !(pantry[pantryKey] >= item.grams);
+      });
       if (missing.length)
         reasons.push(
           `Not enough confirmed ingredients: ${missing.map((item) => `${item.name} (${item.grams} g needed)`).join(", ")}.`,
@@ -226,14 +242,12 @@ export function validateInputs(profile, context, pantry) {
     "available",
     "eating",
     "cleanup",
-    "onward",
-    "buffer",
     "service",
   ]) {
     if (context[key] !== null && !Number.isInteger(context[key]))
       throw new Error("Time allowances must use whole minutes.");
   }
-  for (const key of ["eating", "cleanup", "onward", "buffer"])
+  for (const key of ["eating", "cleanup"])
     numeric(context[key], key, 0, 240);
   if (context.service !== null)
     numeric(context.service, "Service allowance", 0, 240);
@@ -261,9 +275,38 @@ export function validateInputs(profile, context, pantry) {
         "energy_kcal",
         "protein_g",
         "carbohydrate_g",
-        "fat_g",
         "fiber_g",
+        "sugar_g",
+        "added_sugar_g",
+        "fat_g",
+        "saturated_fat_g",
+        "trans_fat_g",
+        "mono_fat_g",
+        "poly_fat_g",
+        "cholesterol_mg",
+        "vitamin_a_mcg",
+        "vitamin_c_mg",
+        "vitamin_d_mcg",
+        "vitamin_e_mg",
+        "vitamin_k_mcg",
+        "thiamin_mg",
+        "riboflavin_mg",
+        "niacin_mg",
+        "pantothenic_mg",
+        "vitamin_b6_mg",
+        "folate_mcg",
+        "vitamin_b12_mcg",
+        "choline_mg",
+        "calcium_mg",
+        "iron_mg",
+        "magnesium_mg",
+        "phosphorus_mg",
+        "potassium_mg",
         "sodium_mg",
+        "zinc_mg",
+        "copper_mg",
+        "manganese_mg",
+        "selenium_mcg",
       ].includes(goal.nutrient) ||
       !["minimum", "maximum", "target_range"].includes(goal.mode)
     )
@@ -300,7 +343,8 @@ export function assertMealAction(meal, state, c = config) {
       ],
     };
   }
+  // Never block a choice — infeasibility reasons are soft advisory warnings only.
+  // The user likes what they like; we note what to grab or adjust, not refuse.
   const result = evaluate(meal, state, c);
-  if (!result.feasible) throw new Error(result.reasons.join(" "));
   return result;
 }

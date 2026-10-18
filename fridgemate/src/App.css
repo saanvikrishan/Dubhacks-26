@@ -1613,3 +1613,33 @@ dialog::backdrop {
     width: 100%;
   }
 }
+
+/* ── Used-up ingredient dialog ──────────────────────────────────────────── */
+.used-up-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+.used-up-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: var(--surface, #f8f6f1);
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: background 0.15s;
+}
+.used-up-item:has(input:checked) {
+  background: var(--green-light, #e8f0e8);
+  text-decoration: line-through;
+  color: var(--muted, #888);
+}
+.used-up-item input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--green, #3a6b3a);
+  flex-shrink: 0;
+}

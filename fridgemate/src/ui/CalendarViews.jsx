@@ -17,7 +17,6 @@ import { byId } from "../data/suggestions";
 
 const timeLabel = (value) =>
   new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
@@ -331,8 +330,7 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
       </button>
       {status?.supported === false && (
         <p className="error">
-          Start the local Daywell server on your Mac to use Apple Calendar. You
-          can also import an .ics export.
+          Start the local Daywell server on your Mac to use Apple Calendar.
         </p>
       )}
       <button
@@ -343,23 +341,6 @@ export function CalendarConnect({ state, onSave, onClose, date }) {
       >
         {gcalBusy ? "Connecting…" : gcalConnected ? "Refresh Google Calendar" : "Connect Google Calendar"}
       </button>
-      <div className="import-divider">
-        <span>or import an export</span>
-      </div>
-      <label className="file-drop">
-        Choose an iCalendar (.ics) file
-        <input
-          aria-label="Import iCalendar file"
-          type="file"
-          accept=".ics,text/calendar"
-          disabled={busy}
-          onChange={(e) => importFile(e.target.files?.[0])}
-        />
-      </label>
-      <p className="fine-print">
-        Calendar → File → Export → Export. File imports are snapshots; refresh
-        by importing again. Recurring events and time zones are supported.
-      </p>
       {message && (
         <p className="success" role="status">
           {message}
@@ -418,8 +399,7 @@ export function EventDialog({
           {timeLabel(event.end)}
         </p>
         <p className="muted">
-          One portion · {event.plan.duration} minutes, including eating, travel
-          and buffer.
+          One portion · {event.plan.duration} minutes, including prep, cooking and eating.
         </p>
         <div className="dialog-actions">
           <button className="primary" onClick={() => onRevise(event.plan)}>

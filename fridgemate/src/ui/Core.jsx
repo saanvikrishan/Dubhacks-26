@@ -312,8 +312,6 @@ function ContextFields({ value, onChange }) {
         <div className="form-grid">
           {field("eating", "Eating (min)")}
           {field("cleanup", "Cooking cleanup (min)")}
-          {field("onward", "Onward travel (min)")}
-          {field("buffer", "Buffer (min)")}
           {field("service", "Eat-out service (min)")}
         </div>
       </details>
@@ -449,7 +447,14 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
             <fieldset>
               <legend>Available equipment</legend>
               <div className="checks">
-                {["stove", "pan", "pot"].map((item) => (
+                {[
+                  "stove", "pan", "pot",
+                  "microwave", "oven", "air fryer", "rice cooker",
+                  "toaster", "blender", "electric kettle",
+                  "baking sheet", "cutting board", "knife",
+                  "mixing bowl", "spatula", "colander",
+                  "slow cooker",
+                ].map((item) => (
                   <label key={item}>
                     <input
                       type="checkbox"
@@ -483,13 +488,26 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                     value={goal.nutrient}
                     onChange={(e) => editGoal(i, "nutrient", e.target.value)}
                   >
-                    {Object.entries(nutrientInfo).map(
-                      ([key, [label, unit]]) => (
-                        <option key={key} value={key}>
-                          {label} ({unit})
-                        </option>
-                      ),
-                    )}
+                    <optgroup label="Macronutrients &amp; Energy">
+                      {["energy_kcal","protein_g","carbohydrate_g","fiber_g","sugar_g","added_sugar_g"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Lipids (Fats)">
+                      {["fat_g","saturated_fat_g","trans_fat_g","mono_fat_g","poly_fat_g","cholesterol_mg"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Vitamins">
+                      {["vitamin_a_mcg","vitamin_c_mg","vitamin_d_mcg","vitamin_e_mg","vitamin_k_mcg","thiamin_mg","riboflavin_mg","niacin_mg","pantothenic_mg","vitamin_b6_mg","folate_mcg","vitamin_b12_mcg","choline_mg"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Minerals">
+                      {["calcium_mg","iron_mg","magnesium_mg","phosphorus_mg","potassium_mg","sodium_mg","zinc_mg","copper_mg","manganese_mg","selenium_mcg"].map((key) => (
+                        <option key={key} value={key}>{nutrientInfo[key][0]} ({nutrientInfo[key][1]})</option>
+                      ))}
+                    </optgroup>
                   </select>
                 </label>
                 <label>
@@ -847,7 +865,7 @@ function Card({
           <p className="card-footnote">
             {selected
               ? `Planned for ${state.plan.date}, ${niceTime(state.plan.start)}–${niceTime(clockTime(minutes(state.plan.start) + state.plan.duration))}.`
-              : `Fits ${niceTime(state.context.start)}–${niceTime(clockTime(minutes(state.context.start) + result.duration))}, including buffer.`}{" "}
+              : `Fits ${niceTime(state.context.start)}–${niceTime(clockTime(minutes(state.context.start) + result.duration))}.`}{" "}
             Nutrition is illustrative.
           </p>
         )}
@@ -1417,7 +1435,7 @@ function Log({ data, onClose, onSave, onLogged }) {
               servings,
               date,
             });
-            onLogged();
+            onLogged(data.meal);
             onClose();
           } catch (err) {
             setError(err.message);
@@ -1475,6 +1493,52 @@ function Log({ data, onClose, onSave, onLogged }) {
   );
 }
 
+function UsedUpDialog({ meal, ingredients, onDone, onClose }) {
+  const [checked, setChecked] = useState(new Set());
+  function toggle(key) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+  return (
+    <Modal title="Did you use anything up?" onClose={onClose}>
+      <p className="muted">
+        You just made <strong>{meal.name}</strong>. Tap any ingredient you ran
+        out of so we can remove it from your pantry.
+      </p>
+      <div className="used-up-list">
+        {ingredients.map(({ display }) => (
+          <label key={display} className="used-up-item">
+            <input
+              type="checkbox"
+              checked={checked.has(display)}
+              onChange={() => toggle(display)}
+            />
+            <span>{display}</span>
+          </label>
+        ))}
+      </div>
+      <p className="fine-print">
+        Leave everything unchecked if you still have leftovers.
+      </p>
+      <div className="dialog-actions">
+        <button
+          className="primary"
+          onClick={() => onDone([...checked])}
+        >
+          {checked.size ? `Remove ${checked.size} item${checked.size > 1 ? "s" : ""}` : "Nothing ran out"}
+          <Icon name="check" />
+        </button>
+        <button className="secondary" onClick={onClose}>
+          Skip
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 export {
   Icon,
   Modal,
@@ -1487,4 +1551,5 @@ export {
   Log,
   Card,
   MealArt,
+  UsedUpDialog,
 };

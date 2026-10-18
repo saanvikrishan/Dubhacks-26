@@ -519,19 +519,24 @@ export function FoodDiscovery({
           return true;
         })
         .map((meal) => {
+          // Gemini meals bypass the catalog feasibility check (ingredient names
+          // don't match pantry keys, and the user already told us what they have).
+          // We still run evaluate() to get timing/duration, but we clear any
+          // catalog-specific reasons so they don't show as errors in the UI.
           const result = evaluate(meal, state);
+          const duration =
+            result.duration ??
+            meal.timing.prep +
+              meal.timing.cook +
+              state.context.eating +
+              state.context.cleanup;
           return {
             ...result,
             meal,
             feasible: true,
-            duration:
-              result.duration ??
-              meal.timing.prep +
-                meal.timing.cook +
-                state.context.eating +
-                state.context.cleanup +
-                state.context.onward +
-                state.context.buffer,
+            reasons: [],
+            gaps: result.gaps ?? [],
+            duration,
           };
         })
     : null;
@@ -667,14 +672,14 @@ export function FoodDiscovery({
         )}
         {saved && (
           <div
-            className={`food-saved-slot ${savedCheck.feasible ? "" : "needs-review"}`}
+            className="food-saved-slot"
           >
             <div>
               <span>PLANNED · {saved.start}</span>
               <strong>{byId[saved.mealId].name}</strong>
-              {!savedCheck.feasible && (
-                <p>
-                  {savedCheck.reasons.join(" ")} Choose a replacement below.
+              {savedCheck && !savedCheck.feasible && savedCheck.reasons.length > 0 && (
+                <p className="fine-print">
+                  Heads up: {savedCheck.reasons[0].replace(/^Not enough confirmed ingredients:/i, "You may need:").replace(/^Needs \d+ minutes;.*$/, "Takes a bit longer than your window.")}
                 </p>
               )}
             </div>
@@ -1003,18 +1008,34 @@ export function FoodDiscovery({
           </p>
         </details>
         {mode === "cook" &&
+          !usingGemini &&
           all.evaluations.some(
             (r) => r.meal.mode === "cook" && !r.feasible,
           ) && (
             <details className="small-panel">
-              <summary>Why some recipes are unavailable</summary>
+              <summary>Tips for these meals</summary>
               {all.evaluations
                 .filter((r) => r.meal.mode === "cook" && !r.feasible)
-                .map((r) => (
-                  <p className="fine-print" key={r.meal.id}>
-                    <strong>{r.meal.name}:</strong> {r.reasons.join(" ")}
-                  </p>
-                ))}
+                .map((r) => {
+                  const note = r.reasons.map((reason) => {
+                    if (/not enough confirmed ingredients/i.test(reason)) {
+                      const match = reason.match(/:\s*(.+)/);
+                      const items = match
+                        ? match[1].split(",").map((s) => s.replace(/\s*\(.*?\)/g, "").trim()).filter(Boolean)
+                        : [];
+                      return items.length ? `Grab: ${items.slice(0, 3).join(", ")}` : "A few ingredients needed";
+                    }
+                    if (/needs equipment/i.test(reason)) return reason.replace("Needs equipment:", "Helpful to have:");
+                    if (/needs \d+ minutes/i.test(reason)) return "Takes a bit longer than your window";
+                    if (/costs \$/i.test(reason)) return reason.replace("Costs", "Est.").replace(", above your", " · cap");
+                    return reason;
+                  }).join(" · ");
+                  return (
+                    <p className="fine-print" key={r.meal.id}>
+                      <strong>{r.meal.name}:</strong> {note}
+                    </p>
+                  );
+                })}
             </details>
           )}
       </aside>

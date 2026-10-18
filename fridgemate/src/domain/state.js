@@ -50,8 +50,6 @@ export function createDemoState() {
       location: "Sample campus area",
       eating: config.timing.editableEatingAllowanceMinutes,
       cleanup: config.timing.editableCleanupAllowanceMinutes,
-      onward: 5,
-      buffer: config.timing.defaultBufferMinutes,
       service: 10,
     },
     pantry: {},
@@ -64,6 +62,8 @@ export function createDemoState() {
     calendar: { source: "manual", connected: false, lastSync: null },
     planUndo: null,
     logUndo: null,
+    geminiMeals: null,
+    groceryList: [],
   };
 }
 function portion(value) {
@@ -207,7 +207,8 @@ function applyAction(state, action, c = config) {
       servings: 1,
       date: state.context.date,
       start: state.context.start,
-      duration: check.duration,
+      // duration may be null if time info is incomplete — use available window as fallback
+      duration: check.duration ?? state.context.available,
     };
     const before = state.mealPlans.find((p) => p.id === plan.id) ?? null;
     return {
@@ -221,7 +222,7 @@ function applyAction(state, action, c = config) {
   if (action.type === "undo") {
     if (state.planUndo) {
       const { slotId, before } = state.planUndo;
-      if (before) assertMealAction(byId[before.mealId], state, c);
+      // Always allow undo — no constraint check blocks restoring a previous choice
       return {
         ...state,
         plan: before,
@@ -233,8 +234,6 @@ function applyAction(state, action, c = config) {
         planUndo: null,
       };
     }
-    if (state.previousPlan)
-      assertMealAction(byId[state.previousPlan.mealId], state, c);
     return { ...state, plan: state.previousPlan, previousPlan: null };
   }
   if (action.type === "clearPlan")
@@ -282,9 +281,7 @@ function applyAction(state, action, c = config) {
         ? (meal.timing.prep ?? 0) +
           (meal.timing.cook ?? 0) +
           (ctx.eating ?? 20) +
-          (meal.mode === "cook" ? (ctx.cleanup ?? 5) : (ctx.service ?? 10)) +
-          (ctx.onward ?? 5) +
-          (ctx.buffer ?? 5)
+          (meal.mode === "cook" ? (ctx.cleanup ?? 5) : (ctx.service ?? 10))
         : 30;
     // If a plan already covers this meal's date+start slot, leave mealPlans alone.
     const existingPlan = state.mealPlans.find(
@@ -335,6 +332,16 @@ function applyAction(state, action, c = config) {
       },
     };
   }
+  if (action.type === "setGeminiMeals") {
+    return {
+      ...state,
+      geminiMeals: Array.isArray(action.meals) ? action.meals : null,
+      groceryList: Array.isArray(action.groceryList) ? action.groceryList : [],
+    };
+  }
+  if (action.type === "clearGeminiMeals") {
+    return { ...state, geminiMeals: null, groceryList: [] };
+  }
   // No external operation is implemented. A flag cannot authorize one.
   requireCapability(action.type, c);
   throw new Error(`No action handler is implemented for ${action.type}.`);
@@ -362,81 +369,136 @@ export function transition(state, action, c = config) {
 
 export function validateState(state) {
   state = normalizeCalendarState(state);
+
+  // Hard structural check — genuinely corrupt data, cannot recover.
   if (
     state.version !== 1 ||
     !Array.isArray(state.logs) ||
     !Array.isArray(state.actions)
   )
     throw new Error("Unsupported saved data. Export or reset this demo.");
-  
-  // Normalize time format in context
-  if (state.context.start && !/^\d{2}:\d{2}$/.test(state.context.start)) {
-    const match = state.context.start.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-    if (match) {
-      let hours = parseInt(match[1]);
-      const minutes = match[2];
-      const period = match[3].toUpperCase();
-      if (period === 'PM' && hours !== 12) hours += 12;
-      if (period === 'AM' && hours === 12) hours = 0;
-      state.context.start = `${hours.toString().padStart(2, '0')}:${minutes}`;
-    }
+
+  const fresh = createDemoState();
+
+  // ── Normalize 12-hour time strings to HH:MM ───────────────────────────────
+  function normTime(value, fallback) {
+    if (!value) return fallback;
+    if (/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return value;
+    const m = value.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (!m) return fallback;
+    let h = parseInt(m[1]);
+    const p = m[3].toUpperCase();
+    if (p === "PM" && h !== 12) h += 12;
+    if (p === "AM" && h === 12) h = 0;
+    return `${h.toString().padStart(2, "0")}:${m[2]}`;
   }
-  if (state.context.commitmentTime && !/^\d{2}:\d{2}$/.test(state.context.commitmentTime)) {
-    const match = state.context.commitmentTime.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-    if (match) {
-      let hours = parseInt(match[1]);
-      const minutes = match[2];
-      const period = match[3].toUpperCase();
-      if (period === 'PM' && hours !== 12) hours += 12;
-      if (period === 'AM' && hours === 12) hours = 0;
-      state.context.commitmentTime = `${hours.toString().padStart(2, '0')}:${minutes}`;
-    }
+  state = {
+    ...state,
+    context: {
+      ...state.context,
+      start: normTime(state.context.start, "12:00"),
+      commitmentTime: normTime(state.context.commitmentTime, "23:59"),
+    },
+  };
+
+  // ── Reset context if it's stale or invalid — preserve everything else ─────
+  // (stale date, bad window, etc. should NOT wipe pantry/profile/logs/calendar)
+  try {
+    validateInputs(state.profile, state.context, state.pantry);
+  } catch {
+    state = { ...state, context: { ...fresh.context, date: today() } };
   }
-  
-  validateInputs(state.profile, state.context, state.pantry);
+
+  // ── Sanitize pantry: drop non-numeric / negative entries ─────────────────
+  const cleanPantry = {};
+  for (const [k, v] of Object.entries(state.pantry ?? {})) {
+    const g = Number(v);
+    if (Number.isFinite(g) && g >= 0) cleanPantry[k] = g;
+  }
+  state = { ...state, pantry: cleanPantry };
+
+  // ── Ensure profile has all required arrays ────────────────────────────────
+  state = {
+    ...state,
+    profile: {
+      ...fresh.profile,
+      ...state.profile,
+      goals: Array.isArray(state.profile?.goals) ? state.profile.goals : [],
+      exclusions: Array.isArray(state.profile?.exclusions) ? state.profile.exclusions : [],
+      equipment: Array.isArray(state.profile?.equipment) ? state.profile.equipment : [],
+    },
+  };
+
+  // ── Carry through geminiMeals / groceryList (in-session, optional) ─────────
+  if (!Array.isArray(state.groceryList)) state = { ...state, groceryList: [] };
+  // geminiMeals can stay as-is (array or null); no deep validation needed
+
   if (!Array.isArray(state.events) || !Array.isArray(state.mealPlans))
     throw new Error("Invalid saved calendar.");
-  for (const plan of [
-    state.plan,
-    state.previousPlan,
-    ...state.mealPlans,
-  ].filter(Boolean)) {
-    if (
-      !byId[plan.mealId] ||
-      !Number.isFinite(plan.duration) ||
-      plan.duration < 0 ||
-      typeof plan.date !== "string" ||
-      typeof plan.start !== "string"
-    )
-      throw new Error("Invalid saved meal plan.");
-    portion(plan.servings);
+
+  // ── Filter bad meal plans instead of throwing ─────────────────────────────
+  state = {
+    ...state,
+    mealPlans: state.mealPlans.filter((plan) => {
+      if (!plan?.id || !byId[plan.mealId]) return false;
+      if (!Number.isFinite(plan.duration) || plan.duration <= 0) return false;
+      if (typeof plan.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(plan.date)) return false;
+      if (typeof plan.start !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(plan.start)) return false;
+      try { portion(plan.servings); return true; } catch { return false; }
+    }),
+  };
+
+  // Deduplicate meal plans (keep last)
+  const seenPlans = new Set();
+  state = {
+    ...state,
+    mealPlans: [...state.mealPlans].reverse().filter((p) => {
+      if (seenPlans.has(p.id)) return false;
+      seenPlans.add(p.id);
+      return true;
+    }).reverse(),
+  };
+
+  // Drop plan/previousPlan if they reference a removed meal
+  if (state.plan && !byId[state.plan?.mealId]) state = { ...state, plan: null };
+  if (state.previousPlan && !byId[state.previousPlan?.mealId])
+    state = { ...state, previousPlan: null };
+
+  // ── Filter bad logs instead of throwing ──────────────────────────────────
+  state = {
+    ...state,
+    logs: state.logs.filter((log) => {
+      if (!byId[log.mealId] || typeof log.id !== "string") return false;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(log.date)) return false;
+      try { portion(log.servings); return true; } catch { return false; }
+    }),
+  };
+
+  // Deduplicate logs (keep last)
+  const seenLogs = new Set();
+  state = {
+    ...state,
+    logs: [...state.logs].reverse().filter((l) => {
+      if (seenLogs.has(l.id)) return false;
+      seenLogs.add(l.id);
+      return true;
+    }).reverse(),
+  };
+
+  // ── Drop invalid events instead of throwing ───────────────────────────────
+  const goodEvents = [];
+  for (const e of state.events) {
+    try { goodEvents.push(validateEvent(e)); } catch { /* skip */ }
   }
-  for (const log of state.logs) {
-    if (
-      !byId[log.mealId] ||
-      typeof log.id !== "string" ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(log.date)
-    )
-      throw new Error("Invalid saved meal log.");
-    portion(log.servings);
-  }
-  if (new Set(state.logs.map((log) => log.id)).size !== state.logs.length)
-    throw new Error("Duplicate saved meal records.");
-  state.events.forEach(validateEvent);
-  if (
-    new Set(state.events.map((e) => e.id)).size !== state.events.length ||
-    new Set(state.mealPlans.map((p) => p.id)).size !== state.mealPlans.length
-  )
-    throw new Error("Duplicate scheduled activity identifiers.");
-  for (const plan of state.mealPlans)
-    if (
-      !byId[plan.mealId] ||
-      !plan.id ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(plan.date) ||
-      !/^([01]\d|2[0-3]):[0-5]\d$/.test(plan.start) ||
-      !Number.isFinite(plan.duration) ||
-      plan.duration <= 0
-    )
-      throw new Error("Invalid scheduled meal.");
+  const seenEvents = new Set();
+  state = {
+    ...state,
+    events: goodEvents.filter((e) => {
+      if (seenEvents.has(e.id)) return false;
+      seenEvents.add(e.id);
+      return true;
+    }),
+  };
+
   return state;
 }
