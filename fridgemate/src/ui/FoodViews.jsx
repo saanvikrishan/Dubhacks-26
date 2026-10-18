@@ -29,13 +29,12 @@ function matchPantryName(raw) {
 
 /** First step when Cook is chosen: free-form groceries → Gemini suggestions. */
 export function CookStart({ state, onSuggested, onEatOut }) {
-  const starter = Object.keys(state.pantry || {})
-    .filter((item) => (state.pantry[item] ?? 0) > 0)
-    .slice(0, 8);
-  const [items, setItems] = useState(starter),
+  const [items, setItems] = useState([]),
     [draft, setDraft] = useState(""),
     [loading, setLoading] = useState(false),
+    [scanning, setScanning] = useState(false),
     [error, setError] = useState("");
+  const busy = loading || scanning;
 
   function addParts(parts) {
     const next = [...items];
@@ -62,6 +61,50 @@ export function CookStart({ state, onSuggested, onEatOut }) {
 
   function removeItem(name) {
     setItems((list) => list.filter((item) => item !== name));
+  }
+
+  async function scanFridgePhoto(file) {
+    if (!file) return;
+    setScanning(true);
+    setError("");
+    try {
+      const body = new FormData();
+      body.append("photo", file);
+      const response = await fetch("/api/vision/ingredients", {
+        method: "POST",
+        body,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail =
+          typeof data.detail === "string"
+            ? data.detail
+            : Array.isArray(data.detail)
+              ? data.detail.map((d) => d.msg || d).join(" ")
+              : "Could not read that photo.";
+        if (response.status === 429)
+          throw new Error(
+            detail ||
+              "Gemini quota exceeded. Try again later or use another API key.",
+          );
+        throw new Error(detail);
+      }
+      const found = data.ingredients || [];
+      if (!found.length)
+        throw new Error(
+          "No ingredients spotted. Try a clearer photo or add them manually.",
+        );
+      addParts(found);
+    } catch (err) {
+      const msg = err.message || "Could not read that photo.";
+      setError(
+        /Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)
+          ? "Start the FastAPI backend on port 8000 (see fridgemate/backend)."
+          : msg,
+      );
+    } finally {
+      setScanning(false);
+    }
   }
 
   async function requestSuggestions(ingredients) {
@@ -126,7 +169,7 @@ export function CookStart({ state, onSuggested, onEatOut }) {
               aria-pressed={false}
               type="button"
               onClick={onEatOut}
-              disabled={loading}
+              disabled={busy}
             >
               <Icon name="fork" size={18} />
               Eat at school
@@ -140,9 +183,29 @@ export function CookStart({ state, onSuggested, onEatOut }) {
           </span>
           <h2>Use your own groceries?</h2>
           <p>
-            Add anything you have—Gemini will suggest meals you can swipe
-            through.
+            Type what you have, or upload a fridge photo—we’ll spot ingredients,
+            then suggest meals you can swipe through.
           </p>
+          <div className="cook-start-photo">
+            <label className="cook-start-photo-button">
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                capture="environment"
+                disabled={busy}
+                aria-label="Upload fridge photo"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  scanFridgePhoto(file);
+                }}
+              />
+              {scanning ? "Scanning photo…" : "Upload fridge photo"}
+            </label>
+            <span className="cook-start-photo-hint">
+              JPEG, PNG, or WebP · max 8 MB
+            </span>
+          </div>
           <label className="cook-start-entry">
             <span>What do you have?</span>
             <div className="cook-start-input-row">
@@ -151,7 +214,7 @@ export function CookStart({ state, onSuggested, onEatOut }) {
                 value={draft}
                 placeholder="e.g. chicken, spinach, tortillas"
                 aria-label="Type groceries you have"
-                disabled={loading}
+                disabled={busy}
                 onChange={(e) => {
                   setDraft(e.target.value);
                   setError("");
@@ -167,7 +230,7 @@ export function CookStart({ state, onSuggested, onEatOut }) {
                 type="button"
                 className="secondary"
                 onClick={addFromDraft}
-                disabled={loading || !draft.trim()}
+                disabled={busy || !draft.trim()}
               >
                 Add
               </button>
@@ -180,7 +243,7 @@ export function CookStart({ state, onSuggested, onEatOut }) {
                 type="button"
                 className="cook-chip on"
                 onClick={() => removeItem(item)}
-                disabled={loading}
+                disabled={busy}
                 aria-label={`Remove ${item}`}
                 title="Tap to remove"
               >
@@ -189,7 +252,8 @@ export function CookStart({ state, onSuggested, onEatOut }) {
             ))}
             {!items.length && (
               <span className="cook-start-empty">
-                No ingredients yet—type above or tap a quick add.
+                No ingredients yet—upload a photo, type above, or tap a quick
+                add.
               </span>
             )}
           </div>
@@ -200,7 +264,7 @@ export function CookStart({ state, onSuggested, onEatOut }) {
                 type="button"
                 className="cook-chip"
                 disabled={
-                  loading ||
+                  busy ||
                   items.some((x) => x.toLowerCase() === item.toLowerCase())
                 }
                 onClick={() => addParts([item])}
@@ -222,17 +286,17 @@ export function CookStart({ state, onSuggested, onEatOut }) {
           <button
             type="button"
             className="primary cook-start-submit"
-            disabled={loading || !items.length}
+            disabled={busy || !items.length}
             onClick={() => requestSuggestions(items)}
           >
             {loading ? "Suggesting…" : "Suggest meals"}
-            {!loading && <Icon name="arrow" size={16} />}
+            {!busy && <Icon name="arrow" size={16} />}
           </button>
         </div>
         <button
           type="button"
           className="cook-start-skip"
-          disabled={loading}
+          disabled={busy}
           onClick={() => requestSuggestions([])}
         >
           {loading ? "Working…" : "Just suggest meals"}

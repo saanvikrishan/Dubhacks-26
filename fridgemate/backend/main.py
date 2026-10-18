@@ -2,11 +2,15 @@ import asyncio
 import json
 import os
 import re
-from datetime import dateackboardClient
+from datetime import date
+from pathlib import Path
+
+from backboard import BackboardClient
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
+from google.genai import types
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent
@@ -52,6 +56,62 @@ backboard_client = BackboardClient(api_key=backboard_key) if backboard_key else 
 _assistant_id = None
 DEMO_ASSISTANT_NAME = "FridgeMate demo"
 PHOTOS = {"tofu", "pasta", "chickpeas"}
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+}
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+def gemini_transient(msg: str) -> bool:
+    return any(
+        code in msg
+        for code in (
+            "429",
+            "RESOURCE_EXHAUSTED",
+            "503",
+            "UNAVAILABLE",
+            "high demand",
+        )
+    )
+
+
+def normalize_ingredient_names(raw_list) -> list[str]:
+    out = []
+    seen = set()
+    for item in raw_list or []:
+        name = str(item).strip().replace("\n", " ")[:60]
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+        if len(out) >= 30:
+            break
+    return out
+
+
+def raise_gemini_failure(last_error, action: str):
+    err = str(last_error or "unknown error")
+    if "429" in err or "RESOURCE_EXHAUSTED" in err:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Gemini free-tier quota for this key is used up "
+                f"(tried: {', '.join(GEMINI_FALLBACKS)}). "
+                "Wait for reset, enable billing, or use another GEMINI_API_KEY."
+            ),
+        )
+    raise HTTPException(
+        status_code=502,
+        detail=f"{action} failed: {err[:240]}",
+    )
 
 
 class RecipeRequest(BaseModel):
@@ -372,24 +432,72 @@ photo must be one of: tofu, pasta, chickpeas (closest visual match).
             last_error = e
             msg = str(e)
             print(f"Gemini error ({model}):", msg)
-            # Try next model on quota / overload; otherwise stop.
-            if not any(
-                code in msg
-                for code in ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "high demand")
-            ):
+            if not gemini_transient(msg):
                 break
 
-    err = str(last_error or "unknown error")
-    if "429" in err or "RESOURCE_EXHAUSTED" in err:
+    raise_gemini_failure(last_error, "Recipe generation")
+
+
+@app.post("/vision/ingredients")
+async def vision_ingredients(photo: UploadFile = File(...)):
+    if not client:
         raise HTTPException(
-            status_code=429,
-            detail=(
-                "Gemini free-tier quota for this key is used up "
-                f"(tried: {', '.join(GEMINI_FALLBACKS)}). "
-                "Wait for reset, enable billing, or use another GEMINI_API_KEY."
-            ),
+            status_code=500,
+            detail="GEMINI_API_KEY is missing from backend/.env or fridgemate/.env",
         )
-    raise HTTPException(
-        status_code=502,
-        detail=f"Recipe generation failed: {err[:240]}",
-    )
+
+    content_type = (photo.content_type or "").lower().split(";")[0].strip()
+    if content_type == "image/jpg":
+        content_type = "image/jpeg"
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload a JPEG, PNG, WebP, or HEIC fridge photo.",
+        )
+
+    data = await photo.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image upload.")
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="Photo is too large (max 8 MB). Try a smaller image.",
+        )
+
+    prompt = """
+You are FridgeMate. Look at this fridge / pantry photo and list edible ingredients
+you can clearly see (produce, proteins, dairy, leftovers in labeled containers, etc.).
+Ignore shelves, containers, brands, and non-food objects.
+Use short grocery-style names (e.g. "eggs", "spinach", "milk").
+Return valid JSON only:
+{"ingredients":["ingredient 1","ingredient 2"]}
+If nothing edible is visible, return {"ingredients":[]}.
+"""
+    image_part = types.Part.from_bytes(data=data, mime_type=content_type)
+    last_error = None
+    for model in GEMINI_FALLBACKS:
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=model,
+                contents=[prompt, image_part],
+                config={"response_mime_type": "application/json"},
+            )
+            parsed = json.loads(response.text or "{}")
+            ingredients = normalize_ingredient_names(
+                parsed.get("ingredients") if isinstance(parsed, dict) else []
+            )
+            if model != GEMINI_MODEL:
+                print(
+                    f"Gemini vision: used fallback model {model} "
+                    f"(primary {GEMINI_MODEL} unavailable)"
+                )
+            return {"ingredients": ingredients, "model": model}
+        except Exception as e:
+            last_error = e
+            msg = str(e)
+            print(f"Gemini vision error ({model}):", msg)
+            if not gemini_transient(msg):
+                break
+
+    raise_gemini_failure(last_error, "Fridge photo scan")
