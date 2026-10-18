@@ -14,6 +14,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 import db as store
+import usda
 
 ROOT = Path(__file__).resolve().parent
 # Prefer backend/.env, fall back to fridgemate/.env
@@ -34,6 +35,10 @@ def on_startup():
         )
     except Exception as e:
         print(f"[Startup] Database init failed: {type(e).__name__}: {e}")
+    key = usda.refresh_api_key()
+    print(
+        f"[Startup] USDA FoodData Central: {'ready' if key else 'not configured (set USDA_API_KEY)'}"
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -70,7 +75,61 @@ backboard_key = (os.getenv("BACKBOARD_API_KEY") or "").strip()
 backboard_client = BackboardClient(api_key=backboard_key) if backboard_key else None
 _assistant_id = None
 DEMO_ASSISTANT_NAME = "FridgeMate demo"
-PHOTOS = {"tofu", "pasta", "chickpeas"}
+PHOTOS = ("pasta", "chickpeas", "tofu")
+# Weighted cues → stock photos in public/food/{key}.png
+PHOTO_SIGNALS = {
+    "pasta": (
+        ("penne", 6),
+        ("spaghetti", 6),
+        ("linguine", 6),
+        ("fettuccine", 6),
+        ("macaroni", 6),
+        ("lasagna", 6),
+        ("ravioli", 6),
+        ("pasta", 5),
+        ("noodle", 4),
+        ("carbonara", 4),
+        ("alfredo", 4),
+        ("bolognese", 4),
+        ("marinara", 3),
+        ("arrabbiata", 4),
+        ("tomato sauce", 3),
+        ("parmesan", 1),
+        ("basil", 1),
+    ),
+    "chickpeas": (
+        ("chickpea", 6),
+        ("garbanzo", 6),
+        ("hummus", 6),
+        ("falafel", 5),
+        ("chana", 5),
+        ("tzatziki", 4),
+        ("mediterranean", 3),
+        ("cucumber", 2),
+        ("lentil", 3),
+        ("dal", 3),
+        ("bean salad", 3),
+        ("black bean", 2),
+        ("kidney bean", 2),
+        ("white bean", 2),
+        ("bean", 2),
+    ),
+    "tofu": (
+        ("tofu", 6),
+        ("tempeh", 5),
+        ("stir-fry", 4),
+        ("stir fry", 4),
+        ("teriyaki", 4),
+        ("sesame", 2),
+        ("buddha bowl", 4),
+        ("grain bowl", 2),
+        ("rice bowl", 3),
+        ("broccoli", 2),
+        ("bell pepper", 1),
+        ("soy", 1),
+        ("edamame", 3),
+    ),
+}
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg",
     "image/jpg",
@@ -164,8 +223,26 @@ def home():
         "gemini": bool(client),
         "backboard": bool(backboard_client),
         "database": store.SessionLocal is not None,
+        "usda": usda.usda_configured(),
         "model": GEMINI_MODEL if client else None,
     }
+
+
+@app.get("/nutrition/lookup")
+async def nutrition_lookup(q: str):
+    """Debug / demo: look up per-100g macros from USDA FDC."""
+    if not usda.usda_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="USDA_API_KEY is missing from backend/.env or fridgemate/.env",
+        )
+    query = (q or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Query q is required.")
+    per_100 = await usda.lookup_per_100g(query)
+    if not per_100:
+        return {"query": query, "status": "not_found", "per_100g": None}
+    return {"query": query, "status": "ok", "per_100g": per_100, "source": "USDA FDC"}
 
 
 @app.get("/pantry")
@@ -342,15 +419,43 @@ def slug(name: str, index: int) -> str:
     return f"gemini-{base or 'meal'}-{index}"
 
 
-def pick_photo(raw: str | None, name: str, blob: str) -> str:
-    if raw in PHOTOS:
-        return raw
-    text = f"{name} {blob}".lower()
-    if "pasta" in text or "noodle" in text:
-        return "pasta"
-    if "chickpea" in text or "hummus" in text or "bean" in text:
-        return "chickpeas"
-    return "tofu"
+def pick_photo(
+    raw: str | None,
+    name: str,
+    description: str = "",
+    ingredients: list | None = None,
+    steps: list | None = None,
+) -> str:
+    """Pick the stock image that best matches the dish (name weighted highest)."""
+    ing_text = " ".join(
+        (i if isinstance(i, str) else str((i or {}).get("name") or ""))
+        for i in (ingredients or [])
+    )
+    step_text = " ".join(str(s) for s in (steps or []))
+    name_l = (name or "").lower()
+    desc_l = (description or "").lower()
+    rest_l = f"{ing_text} {step_text}".lower()
+
+    scores = {key: 0 for key in PHOTOS}
+    for key, signals in PHOTO_SIGNALS.items():
+        for token, weight in signals:
+            if token in name_l:
+                scores[key] += weight * 3  # dish title wins
+            if token in desc_l:
+                scores[key] += weight * 2
+            if token in rest_l:
+                scores[key] += weight
+
+    # Model hint is a weak tie-break only — never override a clear keyword win.
+    hint = (raw or "").strip().lower()
+    if hint in scores:
+        scores[hint] += 1
+
+    best = max(PHOTOS, key=lambda k: (scores[k], PHOTOS.index(k)))
+    if scores[best] <= 0:
+        # No cues: prefer a grain bowl look over random pasta.
+        return "tofu"
+    return best
 
 
 def normalize_ingredient(item) -> dict:
@@ -428,7 +533,13 @@ def normalize_meal(raw: dict, index: int, fallback_ingredients: list[str]) -> di
             "Taste and adjust seasoning.",
         ],
         "mode": "cook",
-        "photo": pick_photo(raw.get("photo"), name, " ".join(steps)),
+        "photo": pick_photo(
+            raw.get("photo"),
+            name,
+            description,
+            mapped,
+            steps,
+        ),
         "suggestion": True,
     }
 
@@ -506,7 +617,11 @@ Return valid JSON only:
   ]
 }
 
-photo must be one of: tofu, pasta, chickpeas (closest visual match).
+photo must be the closest visual match among ONLY these stock photos:
+- pasta = penne in red tomato sauce with basil/cheese
+- chickpeas = Mediterranean chickpea rice bowl with cucumber, tomato, herbs
+- tofu = seared tofu stir-fry bowl with broccoli, peppers, carrots over rice
+Match the recipe name first (e.g. any pasta dish → pasta; hummus/falafel/chickpea → chickpeas; tofu/stir-fry/teriyaki bowl → tofu).
 """
 
     last_error = None
@@ -526,6 +641,8 @@ photo must be one of: tofu, pasta, chickpeas (closest visual match).
                 normalize_meal(r if isinstance(r, dict) else {}, i, cleaned)
                 for i, r in enumerate(recipes[:8])
             ]
+            if usda.usda_configured():
+                meals = await usda.enrich_meals(meals)
             if model != GEMINI_MODEL:
                 print(f"Gemini: used fallback model {model} (primary {GEMINI_MODEL} unavailable)")
             return {
@@ -533,6 +650,7 @@ photo must be one of: tofu, pasta, chickpeas (closest visual match).
                 "recipes": meals,
                 "ingredients": cleaned,
                 "model": model,
+                "nutrition": "usda" if usda.usda_configured() else "gemini_estimate",
             }
         except Exception as e:
             last_error = e

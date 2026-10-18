@@ -546,7 +546,7 @@ export default function App() {
                   {logs.length
                     ? `${summary.energy_kcal.known}/${logs.length} logs have energy data. `
                     : "Confirm what you ate to start a subtotal. "}
-                  Planned meals are excluded. Recipe nutrition is illustrative.
+                  Planned meals are excluded. Cook recipes use USDA when configured.
                 </p>
               </section>
             </div>

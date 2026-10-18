@@ -8,6 +8,7 @@ import {
   goalStatus,
   nutrientInfo,
   portionNutrition,
+  usdaConfidenceExplain,
 } from "../domain/nutrition";
 import { money, num, niceTime } from "./format";
 import { today } from "../domain/state";
@@ -572,7 +573,12 @@ function NutritionTable({ meal, servings = 1 }) {
         ))}
       </div>
       <p className="fine-print">
-        Illustrative demo nutrition · {num(servings)} serving
+        {meal.nutrition?.kind === "usda_estimated"
+          ? `USDA FoodData Central estimate${meal.nutrition.confidence ? ` · ${meal.nutrition.confidence} confidence` : ""}`
+          : meal.nutrition?.kind === "gemini_suggestion"
+            ? "Gemini estimate · not verified"
+            : "Illustrative demo nutrition"}{" "}
+        · {num(servings)} serving
         {servings === 1 ? "" : "s"} · {num(meal.portionGrams * servings)} g.{" "}
         {meal.nutrition.preparation}
       </p>
@@ -591,14 +597,33 @@ function Details({ meal, state, onClose, onChoose, onLog }) {
         <>
           <h3>What’s in this portion</h3>
           <NutritionTable meal={meal} />
-          <details className="allowances">
+          <details className="allowances" open={meal.nutrition?.kind === "usda_estimated"}>
             <summary>Nutrition source & basis</summary>
             <p>{meal.nutrition.source}</p>
-            <p>
-              ID: {meal.id} · Basis: {meal.nutrition.basis} · Fixture checked:{" "}
-              {meal.nutrition.checkedAt}. No external source verifies these
-              numbers.
-            </p>
+            {meal.nutrition?.kind === "usda_estimated" ? (
+              <>
+                <p>
+                  <strong>
+                    {(meal.nutrition.confidence || "medium").replace(/^./, (c) =>
+                      c.toUpperCase(),
+                    )}{" "}
+                    confidence:
+                  </strong>{" "}
+                  {usdaConfidenceExplain(meal.nutrition)}
+                </p>
+                <p>
+                  High ≈ most ingredients matched · Medium ≈ about half · Low ≈
+                  only a few. Unmatched ingredients are left out of the totals.
+                  Macros are summed from USDA matches and scaled per serving.
+                </p>
+              </>
+            ) : (
+              <p>
+                ID: {meal.id} · Basis: {meal.nutrition.basis} · Checked:{" "}
+                {meal.nutrition.checkedAt}. No external source verifies these
+                numbers.
+              </p>
+            )}
           </details>
         </>
       )}

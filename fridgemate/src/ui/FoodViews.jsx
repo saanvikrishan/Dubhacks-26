@@ -5,7 +5,7 @@ import { catalog, pantryItems } from "../data/catalog";
 import { byId } from "../data/suggestions";
 import { config } from "../domain/config";
 import { recommend, clockTime, evaluate } from "../domain/engine";
-import { portionNutrition } from "../domain/nutrition";
+import { portionNutrition, usdaConfidenceExplain } from "../domain/nutrition";
 import { prettyDate } from "../domain/calendar";
 import {
   DEAL_SOURCE,
@@ -656,13 +656,17 @@ export function FoodDiscovery({
               <img
                 draggable={false}
                 src={`/food/${photoFor(meal)}.png`}
-                alt={`AI illustration representing ${meal.name}`}
+                alt={`Stock photo matched to ${meal.name}`}
               />
               <span className="cover-tag">
                 <Icon name="leaf" size={14} />
-                {usingGemini ? "Gemini suggestion" : "Cook with your groceries"}
+                {usingGemini
+                  ? meal.nutrition?.kind === "usda_estimated"
+                    ? "Gemini + USDA"
+                    : "Gemini suggestion"
+                  : "Cook with your groceries"}
               </span>
-              <span className="photo-label">AI illustration</span>
+              <span className="photo-label">Closest stock photo</span>
             </button>
             <div className="flashcard-body">
               <h2>{meal.name}</h2>
@@ -676,14 +680,28 @@ export function FoodDiscovery({
                 <span>{num(nutrition.energy_kcal)} kcal</span>
                 <span>{num(nutrition.protein_g)} g protein</span>
               </div>
-              <div className="fits-line">
+              <div
+                className="fits-line"
+                title={
+                  meal.nutrition?.kind === "usda_estimated"
+                    ? usdaConfidenceExplain(meal.nutrition)
+                    : undefined
+                }
+              >
                 <Icon name="check" size={16} />
                 {usingGemini
-                  ? "AI idea from your ingredients · estimates only"
+                  ? meal.nutrition?.kind === "usda_estimated"
+                    ? `USDA macros · ${meal.nutrition.confidence || "medium"} confidence`
+                    : "AI idea from your ingredients · estimates only"
                   : constrainedFallback
                     ? `Showing outside constraints · ${result.reasons?.[0] ?? "adjust window or groceries"}`
                     : "Ingredients, equipment, budget and calendar checked"}
               </div>
+              {meal.nutrition?.kind === "usda_estimated" ? (
+                <p className="fine-print">
+                  {usdaConfidenceExplain(meal.nutrition)}
+                </p>
+              ) : null}
               <div className="swipe-actions">
                 <button
                   className="decline-button"
@@ -833,7 +851,9 @@ export function FoodDiscovery({
           <span>
             {mode === "cook"
               ? usingGemini
-                ? "Gemini estimates · not verified nutrition"
+                ? geminiMeals.some((m) => m.nutrition?.kind === "usda_estimated")
+                  ? "USDA macros from matched ingredients"
+                  : "Gemini estimates · not verified nutrition"
                 : "Nutrition & costs are demo estimates"
               : "UW sources checked Oct 17 · hours can change"}
           </span>
