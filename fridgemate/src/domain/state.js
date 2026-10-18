@@ -1,6 +1,6 @@
 import { config, requireCapability } from "./config.js";
 import { assertMealAction, validateInputs } from "./engine.js";
-import { byId } from "../data/catalog.js";
+import { byId } from "../data/suggestions.js";
 import { normalizeCalendarState, validateEvent } from "./calendar.js";
 
 export const today = () =>
@@ -319,6 +319,31 @@ export function validateState(state) {
     !Array.isArray(state.actions)
   )
     throw new Error("Unsupported saved data. Export or reset this demo.");
+  
+  // Normalize time format in context
+  if (state.context.start && !/^\d{2}:\d{2}$/.test(state.context.start)) {
+    const match = state.context.start.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (match) {
+      let hours = parseInt(match[1]);
+      const minutes = match[2];
+      const period = match[3].toUpperCase();
+      if (period === 'PM' && hours !== 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
+      state.context.start = `${hours.toString().padStart(2, '0')}:${minutes}`;
+    }
+  }
+  if (state.context.commitmentTime && !/^\d{2}:\d{2}$/.test(state.context.commitmentTime)) {
+    const match = state.context.commitmentTime.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (match) {
+      let hours = parseInt(match[1]);
+      const minutes = match[2];
+      const period = match[3].toUpperCase();
+      if (period === 'PM' && hours !== 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
+      state.context.commitmentTime = `${hours.toString().padStart(2, '0')}:${minutes}`;
+    }
+  }
+  
   validateInputs(state.profile, state.context, state.pantry);
   if (!Array.isArray(state.events) || !Array.isArray(state.mealPlans))
     throw new Error("Invalid saved calendar.");
