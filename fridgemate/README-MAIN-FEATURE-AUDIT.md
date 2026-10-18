@@ -1,6 +1,6 @@
 # Main feature audit — 2026-10-18
 
-Compared the live checkout against freshly fetched `origin/main` commit `b4d8025`. The feature-branch integration preserves the main history. Real .env files are excluded; the earlier temporary stash remains as a recovery backup.
+Compared the live checkout against freshly fetched `origin/main` commit `bd66e44`. The feature-branch integration preserves the main history. Real .env files are excluded; the earlier temporary stash remains as a recovery backup.
 
 ## Compatibility fixes made in this audit
 
@@ -16,6 +16,7 @@ Compared the live checkout against freshly fetched `origin/main` commit `b4d8025
 
 All main HTTP method/path combinations remain, including the new `/profile-patch` proposal endpoint. Additional routes provide walking results and read-only Kroger package quotes. No named UI components from main were removed.
 
+- Latest main UI styles, prepared-dish backend matching, missing-ingredient alternatives and agent prompt files are included. Ambiguous image URLs still use the safe placeholder; the bounded recipe generator retains its documented contract.
 - Daywell AI chat, conversation history, constraint interpretation and phrasing endpoints. The latest main profile preference proposals, explicit accept/dismiss controls and cuisine preference persistence are preserved; their new endpoint has a preview proxy.
 - Fridge-photo ingredient scanning, free-text groceries, editable quantities and used-up ingredient confirmation.
 - Postgres pantry and saved-meal routes; saved-meal write on selection.

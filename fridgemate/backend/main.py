@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from meal_generation import RecipeRequest, RecipeGenerator
 from travel import walking_client
 from kroger import kroger_client
+from skills.loader import load_skill
 
 ROOT = Path(__file__).resolve().parent
 # Prefer backend/.env, fall back to fridgemate/.env
@@ -607,16 +608,132 @@ def slug(name: str, index: int) -> str:
 
 
 # TheMealDB CDN thumbs — existing photos, not AI generation (fast).
-_image_cache: dict[str, str] = {}
+_image_cache: dict[str, str | None] = {}
+
+_IMAGE_STOP = {
+    "a",
+    "an",
+    "the",
+    "and",
+    "or",
+    "with",
+    "in",
+    "of",
+    "on",
+    "to",
+    "style",
+    "homemade",
+    "easy",
+    "quick",
+    "bowl",
+    "plate",
+    "dish",
+    "recipe",
+    "meal",
+    "fresh",
+    "simple",
+    "classic",
+    "best",
+    "loaded",
+    "healthy",
+    "spicy",
+    "zesty",
+}
+
+# Single-token searches that return random unrelated dishes too often.
+_IMAGE_GENERIC = {
+    "chicken",
+    "beef",
+    "pork",
+    "fish",
+    "salmon",
+    "tofu",
+    "egg",
+    "eggs",
+    "rice",
+    "pasta",
+    "noodle",
+    "noodles",
+    "soup",
+    "salad",
+    "curry",
+    "stir",
+    "fry",
+    "fried",
+    "baked",
+    "grilled",
+    "roasted",
+    "sauce",
+    "vegetable",
+    "veggie",
+    "veggies",
+}
+
+
+def _image_tokens(text: str) -> list[str]:
+    words = re.findall(r"[a-z0-9]+", (text or "").lower())
+    return [w for w in words if len(w) > 2 and w not in _IMAGE_STOP]
+
+
+def _score_dish_match(query: str, meal_title: str) -> int:
+    """Higher = better. Require meaningful overlap; punish conflicting proteins."""
+    want = set(_image_tokens(query))
+    got = set(_image_tokens(meal_title))
+    if not want or not got:
+        return -999
+    shared = want & got
+    if not shared:
+        return -400
+    # One shared token is only OK for short queries ("pad thai")
+    if len(want) >= 3 and len(shared) < 2:
+        return -200
+    score = len(shared) * 120
+    # Prefer titles that cover most of the query (not just "chicken")
+    score += int(180 * len(shared) / max(1, len(want)))
+    proteins = {
+        "shrimp",
+        "prawn",
+        "prawns",
+        "chicken",
+        "beef",
+        "pork",
+        "lamb",
+        "fish",
+        "salmon",
+        "tuna",
+        "bacon",
+        "sausage",
+        "crab",
+        "lobster",
+        "turkey",
+        "duck",
+        "steak",
+        "tofu",
+        "egg",
+        "eggs",
+    }
+    for p in proteins:
+        if p in got and p not in want:
+            score -= 500
+    # Mild penalty for long unrelated titles
+    extras = len(got - want)
+    score -= min(80, extras * 12)
+    return score
 
 
 def _image_search_queries(name: str) -> list[str]:
     base = re.sub(r"\s+", " ", (name or "").strip())
     base = re.sub(r"\([^)]*\)", "", base).strip(" ,-")
-    parts = [p for p in re.split(r"[\s/]+", base) if p]
-    candidates = [base, " ".join(parts[:3]), " ".join(parts[:2])]
-    if parts:
-        candidates.append(parts[0])
+    parts = [p for p in re.split(r"[\s/,-]+", base) if p]
+    meaningful = [p for p in parts if p.lower() not in _IMAGE_STOP]
+    candidates = [base]
+    if len(meaningful) >= 3:
+        candidates.append(" ".join(meaningful[:3]))
+    if len(meaningful) >= 2:
+        candidates.append(" ".join(meaningful[:2]))
+    # Only use a single distinctive token — never generic proteins/carbs alone
+    if len(meaningful) == 1 and meaningful[0].lower() not in _IMAGE_GENERIC:
+        candidates.append(meaningful[0])
     out: list[str] = []
     seen: set[str] = set()
     for q in candidates:
@@ -629,15 +746,19 @@ def _image_search_queries(name: str) -> list[str]:
 
 
 async def resolve_dish_image(name: str, client: httpx.AsyncClient | None = None) -> str | None:
-    """Look up a real food photo by dish name (TheMealDB). Cached + ~ms CDN."""
+    """Look up a real food photo by dish name (TheMealDB). Cached + ~ms CDN.
+
+    Picks the best-scoring title match — never blindly takes meals[0].
+    """
     key = (name or "").strip().lower()
     if not key:
         return None
-    cached = _image_cache.get(key)
-    if cached:
-        return cached
+    if key in _image_cache:
+        return _image_cache[key]
 
     async def _search(http: httpx.AsyncClient) -> str | None:
+        best_url: str | None = None
+        best_score = 99  # require score >= 100
         for q in _image_search_queries(name):
             try:
                 response = await http.get(
@@ -647,17 +768,29 @@ async def resolve_dish_image(name: str, client: httpx.AsyncClient | None = None)
                 if response.status_code != 200:
                     continue
                 meals = (response.json() or {}).get("meals") or []
-                thumb = meals[0].get("strMealThumb") if meals else None
-                if thumb:
-                    _image_cache[key] = thumb
-                    return thumb
+                for meal in meals[:12]:
+                    title = meal.get("strMeal") or ""
+                    thumb = meal.get("strMealThumb")
+                    if not thumb:
+                        continue
+                    score = _score_dish_match(name, title)
+                    # Also reward close matches to the specific search query
+                    score = max(score, _score_dish_match(q, title) - 20)
+                    if score > best_score:
+                        best_score = score
+                        best_url = thumb
             except Exception as e:
                 print(f"[Image] TheMealDB miss for {q!r}: {type(e).__name__}")
-        return None
+        _image_cache[key] = best_url
+        if best_url:
+            print(f"[Image] matched {name!r} → score={best_score}")
+        else:
+            print(f"[Image] no confident match for {name!r}")
+        return best_url
 
     if client is not None:
         return await _search(client)
-    async with httpx.AsyncClient(timeout=2.0) as http:
+    async with httpx.AsyncClient(timeout=2.5) as http:
         return await _search(http)
 
 
@@ -665,10 +798,12 @@ async def attach_dish_images(meals: list[dict]) -> None:
     """Attach fast CDN image URLs in parallel (does not block on AI image gen)."""
     if not meals:
         return
-    async with httpx.AsyncClient(timeout=2.0) as client:
+    async with httpx.AsyncClient(timeout=2.5) as client:
 
         async def one(meal: dict) -> None:
-            url = await resolve_dish_image(meal.get("name") or "", client)
+            # Prefer Gemini's short image_search phrase when present
+            label = (meal.get("imageSearch") or meal.get("name") or "").strip()
+            url = await resolve_dish_image(label, client)
             if url:
                 meal["imageUrl"] = url
                 meal["photo"] = url
@@ -970,7 +1105,9 @@ async def conversational_reply(user_text: str, history) -> str:
         reject_blocked_text()
     if not client:
         return CONVO_FALLBACK
-    prompt = f"""You are the food assistant for Daywell. Chat naturally and briefly (1-2 sentences). You help with meal planning — ingredients, time, budget, dietary needs. If the user asks something unrelated to food/cooking, you can still respond conversationally, but steer back to how you can help with meals. Never invent recipe names, nutrition facts, or specific dishes — if they ask for actual meal suggestions, tell them to describe what they're looking for (ingredients, time, budget) so you can check real options.
+    skill = load_skill("conversation_skill")
+    prompt = f"""You are the food assistant for Daywell.
+{skill}
 
 Recent conversation:
 {history_block(history)}
@@ -1006,26 +1143,11 @@ User: {user_text}
 def interpreter_prompt(text: str, memories: list[str], names: set[str], history=None) -> str:
     memory_block = "\n".join(f"- {item}" for item in memories) or "None."
     ingredients = ", ".join(sorted(names))
-    return f"""You classify one message and, when it is a meal request, translate it into a constraint patch for an existing catalog.
-Return JSON only. The object below shows the shape. Set intent from the message, not always "meal_request".
-
-Set "intent" to "meal_request" or "conversation".
-Use "meal_request" when the user wants meal options, or is refining an earlier meal request: cheaper, faster, more protein, a diet, an ingredient, a budget, a time limit, cook versus eat out, or "something else".
-A follow-up that changes a constraint is still a meal_request even if it names no dish. "what about cheaper options" after a vegetarian request is a meal_request.
-Carry constraints that are still in force from the recent chat into the patch. For "cheaper" or "faster" with no number, set sort to "cost" or "time" and leave budget and available null. Do not invent a dollar amount or a minute count.
-Use "conversation" for greetings, thanks, questions about the app, and other small talk that does not ask for or refine meals.
-
-For a meal_request, use null for every patch field the user did not mention and that the recent chat does not already constrain. Do not invent recipes.
-Do not invent pantry grams. If a food is not in the catalog ingredient list, leave it out of pantry and add the user's words to unparsed.
-For a conversation, leave every patch field null and unparsed empty.
+    skill = load_skill("interpreter_skill")
+    return f"""You are Daywell's meal-request interpreter.
+{skill}
 
 Catalog ingredient names, exact spelling: {ingredients}
-Modes: compare, cook, eatOut
-Sorts: catalog, time, cost, protein
-Diets: anything, vegetarian, vegan
-Exclusions: soy, egg, milk, wheat, peanut, tree nut, sesame, fish, shellfish
-Equipment: stove, pan, pot, microwave, oven, air fryer, rice cooker, toaster, blender, electric kettle, baking sheet, cutting board, knife, mixing bowl, spatula, colander, slow cooker
-Map "peanuts" to the exclusion "peanut". Budget is USD per meal, from 0 to 1000.
 
 Recent chat, oldest first:
 {history_block(history)}
@@ -1035,25 +1157,6 @@ Known memories:
 
 User message:
 {text}
-
-Return this object and no other keys inside profile or context:
-{{
-  "intent": "meal_request",
-  "mode": null,
-  "sort": null,
-  "passed": null,
-  "profile": {{
-    "diet": null,
-    "exclusions": null,
-    "preferred": null,
-    "budget": null,
-    "cooking": null,
-    "equipment": null
-  }},
-  "context": {{"available": null}},
-  "pantry": null,
-  "unparsed": []
-}}
 """
 
 
@@ -1147,10 +1250,9 @@ async def phrase_reply(request: PhraseRequest):
             status_code=500,
             detail="GEMINI_API_KEY is missing from backend/.env or fridgemate/.env",
         )
-    prompt = f"""Rewrite the meal assistant summary below as one or two natural, conversational sentences.
-Vary the wording. Keep every fact exactly: meal names, durations, costs, reasons, and disclosure lines such as catalog misses and "for this reply only".
-Do not add meals, times, prices, reasons, or advice that are not in the summary.
-Return only the rewritten sentences.
+    skill = load_skill("phrase_skill")
+    prompt = f"""You are Daywell's reply phrasing skill.
+{skill}
 
 Summary:
 {summary}
@@ -1246,14 +1348,9 @@ async def vision_ingredients(photo: UploadFile = File(...)):
             detail="Photo is too large (max 8 MB). Try a smaller image.",
         )
 
-    prompt = """
-You are FridgeMate. Look at this fridge / pantry photo and list edible ingredients
-you can clearly see (produce, proteins, dairy, leftovers in labeled containers, etc.).
-Ignore shelves, containers, brands, and non-food objects.
-Use short grocery-style names (e.g. "eggs", "spinach", "milk").
-Return valid JSON only:
-{"ingredients":["ingredient 1","ingredient 2"]}
-If nothing edible is visible, return {"ingredients":[]}.
+    skill = load_skill("vision_skill")
+    prompt = f"""You are FridgeMate's fridge / pantry vision skill.
+{skill}
 """
     image_part = types.Part.from_bytes(data=data, mime_type=content_type)
     last_error = None

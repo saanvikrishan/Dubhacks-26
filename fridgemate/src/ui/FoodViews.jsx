@@ -13,10 +13,12 @@ import {
 
 function MealPhoto({ meal, alt, className }) {
   const [src, setSrc] = useState(() => mealImage(meal));
+  const failed = useRef(new Set());
   useEffect(() => {
     let cancelled = false;
+    failed.current = new Set();
     resolveMealImage(meal).then((url) => {
-      if (!cancelled && url) setSrc(url);
+      if (!cancelled && url && !failed.current.has(url)) setSrc(url);
     });
     return () => {
       cancelled = true;
@@ -30,7 +32,7 @@ function MealPhoto({ meal, alt, className }) {
       alt={alt || meal?.name || "Meal"}
       loading="eager"
       decoding="async"
-      onError={() => {if(src!==MEAL_IMAGE_PLACEHOLDER)setSrc(MEAL_IMAGE_PLACEHOLDER);}}
+      onError={() => {failed.current.add(src);if(src!==MEAL_IMAGE_PLACEHOLDER)setSrc(MEAL_IMAGE_PLACEHOLDER);}}
     /><span className="photo-label">{src===MEAL_IMAGE_PLACEHOLDER?"Photo unavailable":src.startsWith('/food/')?"Meal illustration":"Illustrative dish photo"}</span></>
   );
 }
@@ -41,7 +43,7 @@ import { clockTime, evaluate } from "../domain/engine";
 import { discoverCookMeals } from "../domain/discovery";
 import { requestRecipeDrafts, cookingMinutes } from "../adapters/recipes";
 import { portionNutrition, usdaConfidenceExplain } from "../domain/nutrition";
-import { mealSubstitutions, substitutionLine } from "../domain/substitutions";
+import { mealSubstitutions, pantryCovers, substitutionLine } from "../domain/substitutions";
 import { prettyDate, eventsForDay, blocksMealPlanning } from "../domain/calendar";
 import {
   DEAL_SOURCE,
@@ -441,8 +443,8 @@ export function SwipeCard({ children, onPass, onAccept, onDetails, label }) {
               : Math.min(0.22, Math.abs(dx) / 380),
             background:
               dx > 0 || flyingOff === "right"
-                ? "rgba(78, 139, 87, 0.55)"
-                : "rgba(189, 120, 85, 0.5)",
+                ? "rgba(61, 154, 95, 0.58)"
+                : "rgba(196, 116, 74, 0.52)",
           }}
         />
         <div
@@ -672,10 +674,21 @@ export function FoodDiscovery({
               </div>
               {!result.feasible && <div className="notice warning" role="status">{result.reasons.join(' ')}</div>}
               {(() => {
-                const alts = mealSubstitutions(
-                  meal,
-                  groceryList.length ? groceryList : state.pantry,
-                ).slice(0, 3);
+                const pantry = groceryList.length ? groceryList : state.pantry;
+                let alts = mealSubstitutions(meal, pantry).slice(0, 4);
+                // If the API left substitutions empty but flagged gaps, still show them
+                if (!alts.length && Array.isArray(meal.missingIngredients)) {
+                  alts = meal.missingIngredients
+                    .filter((name) => name && !pantryCovers(name, pantry))
+                    .slice(0, 4)
+                    .map((missing) => ({
+                      missing,
+                      useInstead: null,
+                      fromPantry: false,
+                      canOmit: false,
+                      note: `${missing} isn’t in your list — swap it or add it.`,
+                    }));
+                }
                 if (!alts.length) return null;
                 return (
                   <div className="substitution-callout">

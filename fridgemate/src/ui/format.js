@@ -74,6 +74,7 @@ const CONFLICT_FOODS = new Set([
   "anchovy",
   "clam",
   "mussel",
+  "tofu",
 ]);
 
 const SYNONYM = {
@@ -106,7 +107,8 @@ function photoQuery(mealOrName) {
   if (mealOrName && typeof mealOrName === "object") {
     const name = String(mealOrName.name || "").trim();
     const search = String(mealOrName.imageSearch || "").trim();
-    // Use the more specific string (usually the full name)
+    // Prefer Gemini's short imageSearch when it is specific enough
+    if (search && tokens(search).length >= 2) return search.slice(0, 100);
     const primary =
       name.length >= search.length ? name || search : search || name;
     return primary.slice(0, 100) || "homemade meal";
@@ -117,9 +119,8 @@ function photoQuery(mealOrName) {
 function searchQuery(mealOrName) {
   const q = photoQuery(mealOrName);
   const toks = tokens(q);
-  // Expand veggie → vegetable already in tokens; keep egg + fried + rice etc.
   const core = toks.slice(0, 6).join(" ");
-  return `${core || q} food -shrimp -prawn -seafood`.trim();
+  return `${core || q} food`.trim();
 }
 
 /** Immediate preview tagged with the dish's own words (not random stock). */
@@ -151,7 +152,7 @@ function curatedImage(meal) {
 
 /**
  * Score a candidate photo against the dish.
- * Shared ingredients help; conflicting proteins (shrimp on an egg dish) hurt a lot.
+ * Shared ingredients help; conflicting proteins hurt a lot.
  */
 function scoreCandidate(query, title, tagText = "") {
   const want = new Set(tokens(query));
@@ -163,22 +164,22 @@ function scoreCandidate(query, title, tagText = "") {
   let shared = 0;
   for (const t of want) if (got.has(t)) shared += 1;
 
+  if (shared === 0) return -400;
+  // One shared token is only OK for short dish names ("pad thai")
+  if (want.size >= 3 && shared < 2) return -200;
+
   let score = shared * 120;
+  // Coverage bonus: matching most of the dish name
+  score += Math.round((180 * shared) / Math.max(1, want.size));
 
-  // Require at least one shared token or we don't trust it
-  if (shared === 0) score -= 400;
-
-  // Bonus when distinctive non-generic words match (egg, vegetable, …)
   for (const t of want) {
     if (got.has(t) && t !== "fried" && t !== "rice" && t !== "food") score += 80;
   }
 
-  // Heavy penalty: photo mentions a protein the dish does not
   for (const t of got) {
     if (CONFLICT_FOODS.has(t) && !want.has(t)) score -= 500;
   }
 
-  // Mild penalty for lots of extra unmatched food words
   const extras = gotList.filter((t) => !want.has(t) && t !== "food").length;
   score -= Math.min(80, extras * 10);
 
@@ -215,8 +216,8 @@ function pickOpenverseUrl(nameOrMeal, results) {
 
   if (!ranked.length) return null;
 
-  // Only accept photos that actually look related (and not conflicting protein)
-  const good = ranked.filter((r) => r.score >= 100);
+  // Require a real shared-token match (score >= 100 ≈ one shared token)
+  const good = ranked.filter((r) => r.score >= 140);
   if (!good.length) return null;
 
   return good[0].url;
@@ -224,7 +225,7 @@ function pickOpenverseUrl(nameOrMeal, results) {
 
 /**
  * Resolve a photo that matches the dish name.
- * Rejects conflicting proteins (e.g. shrimp when the dish is egg/veggie).
+ * Uses a confident prepared-dish match; otherwise keeps a neutral placeholder.
  */
 export async function resolveMealImage(nameOrMeal, {fetchImpl=fetch} = {}) {
   const curated=curatedImage(nameOrMeal);
@@ -234,6 +235,7 @@ export async function resolveMealImage(nameOrMeal, {fetchImpl=fetch} = {}) {
   const hit = thumbCache.get(key);
   if (hit) return hit;
   if (inflight.has(key)) return inflight.get(key);
+
 
   const job = (async () => {
     const controller = new AbortController();
