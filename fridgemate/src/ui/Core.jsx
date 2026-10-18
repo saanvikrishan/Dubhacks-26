@@ -739,21 +739,16 @@ function Details({ meal, state, onClose, onChoose, onLog }) {
           : meal.allergens.join(", ") || "None listed"}
         . Demo information does not verify real allergen safety.
       </p>
-      {!result.feasible && (
-        <div className="notice warning">{result.reasons.join(" ")}</div>
-      )}
       <div className="dialog-actions">
-        {result.feasible && (
-          <button
-            className="primary"
-            onClick={() => {
-              onClose();
-              onChoose(meal);
-            }}
-          >
+        <button
+          className="primary"
+          onClick={() => {
+            onClose();
+            onChoose(meal);
+          }}
+        >
             Choose this meal
           </button>
-        )}
         {flags.mealLogging.available && (
           <button
             className="secondary"
@@ -1218,62 +1213,74 @@ function Assistant({ state, onAction, onClose }) {
     }
 
     // 2. Detect preference/taste statements — route to profile-patch
-    // 2. Detect and parse preference/taste statements locally — no backend needed
-    const isPreference = /\b(i.m vegan|i.m vegetarian|i eat|i love\b|i like\b|i enjoy\b|i prefer\b|i hate\b|i avoid\b|i don.t eat|i can.t eat|allergic to|intolerant|food from|fan of|i have a\b|i.ve got a\b|i own a\b|i use a\b)\b/i.test(sent);
-    if (isPreference) {
-      const q = sent.toLowerCase();
+    // 2. Detect preference statements by scanning for known profile keywords
+    const DIETS     = ["vegan", "vegetarian"];
+    const ALLERGENS = ["soy","egg","milk","wheat","peanut","tree nut","sesame","fish","shellfish"];
+    const EQUIPMENT = ["microwave","oven","air fryer","rice cooker","toaster","blender",
+      "electric kettle","baking sheet","cutting board","knife","mixing bowl","spatula",
+      "colander","slow cooker","stove","pan","pot"];
+    const CUISINES  = ["italian","mexican","chinese","japanese","indian","thai","korean",
+      "mediterranean","american","french","greek","spanish","middle eastern",
+      "vietnamese","caribbean","latin american"];
+
+    const q = sent.toLowerCase();
+
+    const hitsDiet      = DIETS.some(d => q.includes(d));
+    const hitsAllergen  = ALLERGENS.some(a => q.includes(a));
+    const hitsEquipment = EQUIPMENT.some(e => q.includes(e));
+    const hitsCuisine   = CUISINES.some(c => q.includes(c));
+    const hitsCooking   = /\b(kitchen|cooking access)\b/.test(q);
+
+    if (hitsDiet || hitsAllergen || hitsEquipment || hitsCuisine || hitsCooking) {
       const patch = {};
 
+      const negative = /\b(hate|avoid|don.?t eat|can.?t eat|allergic|intolerant|no |not |without|don.?t have|can.?t have|don.?t like|dislike)\b/.test(q);
+      const positive = !negative;
+
       // Diet
-      if (/\bvegan\b/.test(q)) patch.diet = "vegan";
-      else if (/\bvegetarian\b/.test(q)) patch.diet = "vegetarian";
+      if (q.includes("vegan"))         patch.diet = "vegan";
+      else if (q.includes("vegetarian")) patch.diet = "vegetarian";
       else if (/\bi eat (meat|everything|anything|all)\b/.test(q)) patch.diet = "anything";
 
       // Cooking access
-      if (/\bno kitchen\b|\bno (stove|oven|cooking)\b|\bcan.t cook\b/.test(q)) patch.cooking = false;
-      if (/\bi (have|got) a kitchen\b|\bi can cook\b/.test(q)) patch.cooking = true;
+      if (/\bno (kitchen|stove|oven|cooking)\b|\bcan.?t cook\b/.test(q)) patch.cooking = false;
+      else if (/\b(have|got).{0,10}kitchen\b|\bcan cook\b/.test(q))       patch.cooking = true;
 
-      // Allergens
-      const ALLERGENS = ["soy","egg","milk","wheat","peanut","tree nut","sesame","fish","shellfish"];
-      const negativeFood = /\b(hate|avoid|don.t eat|can.t eat|allergic to|intolerant|no)\b/.test(q);
-      const positiveFood = /\b(love|like|enjoy|prefer|eat|fan of|food from|i like)\b/.test(q);
-      const excAdd = ALLERGENS.filter(a => negativeFood && q.includes(a));
-      const excRemove = ALLERGENS.filter(a => positiveFood && q.includes(a));
-      if (excAdd.length) patch.exclusions_add = excAdd;
-      if (excRemove.length) patch.exclusions_remove = excRemove;
-
-      // Equipment
-      const EQUIPMENT = ["microwave","oven","air fryer","rice cooker","toaster","blender",
-        "electric kettle","baking sheet","cutting board","knife","mixing bowl","spatula",
-        "colander","slow cooker","stove","pan","pot"];
-      const hasEquip = /\bi (have|got|own|use) a?\b/.test(q);
-      const noEquip = /\bno\b|\bdon.t have\b|\bwithout\b/.test(q);
-      const equipAdd = EQUIPMENT.filter(e => hasEquip && q.includes(e));
-      const equipRemove = EQUIPMENT.filter(e => noEquip && q.includes(e));
-      if (equipAdd.length) patch.equipment_add = equipAdd;
-      if (equipRemove.length) patch.equipment_remove = equipRemove;
-
-      // Cuisines + preferred food
-      const CUISINES = ["italian","mexican","chinese","japanese","indian","thai","korean",
-        "mediterranean","american","french","greek","spanish","middle eastern",
-        "vietnamese","caribbean","latin american"];
-      const likedCuisines = CUISINES.filter(c => positiveFood && q.includes(c));
-      const dislikedCuisines = CUISINES.filter(c => negativeFood && q.includes(c));
-      if (likedCuisines.length) {
-        patch.cuisines_add = likedCuisines.map(c => c.charAt(0).toUpperCase() + c.slice(1));
-        if (!patch.preferred) patch.preferred = likedCuisines[0] + " food";
-      }
-      if (dislikedCuisines.length) patch.cuisines_remove = dislikedCuisines.map(c => c.charAt(0).toUpperCase() + c.slice(1));
-
-      const hasChanges = Object.keys(patch).length > 0;
-
-      if (!hasChanges) {
-        // Nothing detected — fall through to Gemini
+      // Allergens — negative = add exclusion, positive = remove exclusion
+      if (negative) {
+        const add = ALLERGENS.filter(a => q.includes(a));
+        if (add.length) patch.exclusions_add = add;
       } else {
-        // Build the new profile
+        const remove = ALLERGENS.filter(a => q.includes(a));
+        if (remove.length) patch.exclusions_remove = remove;
+      }
+
+      // Equipment — positive = add, negative = remove
+      if (positive) {
+        const add = EQUIPMENT.filter(e => q.includes(e));
+        if (add.length) patch.equipment_add = add;
+      } else {
+        const remove = EQUIPMENT.filter(e => q.includes(e));
+        if (remove.length) patch.equipment_remove = remove;
+      }
+
+      // Cuisines — positive = add to liked, negative = remove
+      if (positive) {
+        const add = CUISINES.filter(c => q.includes(c));
+        if (add.length) {
+          patch.cuisines_add = add.map(c => c.charAt(0).toUpperCase() + c.slice(1));
+          if (!patch.preferred) patch.preferred = add[0] + " food";
+        }
+      } else {
+        const remove = CUISINES.filter(c => q.includes(c));
+        if (remove.length)
+          patch.cuisines_remove = remove.map(c => c.charAt(0).toUpperCase() + c.slice(1));
+      }
+
+      if (Object.keys(patch).length > 0) {
         const newProfile = { ...state.profile };
-        if (patch.diet) newProfile.diet = patch.diet;
-        if (patch.preferred) newProfile.preferred = patch.preferred;
+        if (patch.diet)       newProfile.diet = patch.diet;
+        if (patch.preferred)  newProfile.preferred = patch.preferred;
         if (patch.cooking != null) newProfile.cooking = patch.cooking;
         if (patch.exclusions_add?.length)
           newProfile.exclusions = [...new Set([...newProfile.exclusions, ...patch.exclusions_add])];
@@ -1288,27 +1295,28 @@ function Assistant({ state, onAction, onClose }) {
         if (patch.cuisines_remove?.length)
           newProfile.cuisines = (newProfile.cuisines ?? []).filter(c => !patch.cuisines_remove.includes(c));
 
-        // Build a human-readable summary of changes
         const changes = [];
-        if (patch.diet) changes.push(`diet → ${patch.diet}`);
-        if (patch.cooking != null) changes.push(patch.cooking ? "cooking access on" : "cooking access off");
-        if (patch.exclusions_add?.length) changes.push(`exclude ${patch.exclusions_add.join(", ")}`);
-        if (patch.exclusions_remove?.length) changes.push(`remove exclusion for ${patch.exclusions_remove.join(", ")}`);
-        if (patch.equipment_add?.length) changes.push(`add ${patch.equipment_add.join(", ")}`);
-        if (patch.equipment_remove?.length) changes.push(`remove ${patch.equipment_remove.join(", ")}`);
-        if (patch.cuisines_add?.length) changes.push(`add ${patch.cuisines_add.join(", ")} to liked cuisines`);
-        if (patch.preferred) changes.push(`preferred food → "${patch.preferred}"`);
-
-        const summary = `Got it! I'd update your profile: ${changes.join(", ")}. Want me to save that?`;
+        if (patch.diet) changes.push(`set diet to ${patch.diet}`);
+        if (patch.cooking != null) changes.push(patch.cooking ? "turn cooking on" : "turn cooking off");
+        if (patch.exclusions_add?.length)    changes.push(`exclude ${patch.exclusions_add.join(", ")}`);
+        if (patch.exclusions_remove?.length) changes.push(`stop excluding ${patch.exclusions_remove.join(", ")}`);
+        if (patch.equipment_add?.length)     changes.push(`add ${patch.equipment_add.join(", ")} to your equipment`);
+        if (patch.equipment_remove?.length)  changes.push(`remove ${patch.equipment_remove.join(", ")} from equipment`);
+        if (patch.cuisines_add?.length)      changes.push(`add ${patch.cuisines_add.join(", ")} to liked cuisines`);
+        if (patch.preferred) changes.push(`set preferred food to "${patch.preferred}"`);
 
         setMessages((prev) => [
           ...prev,
           { user: true, message: sent },
-          { message: summary, proposal: { type: "updateProfile", profile: newProfile } },
+          {
+            message: `Got it — I'd ${changes.join(", ")}. Want me to save that?`,
+            proposal: { type: "updateProfile", profile: newProfile },
+          },
         ]);
         setText("");
         return;
       }
+      // Keywords hit but nothing actionable — fall through to Gemini
     }
 
     // 3. Fall through to Gemini meal interpreter

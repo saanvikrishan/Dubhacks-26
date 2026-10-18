@@ -143,16 +143,10 @@ export function replyFromPatch(patch, state, catalog, c = config) {
         ? "eat-out options"
         : "meals";
   let message = result.cards.length
-    ? `These ${label} fit your current constraints: ${result.cards
-        .map(
-          (r) =>
-            `${r.meal.name} (${r.duration} min, $${r.meal.cost.toFixed(2)})`,
-        )
-        .join("; ")}. Open Food to inspect and choose.`
-    : `Nothing fits the current constraints. ${result.evaluations
-        .filter((r) => r.meal.mode === "cook" && !r.feasible)
-        .map((r) => `${r.meal.name}: ${r.reasons.join(" ")}`)
-        .join(" ")}`.trim();
+    ? `Here's what works: ${result.cards
+        .map((r) => `${r.meal.name} (${r.duration} min, $${r.meal.cost.toFixed(2)})`)
+        .join("; ")}. Open Food to pick one.`
+    : `Nothing in the catalog fits those exact constraints right now — open Food to browse everything and choose what looks good anyway.`;
   const unparsed = Array.isArray(patch?.unparsed) ? patch.unparsed : [];
   if (unparsed.length)
     message += ` Not in the catalog: ${unparsed.join(", ")}.`;
