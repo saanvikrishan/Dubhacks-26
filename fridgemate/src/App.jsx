@@ -44,6 +44,10 @@ export default function App() {
   const [tab, setTab] = useState("Today"),
     [mode, setMode] = useState("cook"),
     [date, setDate] = useState(today());
+  const [cookStep, setCookStep] = useState("ask"),
+    [suggestionMode, setSuggestionMode] = useState("groceries"),
+    [groceryList, setGroceryList] = useState([]),
+    [swipeSession, setSwipeSession] = useState(0);
   const [dialog, setDialog] = useState(null),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
@@ -109,20 +113,49 @@ export default function App() {
       setNotice(
         "No free window of 35 minutes or more was found. Adjust the meal window in Food.",
       );
+    if (nextMode === "cook") startCook();
     setMode(nextMode);
     setTab("Food");
   }
-  function choose(meal) {
+  function startCook() {
+    setCookStep("ask");
+  }
+  function useGroceries(list, result) {
+    if (!safe({ type: "updatePantry", pantry: result.pantry })) return;
+    setGroceryList(list);
+    setSuggestionMode("groceries");
+    setCookStep("swipe");
+    setSwipeSession((session) => session + 1);
+    setNotice(
+      result.unmatched.length
+        ? `Showing meals from ${result.matched.join(", ")}. No recipes yet for ${result.unmatched.join(", ")}.`
+        : "Showing meals you can make from what you have.",
+    );
+  }
+  function justSuggest() {
+    setSuggestionMode("any");
+    setCookStep("swipe");
+    setSwipeSession((session) => session + 1);
+    setNotice("Suggesting meals you could make.");
+  }
+  function choose(meal, options = {}) {
     const existing = state.mealPlans.find(
       (p) => p.date === state.context.date && p.start === state.context.start,
     );
+    const ignoreIngredients = options.ignoreIngredients === true;
     if (existing && existing.mealId !== meal.id) {
-      setDialog({ type: "replace", meal, existing });
+      setDialog({ type: "replace", meal, existing, ignoreIngredients });
       return;
     }
-    if (safe({ type: "choose", mealId: meal.id })) {
+    if (
+      safe({
+        type: "choose",
+        mealId: meal.id,
+        ignoreIngredients,
+      })
+    ) {
       setNotice(`${meal.name} added to My Plan.`);
-      setDialog({ type: "details", meal });
+      setDialog({ type: "details", meal, ignoreIngredients });
     }
   }
   function reviseMeal(plan) {
@@ -157,13 +190,19 @@ export default function App() {
     )
       return;
     setMode(byId[plan.mealId].mode);
+    if (byId[plan.mealId].mode === "cook") setCookStep("swipe");
     setTab("Food");
     close();
   }
   const openLog = (meal, log = null) =>
     setDialog({ type: "log", meal, log, id: log?.id ?? crypto.randomUUID() });
   const openEvent = (event) => setDialog({ type: "event", event });
-  const openDetails = (meal) => setDialog({ type: "details", meal });
+  const openDetails = (meal, options = {}) =>
+    setDialog({
+      type: "details",
+      meal,
+      ignoreIngredients: options.ignoreIngredients === true,
+    });
   const addEvent = (eventDate) => setDialog({ type: "event", date: eventDate });
   const latest = logs.toSorted((a, b) =>
     (b.confirmedAt || "").localeCompare(a.confirmedAt || ""),
@@ -262,7 +301,9 @@ export default function App() {
                 ? prettyDate(day, { weekday: "long" })
                 : tab === "My Plan"
                   ? "Your calendar, meals and tasks in one place."
-                  : "Find a meal. Swipe to make it yours."}
+                  : mode === "cook" && cookStep === "ask"
+                    ? "Use what you have, or skip to meal ideas."
+                    : "Find a meal. Swipe to make it yours."}
             </p>
           </div>
           <div className="page-tools">
@@ -554,11 +595,24 @@ export default function App() {
         )}
         {tab === "Food" && (
           <FoodDiscovery
-            key={`${mode}-${state.context.date}-${state.context.start}-${state.context.available}-${JSON.stringify(state.pantry)}-${state.events.length}`}
+            key={`${mode}-${cookStep}-${swipeSession}-${state.context.date}-${state.context.start}-${state.context.available}-${JSON.stringify(state.pantry)}-${state.events.length}`}
             state={state}
             mode={mode}
+            cookStep={cookStep}
+            suggestionMode={suggestionMode}
+            groceryList={groceryList}
             onMode={setMode}
+            onStartCook={() => {
+              setMode("cook");
+              startCook();
+            }}
             onChoose={choose}
+            onUseGroceries={useGroceries}
+            onSuggestMeals={justSuggest}
+            onEditGroceries={() => {
+              setMode("cook");
+              startCook();
+            }}
             onVenue={(venue) => setDialog({ type: "venue", venue })}
             onVenueDirections={(venue) => {
               window.location.assign(directionsUrl(venue));
@@ -623,14 +677,36 @@ export default function App() {
         <Details
           meal={dialog.meal}
           state={state}
-          onChoose={choose}
+          onChoose={(meal) =>
+            choose(meal, { ignoreIngredients: dialog.ignoreIngredients })
+          }
           onLog={openLog}
           onClose={close}
+          ignoreIngredients={dialog.ignoreIngredients === true}
         />
       )}
       {dialog?.type === "kitchen" && (
         <Modal title="Groceries on hand" onClose={close} wide>
-          <Kitchen state={state} onSave={dispatch} />
+          <Kitchen
+            state={state}
+            onSave={dispatch}
+            onSaved={(pantry) => {
+              const named = Object.entries(pantry)
+                .filter(([, grams]) => grams > 0)
+                .map(([name]) => name);
+              setGroceryList(named);
+              setSuggestionMode(named.length ? "groceries" : "any");
+              setCookStep("swipe");
+              setMode("cook");
+              setSwipeSession((session) => session + 1);
+              close();
+              setNotice(
+                named.length
+                  ? "Showing meals you can make from those amounts."
+                  : "No groceries were entered. Suggesting meals instead.",
+              );
+            }}
+          />
         </Modal>
       )}
       {dialog?.type === "assistant" && (
@@ -668,9 +744,20 @@ export default function App() {
           onClose={close}
           button="Confirm replacement"
           onConfirm={() => {
-            dispatch({ type: "choose", mealId: dialog.meal.id });
+            if (
+              !safe({
+                type: "choose",
+                mealId: dialog.meal.id,
+                ignoreIngredients: dialog.ignoreIngredients === true,
+              })
+            )
+              return;
             setNotice("Meal replaced in My Plan.");
-            setDialog({ type: "details", meal: dialog.meal });
+            setDialog({
+              type: "details",
+              meal: dialog.meal,
+              ignoreIngredients: dialog.ignoreIngredients === true,
+            });
           }}
         >
           <p>
@@ -722,8 +809,9 @@ export default function App() {
               <h3>Today, My Plan, Food</h3>
               <p>
                 Today is your next activity and full day’s agenda. My Plan is
-                the calendar. Food has separate Cook and Eat at school swipe
-                decks.
+                the calendar. Cook asks what groceries you have, then suggests
+                meals you can make in a swipe deck. Just suggest meals skips
+                that list. Eat at school stays its own swipe deck.
               </p>
             </section>
             <section>

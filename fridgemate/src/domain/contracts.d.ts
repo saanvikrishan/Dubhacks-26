@@ -73,6 +73,7 @@ export interface MealPlan {
   date: string;
   start: string;
   duration: number;
+  ignoreIngredients?: boolean;
 }
 export interface Consumption {
   id: string;

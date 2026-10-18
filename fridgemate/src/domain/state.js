@@ -193,7 +193,8 @@ function applyAction(state, action, c = config) {
   if (action.type === "choose") {
     const meal = byId[action.mealId];
     if (!meal) throw new Error("This meal no longer exists.");
-    const check = assertMealAction(meal, state, c);
+    const ignoreIngredients = action.ignoreIngredients === true;
+    const check = assertMealAction(meal, state, c, { ignoreIngredients });
     const plan = {
       id: `meal:${state.context.date}:${state.context.start}`,
       mealId: meal.id,
@@ -201,6 +202,7 @@ function applyAction(state, action, c = config) {
       date: state.context.date,
       start: state.context.start,
       duration: check.duration,
+      ...(ignoreIngredients ? { ignoreIngredients: true } : {}),
     };
     const before = state.mealPlans.find((p) => p.id === plan.id) ?? null;
     return {
@@ -214,7 +216,10 @@ function applyAction(state, action, c = config) {
   if (action.type === "undo") {
     if (state.planUndo) {
       const { slotId, before } = state.planUndo;
-      if (before) assertMealAction(byId[before.mealId], state, c);
+      if (before)
+        assertMealAction(byId[before.mealId], state, c, {
+          ignoreIngredients: before.ignoreIngredients === true,
+        });
       return {
         ...state,
         plan: before,
@@ -227,7 +232,9 @@ function applyAction(state, action, c = config) {
       };
     }
     if (state.previousPlan)
-      assertMealAction(byId[state.previousPlan.mealId], state, c);
+      assertMealAction(byId[state.previousPlan.mealId], state, c, {
+        ignoreIngredients: state.previousPlan.ignoreIngredients === true,
+      });
     return { ...state, plan: state.previousPlan, previousPlan: null };
   }
   if (action.type === "clearPlan")

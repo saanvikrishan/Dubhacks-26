@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
 import { Icon, Modal } from "./Core";
 import { money, num, photoFor } from "./format";
-import { catalog, byId } from "../data/catalog";
+import { catalog, byId, pantryItems } from "../data/catalog";
 import { config } from "../domain/config";
 import { recommend, clockTime, evaluate } from "../domain/engine";
+import { addGroceryNames, pantryFromGroceries } from "../domain/groceries";
 import { portionNutrition } from "../domain/nutrition";
 import { prettyDate } from "../domain/calendar";
 import {
@@ -123,10 +124,173 @@ const fresh = new Set([
   "tofu-cucumber",
   "chickpea-rice-salad",
 ]);
+const wideRecommend = {
+  ...config,
+  recommendation: { ...config.recommendation, maxCards: 100 },
+};
+
+function GroceryPrompt({ initialItems, state, onUseGroceries, onSuggestMeals, onAmounts }) {
+  const [items, setItems] = useState(initialItems),
+    [draft, setDraft] = useState(""),
+    [hint, setHint] = useState("");
+  const preview = pantryFromGroceries(items);
+  const ideas = preview.matched.length
+    ? recommend(
+        catalog,
+        { ...state, pantry: preview.pantry },
+        { mode: "cook" },
+        wideRecommend,
+      ).cards
+    : [];
+  const extras = items.filter(
+    (item) => !pantryItems.some((name) => name.toLowerCase() === item.toLowerCase()),
+  );
+  const selected = (name) =>
+    items.some((item) => item.toLowerCase() === name.toLowerCase());
+  function addDraft() {
+    const next = addGroceryNames(items, draft);
+    if (next.length === items.length && !draft.trim()) return;
+    setItems(next);
+    setDraft("");
+    setHint("");
+  }
+  function toggle(name) {
+    setHint("");
+    setItems((current) =>
+      current.some((item) => item.toLowerCase() === name.toLowerCase())
+        ? current.filter((item) => item.toLowerCase() !== name.toLowerCase())
+        : [...current, name],
+    );
+  }
+  function submit(event) {
+    event.preventDefault();
+    const next = addGroceryNames(items, draft);
+    setItems(next);
+    setDraft("");
+    const result = pantryFromGroceries(next);
+    if (!result.matched.length) {
+      setHint(
+        next.length
+          ? "Those ingredients aren’t in the recipe library yet. Tap a few below, or just suggest meals."
+          : "Add what you have, or choose Just suggest meals.",
+      );
+      return;
+    }
+    onUseGroceries(next, result);
+  }
+  return (
+    <section className="grocery-prompt" aria-labelledby="grocery-heading">
+      <div className="grocery-card">
+        <div className="grocery-intro">
+          <span className="eyebrow">COOK AT HOME</span>
+          <h2 id="grocery-heading">Use your own groceries?</h2>
+          <p>
+            Add what you have. We’ll suggest meals you can make, with pictures
+            you can swipe left to pass or right to choose.
+          </p>
+        </div>
+        <form onSubmit={submit}>
+          <label className="grocery-label" htmlFor="grocery-input">
+            What do you have?
+          </label>
+          <div className="grocery-entry">
+            <input
+              id="grocery-input"
+              value={draft}
+              placeholder="eggs, rice, tomatoes…"
+              autoComplete="off"
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  addDraft();
+                }
+              }}
+            />
+            <button type="button" className="secondary" onClick={addDraft}>
+              Add
+            </button>
+          </div>
+          {extras.length > 0 && (
+            <div className="grocery-selected" aria-label="Other groceries you added">
+              {extras.map((item) => (
+                <button
+                  type="button"
+                  key={item}
+                  className="grocery-chip unmatched"
+                  onClick={() => toggle(item)}
+                >
+                  {item}
+                  <span aria-hidden="true"> ×</span>
+                  <span className="sr-only">Remove {item}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {preview.unmatched.length > 0 && (
+            <p className="grocery-hint">
+              No recipes yet for {preview.unmatched.join(", ")}.
+            </p>
+          )}
+          {hint && (
+            <p className="grocery-hint" role="status">
+              {hint}
+            </p>
+          )}
+          {ideas.length > 0 && (
+            <p className="grocery-count" aria-live="polite">
+              {ideas.length === 1
+                ? "1 meal you could make"
+                : `${ideas.length} meals you could make`}
+            </p>
+          )}
+          <button
+            className="primary grocery-continue"
+            type="submit"
+            disabled={!items.length && draft.trim().length < 2}
+          >
+            See what I can make
+            <Icon name="arrow" size={16} />
+          </button>
+        </form>
+        <div className="grocery-common">
+          <span>Or tap what you have</span>
+          <div className="grocery-chips">
+            {pantryItems.map((item) => (
+              <button
+                type="button"
+                key={item}
+                className={`grocery-chip${selected(item) ? " selected" : ""}`}
+                aria-pressed={selected(item)}
+                onClick={() => toggle(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
+        <button type="button" className="text-button grocery-amounts" onClick={onAmounts}>
+          Enter amounts in grams
+        </button>
+      </div>
+      <div className="grocery-skip">
+        <p>Skip the list and browse ideas.</p>
+        <button type="button" className="grocery-skip-button" onClick={onSuggestMeals}>
+          Just suggest meals
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export function FoodDiscovery({
   state,
   mode,
+  cookStep,
+  suggestionMode,
+  groceryList,
   onMode,
+  onStartCook,
   onChoose,
   onVenue,
   onVenueDirections,
@@ -135,16 +299,21 @@ export function FoodDiscovery({
   onPreferences,
   onWindow,
   onUndoPlan,
+  onUseGroceries,
+  onSuggestMeals,
+  onEditGroceries,
 }) {
   const [passed, setPassed] = useState([]),
     [mood, setMood] = useState("any"),
     [sort, setSort] = useState("catalog"),
     [openOnly, setOpenOnly] = useState(true);
+  const asking = mode === "cook" && cookStep === "ask";
+  const suggestingAny = mode === "cook" && suggestionMode === "any";
   const all = recommend(
     catalog,
     state,
-    { mode: "cook", sort, passed },
-    { ...config, recommendation: { ...config.recommendation, maxCards: 100 } },
+    { mode: "cook", sort, passed, ignoreIngredients: suggestingAny },
+    wideRecommend,
   );
   const meals = all.cards.filter(
     (r) =>
@@ -170,21 +339,24 @@ export function FoodDiscovery({
   const meal = meals[0]?.meal,
     result = meals[0],
     venue = venues[0],
-    nutrition = meal ? portionNutrition(meal) : null;
+    nutrition = meal ? portionNutrition(meal) : null,
+    shortOn = meal
+      ? meal.ingredients.filter((item) => !(state.pantry[item.name] >= item.grams))
+      : [];
   const pass = (id) => setPassed((p) => [...p, id]);
   const saved = state.mealPlans.find(
     (p) => p.date === state.context.date && p.start === state.context.start,
   );
   const savedCheck = saved ? evaluate(byId[saved.mealId], state) : null;
   return (
-    <div className="food-layout">
+    <div className={`food-layout${asking ? " grocery-layout" : ""}`}>
       <section className="food-discovery">
         <div className="food-topbar">
           <div className="food-mode">
             <button
               aria-pressed={mode === "cook"}
               onClick={() => {
-                onMode("cook");
+                onStartCook();
                 setPassed([]);
               }}
             >
@@ -209,7 +381,15 @@ export function FoodDiscovery({
             <span>Adjust</span>
           </button>
         </div>
-        {mode === "cook" ? (
+        {asking ? (
+          <GroceryPrompt
+            initialItems={groceryList}
+            state={state}
+            onUseGroceries={onUseGroceries}
+            onSuggestMeals={onSuggestMeals}
+            onAmounts={onKitchen}
+          />
+        ) : mode === "cook" ? (
           <div className="food-filters">
             <label>
               Mood
@@ -260,7 +440,7 @@ export function FoodDiscovery({
             </label>
           </div>
         )}
-        {saved && (
+        {!asking && saved && (
           <div
             className={`food-saved-slot ${savedCheck.feasible ? "" : "needs-review"}`}
           >
@@ -281,15 +461,19 @@ export function FoodDiscovery({
             </button>
           </div>
         )}
-        {state.planUndo && (
+        {!asking && state.planUndo && (
           <button className="text-button plan-undo" onClick={onUndoPlan}>
             ↶ Undo last plan change
           </button>
         )}
+        {!asking && (
+          <>
         <div className="deck-heading">
           <span>
             {mode === "cook"
-              ? `${meals.length} meals fit your constraints`
+              ? suggestingAny
+                ? `${meals.length} meal ideas`
+                : `${meals.length} meals from what you have`
               : `${venues.length} UW locations`}
           </span>
           <span>← Pass · {mode === "cook" ? "Choose" : "Directions"} →</span>
@@ -299,13 +483,13 @@ export function FoodDiscovery({
             key={meal.id}
             label={`Meal swipe card: ${meal.name}`}
             onPass={() => pass(meal.id)}
-            onAccept={() => onChoose(meal)}
-            onDetails={() => onDetails(meal)}
+            onAccept={() => onChoose(meal, { ignoreIngredients: suggestingAny })}
+            onDetails={() => onDetails(meal, { ignoreIngredients: suggestingAny })}
           >
             <button
               className="flashcard-cover"
               data-card-open
-              onClick={() => onDetails(meal)}
+              onClick={() => onDetails(meal, { ignoreIngredients: suggestingAny })}
               aria-label={`View ${meal.name} details`}
             >
               <img
@@ -315,7 +499,7 @@ export function FoodDiscovery({
               />
               <span className="cover-tag">
                 <Icon name="leaf" size={14} />
-                Cook with your groceries
+                {suggestingAny ? "Meal idea" : "Cook with your groceries"}
               </span>
               <span className="photo-label">AI illustration</span>
             </button>
@@ -333,7 +517,9 @@ export function FoodDiscovery({
               </div>
               <div className="fits-line">
                 <Icon name="check" size={16} />
-                Ingredients, equipment, budget and calendar checked
+                {suggestingAny && shortOn.length
+                  ? `Time, diet, budget and calendar checked. You may still need ${shortOn.map((item) => item.name).join(", ")}.`
+                  : "Ingredients, equipment, budget and calendar checked"}
               </div>
               <div className="swipe-actions">
                 <button
@@ -345,13 +531,13 @@ export function FoodDiscovery({
                 </button>
                 <button
                   className="detail-button"
-                  onClick={() => onDetails(meal)}
+                  onClick={() => onDetails(meal, { ignoreIngredients: suggestingAny })}
                 >
                   Recipe & nutrition
                 </button>
                 <button
                   className="accept-button"
-                  onClick={() => onChoose(meal)}
+                  onClick={() => onChoose(meal, { ignoreIngredients: suggestingAny })}
                   aria-label="Choose this meal"
                 >
                   <Icon name="check" size={23} />
@@ -462,24 +648,37 @@ export function FoodDiscovery({
                 ? "Bring back passed cards or change your mood."
                 : mode === "eatOut"
                   ? "Change the meal time or include locations outside their published hours."
-                  : "Check the meal window, groceries, restrictions and budget."}
+                  : suggestingAny
+                    ? "Check the meal window, restrictions and budget."
+                    : "Nothing you listed fits this window. Edit your groceries, or just suggest meals."}
             </p>
-            <button
-              className="primary"
-              onClick={() =>
-                passed.length
-                  ? setPassed([])
+            <div className="deck-empty-actions">
+              <button
+                className="primary"
+                onClick={() =>
+                  passed.length
+                    ? setPassed([])
+                    : mode === "eatOut"
+                      ? setOpenOnly(false)
+                      : suggestingAny
+                        ? onPreferences()
+                        : onEditGroceries()
+                }
+              >
+                {passed.length
+                  ? "Show passed cards"
                   : mode === "eatOut"
-                    ? setOpenOnly(false)
-                    : onPreferences()
-              }
-            >
-              {passed.length
-                ? "Show passed cards"
-                : mode === "eatOut"
-                  ? "Show all locations"
-                  : "Adjust constraints"}
-            </button>
+                    ? "Show all locations"
+                    : suggestingAny
+                      ? "Adjust constraints"
+                      : "Edit groceries"}
+              </button>
+              {mode === "cook" && !suggestingAny && (
+                <button className="secondary" onClick={onSuggestMeals}>
+                  Just suggest meals
+                </button>
+              )}
+            </div>
           </div>
         )}
         <div className="deck-footer">
@@ -490,13 +689,21 @@ export function FoodDiscovery({
           >
             ↶ Undo last pass
           </button>
+          {mode === "cook" && (
+            <button className="text-button" onClick={onEditGroceries}>
+              {suggestingAny ? "Use your groceries" : "Edit groceries"}
+            </button>
+          )}
           <span>
             {mode === "cook"
               ? "Nutrition & costs are demo estimates"
               : "UW sources checked Oct 17 · hours can change"}
           </span>
         </div>
+          </>
+        )}
       </section>
+      {!asking && (
       <aside className="food-explainer">
         <section className="small-panel">
           <h3>Your meal constraints</h3>
@@ -531,11 +738,11 @@ export function FoodDiscovery({
         <details className="small-panel how-decisions" open>
           <summary>How Daywell chooses</summary>
           <p>
-            Cook cards come from{" "}
+            Cook starts with the groceries you list, then shows meals from{" "}
             {catalog.filter((m) => m.mode === "cook").length} curated recipes.
-            Rules remove meals that conflict with your ingredients, equipment,
-            diet, budget, time or calendar. Your selected priority then orders
-            the rest.
+            Rules remove meals that conflict with those ingredients, your
+            equipment, diet, budget, time or calendar. Just suggest meals skips
+            the grocery list. Your selected priority then orders the rest.
           </p>
           <p>
             Eat at school uses real UW dining locations and published menu
@@ -563,10 +770,20 @@ export function FoodDiscovery({
             </details>
           )}
       </aside>
-      <button className="floating-groceries" onClick={onKitchen}>
+      )}
+      {!asking && (
+      <button
+        className="floating-groceries"
+        onClick={mode === "cook" ? onEditGroceries : onKitchen}
+      >
         <Icon name="kitchen" size={20} />
-        My groceries
+        {mode === "cook"
+          ? suggestingAny
+            ? "Use your groceries"
+            : "Edit groceries"
+          : "My groceries"}
       </button>
+      )}
     </div>
   );
 }

@@ -539,8 +539,15 @@ function NutritionTable({ meal, servings = 1 }) {
     </>
   );
 }
-function Details({ meal, state, onClose, onChoose, onLog }) {
-  const result = evaluate(meal, state);
+function Details({
+  meal,
+  state,
+  onClose,
+  onChoose,
+  onLog,
+  ignoreIngredients = false,
+}) {
+  const result = evaluate(meal, state, config, { ignoreIngredients });
   return (
     <Modal title={meal.name} onClose={onClose} wide>
       <p className="muted">
@@ -755,7 +762,7 @@ function Card({
     </article>
   );
 }
-function Kitchen({ state, onSave }) {
+function Kitchen({ state, onSave, onSaved }) {
   const [pantry, setPantry] = useState({ ...state.pantry }),
     [error, setError] = useState(""),
     [saved, setSaved] = useState(false);
@@ -780,6 +787,7 @@ function Kitchen({ state, onSave }) {
             onSave({ type: "updatePantry", pantry });
             setSaved(true);
             setError("");
+            onSaved?.(pantry);
           } catch (err) {
             setError(err.message);
           }

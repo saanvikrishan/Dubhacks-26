@@ -373,3 +373,40 @@ test("assistant proposes bounded commands and uses the same plan without mutatio
     undefined,
   );
 });
+test("suggesting meals can skip the pantry check without relaxing other rules", () => {
+  const state = createDemoState();
+  state.pantry = {};
+  assert.equal(evaluate(byId["tofu-bowl"], state).feasible, false);
+  assert.equal(
+    evaluate(byId["tofu-bowl"], state, config, { ignoreIngredients: true })
+      .feasible,
+    true,
+  );
+  state.profile.cooking = false;
+  assert.equal(
+    evaluate(byId["tofu-bowl"], state, config, { ignoreIngredients: true })
+      .feasible,
+    false,
+  );
+});
+test("a suggested meal can be planned without groceries and undone", () => {
+  let state = createDemoState();
+  state.pantry = {};
+  assert.throws(() =>
+    transition(state, { type: "choose", mealId: "chickpea-toast" }),
+  );
+  state = transition(state, {
+    type: "choose",
+    mealId: "chickpea-toast",
+    ignoreIngredients: true,
+  });
+  assert.equal(state.plan.mealId, "chickpea-toast");
+  assert.equal(state.plan.ignoreIngredients, true);
+  state = transition(state, {
+    type: "choose",
+    mealId: "tofu-cucumber",
+    ignoreIngredients: true,
+  });
+  state = transition(state, { type: "undo" });
+  assert.equal(state.plan.mealId, "chickpea-toast");
+});

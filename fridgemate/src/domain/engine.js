@@ -30,7 +30,8 @@ export function timeParts(meal, context) {
 }
 
 /** Pure eligibility evaluation. No score, weight, model, or external call. */
-export function evaluate(meal, state, c = config) {
+export function evaluate(meal, state, c = config, options = {}) {
+  const ignoreIngredients = options.ignoreIngredients === true;
   const { profile: p, context: ctx, pantry } = state;
   const reasons = [],
     gaps = [];
@@ -63,13 +64,15 @@ export function evaluate(meal, state, c = config) {
     );
     if (missingEquipment.length)
       reasons.push(`Needs equipment: ${missingEquipment.join(", ")}.`);
-    const missing = meal.ingredients.filter(
-      (item) => !(pantry[item.name] >= item.grams),
-    );
-    if (missing.length)
-      reasons.push(
-        `Not enough confirmed ingredients: ${missing.map((item) => `${item.name} (${item.grams} g needed)`).join(", ")}.`,
+    if (!ignoreIngredients) {
+      const missing = meal.ingredients.filter(
+        (item) => !(pantry[item.name] >= item.grams),
       );
+      if (missing.length)
+        reasons.push(
+          `Not enough confirmed ingredients: ${missing.map((item) => `${item.name} (${item.grams} g needed)`).join(", ")}.`,
+        );
+    }
   }
   const parts = timeParts(meal, ctx);
   const unknownTime = Object.values(parts).some(
@@ -124,12 +127,17 @@ export function evaluate(meal, state, c = config) {
 export function recommend(
   catalog,
   state,
-  { mode = "compare", sort = "catalog", passed = [] } = {},
+  {
+    mode = "compare",
+    sort = "catalog",
+    passed = [],
+    ignoreIngredients = false,
+  } = {},
   c = config,
 ) {
   const evaluations = catalog.map((meal) => ({
     meal,
-    ...evaluate(meal, state, c),
+    ...evaluate(meal, state, c, { ignoreIngredients }),
   }));
   let eligible = evaluations.filter(
     (result) =>
@@ -274,9 +282,9 @@ export function validateInputs(profile, context, pantry) {
     numeric(grams, "Pantry grams", 0, 100000);
 }
 
-export function assertMealAction(meal, state, c = config) {
+export function assertMealAction(meal, state, c = config, options) {
   requireCapability(meal.mode, c);
-  const result = evaluate(meal, state, c);
+  const result = evaluate(meal, state, c, options);
   if (!result.feasible) throw new Error(result.reasons.join(" "));
   return result;
 }
