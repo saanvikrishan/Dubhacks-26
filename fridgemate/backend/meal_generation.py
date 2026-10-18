@@ -12,6 +12,11 @@ from typing import Literal
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
+from usda import MATCHES
+
+# Reviewed USDA ingredient names; recipes that use them get calculable nutrition.
+KNOWN_INGREDIENTS = ", ".join(sorted(MATCHES))
+
 
 CUISINES = ("Chinese", "Indian", "Italian", "Japanese", "Korean", "Mexican", "Mediterranean",
             "Middle Eastern", "Thai", "Vietnamese", "American")
@@ -244,6 +249,8 @@ class RecipeGenerator:
             "already excludes eating, cleaning, travel and buffer. If no meal is possible, return "
             "an empty recipes array; do not invent a fit. Steps must describe the actual preparation "
             "and equipment. Do not generate nutrition, prices, allergen guarantees or feasibility. "
+            "Name each ingredient with one of these exact names whenever it fits, so nutrition can be "
+            "calculated; otherwise use a short plain name: " + KNOWN_INGREDIENTS + ". "
             "Return JSON matching the schema.\nInput: " + json.dumps(hard)
             + "\nPreferences: " + json.dumps(context)
         )

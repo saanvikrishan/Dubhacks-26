@@ -18,7 +18,7 @@ function reviewed(initial=createDemoState()) {
 test('generated drafts discard remote trust flags, invented costs and model nutrient claims',()=>{
   const m=normalizeGeneratedMeal(raw());assert.equal(m.cost,null);assert.equal(m.allergens,null);assert.equal(m.diets,null);assert.equal(m.review,null);
   assert.ok(Math.abs(portionNutrition(m).protein_g-13.94)<1e-9);
-  const unknown=normalizeGeneratedMeal({...raw(),ingredients:[{name:'rice',grams:100}]});
+  const unknown=normalizeGeneratedMeal({...raw(),ingredients:[{name:'noodles',grams:100}]});
   assert.ok(Object.values(unknown.nutrition.values).every(v=>v===null));
   assert.throws(()=>normalizeGeneratedMeal({...raw(),ingredients:[{name:'tofu',grams:'100'}]}));
   assert.throws(()=>normalizeGeneratedMeal({...raw(),timing:{prep:-1,cook:2,outbound:0}}));

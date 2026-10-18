@@ -63,6 +63,16 @@ test("USDA: four explicitly matched actual detail records retain six nutrients a
       ),
     /Unsupported/,
   );
+  // A reviewed label source is accepted only with the same named brand owner.
+  const label = { ...tofuMatch, expectedDataType: "Branded", labelSource: true, brandOwner: "Example Foods" };
+  assert.equal(
+    normalizeUsdaFood({ ...tofuRaw(), dataType: "Branded", brandOwner: "Example Foods" }, label).dataType,
+    "Branded",
+  );
+  assert.throws(
+    () => normalizeUsdaFood({ ...tofuRaw(), dataType: "Branded", brandOwner: "Other Foods" }, label),
+    /Unsupported/,
+  );
 });
 
 test("USDA: g/mg/micrograms and kJ are converted by explicit source units", () => {

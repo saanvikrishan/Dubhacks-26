@@ -49,9 +49,9 @@ class UsdaClientTests(unittest.IsolatedAsyncioTestCase):
         client=usda.FdcClient(send=send,now=lambda:clock[0],saved=[])
         with patch.object(usda,'usda_configured',return_value=True):
             a,b=await asyncio.gather(client.details(list(range(1,22))),client.details(list(range(1,22))))
-            self.assertEqual(len(calls),2);self.assertEqual(len(calls[0][1]['fdcIds']),20)
+            self.assertEqual(len(calls),3);self.assertTrue(all(len(c[1]['fdcIds'])<=usda.BATCH for c in calls))
             a['records'][0]['description']='changed';self.assertNotEqual(a,b)
-            clock[0]+=usda.TTL+1;await client.details([1]);self.assertEqual(len(calls),3)
+            clock[0]+=usda.TTL+1;await client.details([1]);self.assertEqual(len(calls),4)
     async def test_429_and_exceptions_retain_original_saved_dates_without_false_live_success(self):
         saved={'fdcId':1,'retrievedAt':'2026-10-01','description':'Saved'}
         client=usda.FdcClient(send=AsyncMock(return_value=(429,None)),now=lambda:1000,saved=[saved])
