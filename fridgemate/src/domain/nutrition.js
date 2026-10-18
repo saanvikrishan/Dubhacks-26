@@ -12,16 +12,28 @@ export function portionNutrition(meal, servings = 1) {
   const { basis, yieldServings, values } = meal.nutrition;
   let factor;
   if (basis === "per_serving") factor = servings;
-  else if (basis === "per_100g" && meal.portionGrams > 0)
+  else if (
+    basis === "per_100g" &&
+    Number.isFinite(meal.portionGrams) &&
+    meal.portionGrams > 0
+  )
     factor = (meal.portionGrams * servings) / 100;
-  else if (basis === "per_recipe" && yieldServings > 0)
+  else if (
+    basis === "per_recipe" &&
+    Number.isFinite(yieldServings) &&
+    yieldServings > 0
+  )
     factor = servings / yieldServings;
   else throw new Error("Unknown nutrition basis or recipe yield.");
+  if (!Number.isFinite(factor) || factor <= 0)
+    throw new Error("Invalid nutrition scale.");
   return Object.fromEntries(
-    Object.keys(nutrientInfo).map((key) => [
-      key,
-      values[key] == null ? null : values[key] * factor,
-    ]),
+    Object.keys(nutrientInfo).map((key) => {
+      const value = values[key];
+      const scaled =
+        Number.isFinite(value) && value >= 0 ? value * factor : null;
+      return [key, Number.isFinite(scaled) ? scaled : null];
+    }),
   );
 }
 export function dailyNutrition(logs, meals, date) {
@@ -35,13 +47,15 @@ export function dailyNutrition(logs, meals, date) {
             : null,
         )
         .filter((v) => v != null);
+      const sum = known.reduce((a, b) => a + b, 0);
+      const hasTotal = known.length > 0 && Number.isFinite(sum);
       return [
         key,
         {
-          value: known.length ? known.reduce((a, b) => a + b, 0) : null,
+          value: hasTotal ? sum : null,
           known: known.length,
           total: entries.length,
-          complete: entries.length > 0 && known.length === entries.length,
+          complete: hasTotal && known.length === entries.length,
         },
       ];
     }),

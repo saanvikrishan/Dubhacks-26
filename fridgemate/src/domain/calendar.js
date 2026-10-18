@@ -251,8 +251,7 @@ export function nextMealWindow(events, date, now = new Date(), desired = 60) {
   return null;
 }
 
-// File imports stay local. ICAL.js handles recurrence/exceptions and embedded zones;
-// IANA TZID values without VTIMEZONE use Intl instead of silently becoming UTC.
+// File imports stay local; recurrence identities remain stable when an instance moves.
 export function importIcs(text, { from, to } = {}) {
   if (typeof text !== "string" || text.length > 1500000)
     throw new Error("Choose an .ics file smaller than 1.5 MB.");
@@ -279,69 +278,150 @@ export function importIcs(text, { from, to } = {}) {
   )
     throw new Error("Choose a valid calendar date range.");
   const components = root.getAllSubcomponents("vevent"),
-    events = [],
+    events = new Map(),
     warnings = [];
-  const masters = components.filter(
-    (comp) => !comp.hasProperty("recurrence-id"),
-  );
+  const store = (event) => {
+    events.set(event.id, validateEvent(event));
+    if (events.size > 10000)
+      throw new Error("Import fewer than 10,000 events at a time.");
+  };
   const instant = (time, comp, property = "dtstart") => {
     if (time.isDate) return localInstant(time.toString().slice(0, 10), "00:00");
-    const tzid = comp.getFirstProperty(property)?.getParameter("tzid");
-    if (time.zone?.tzid === "UTC") return time.toJSDate().toISOString();
-    if (tzid && time.zone?.tzid !== "floating")
+    const prop = comp.getFirstProperty(property);
+    // A derived end (DURATION/default) inherits the start's time zone.
+    const tzid =
+      prop?.getParameter("tzid") ??
+      (!prop && property === "dtend"
+        ? comp.getFirstProperty("dtstart")?.getParameter("tzid")
+        : undefined);
+    if (time.zone?.tzid === "UTC" || (tzid && time.zone?.tzid !== "floating"))
       return time.toJSDate().toISOString();
-    return localInstant(
-      time.toString().slice(0, 10),
-      time.toString().slice(11, 16),
-      tzid || TIMEZONE,
-    );
+    return new Date(
+      Date.parse(
+        localInstant(
+          time.toString().slice(0, 10),
+          time.toString().slice(11, 16),
+          tzid || TIMEZONE,
+        ),
+      ) +
+        time.second * 1000,
+    ).toISOString();
   };
+  const isCancelled = (component) =>
+    component.getFirstPropertyValue("status") === "CANCELLED";
   let iterations = 0;
-  for (const comp of masters) {
-    const master = new ICAL.Event(comp);
+  for (const comp of components.filter(
+    (c) => !c.hasProperty("recurrence-id"),
+  )) {
+    if (isCancelled(comp)) continue;
+    // ICAL's default constructor relates every sibling exception, including other UIDs.
+    const master = new ICAL.Event(comp, {
+      exceptions: [],
+      strictExceptions: true,
+    });
     if (!master.startDate) {
       warnings.push("Skipped an event without a start.");
       continue;
     }
-    const exceptions = components.filter(
-      (c) =>
-        c.hasProperty("recurrence-id") &&
-        c.getFirstPropertyValue("uid") === master.uid,
-    );
-    for (const exception of exceptions)
-      master.relateException(new ICAL.Event(exception));
-    const iterator = master.iterator();
-    let occurrence;
-    while ((occurrence = iterator.next())) {
-      if (++iterations > 100000)
-        throw new Error(
-          "This calendar has too many recurrence instances. Export a smaller date range.",
-        );
-      const details = master.getOccurrenceDetails(occurrence),
-        item = details.item,
-        component = item.component;
-      let start, end;
+    const exceptions = components
+      .filter(
+        (c) =>
+          c.hasProperty("recurrence-id") &&
+          c.getFirstPropertyValue("uid") === master.uid,
+      )
+      .map((c) => new ICAL.Event(c));
+    const cancelled = new Set(),
+      ranges = [],
+      directOverrides = new Set();
+    let backwardShift = 0;
+    for (const exception of exceptions) {
+      let nominal;
       try {
-        start = instant(details.startDate, component);
-        end = instant(details.endDate, component, "dtend");
+        nominal = instant(exception.recurrenceId, comp);
+        if (exception.modifiesFuture())
+          ranges.push({
+            start: Date.parse(nominal),
+            cancelled: isCancelled(exception.component),
+          });
+        else if (!isCancelled(exception.component))
+          directOverrides.add(nominal);
       } catch {
-        warnings.push(
-          `Unsupported time zone for ${item.summary || "an event"}.`,
-        );
+        warnings.push("Skipped an exception with an unsupported time zone.");
         continue;
       }
-      if (Date.parse(start) >= rangeEnd) break;
-      if (
-        Date.parse(end) <= rangeStart ||
-        component.getFirstPropertyValue("status") === "CANCELLED"
-      )
+      if (isCancelled(exception.component)) {
+        try {
+          cancelled.add(nominal);
+        } catch {
+          warnings.push(
+            "Skipped a cancellation with an unsupported time zone.",
+          );
+        }
         continue;
-      if (Date.parse(end) <= Date.parse(start))
-        end = new Date(
-          Date.parse(start) + (details.startDate.isDate ? 86400000 : 1800000),
-        ).toISOString();
-      events.push(
-        validateEvent({
+      }
+      master.relateException(exception);
+      if (exception.modifiesFuture()) {
+        try {
+          backwardShift = Math.max(
+            backwardShift,
+            Date.parse(instant(exception.recurrenceId, comp)) -
+              Date.parse(instant(exception.startDate, exception.component)),
+          );
+        } catch {
+          warnings.push("A shifted series has an unsupported time zone.");
+        }
+      }
+    }
+    ranges.sort((a, b) => a.start - b.start);
+    const append = (occurrence) => {
+      let data;
+      try {
+        const nominal = instant(occurrence, comp);
+        const range = ranges
+          .filter((item) => item.start <= Date.parse(nominal))
+          .at(-1);
+        if (
+          cancelled.has(nominal) ||
+          (range?.cancelled && !directOverrides.has(nominal))
+        )
+          return;
+        const details = master.getOccurrenceDetails(occurrence),
+          item = details.item,
+          component = item.component;
+        if (isCancelled(component)) return;
+        const start = instant(details.startDate, component);
+        let end;
+        const duration = component.getFirstPropertyValue("duration");
+        if (duration && !component.hasProperty("dtend")) {
+          if (duration.isNegative) throw new Error("Negative event duration.");
+          // Days/weeks follow the local calendar; hours/minutes/seconds are elapsed time.
+          const localEnd = details.startDate.clone();
+          localEnd.day += duration.weeks * 7 + duration.days;
+          end = new Date(
+            Date.parse(instant(localEnd, component)) +
+              (duration.hours * 3600 +
+                duration.minutes * 60 +
+                duration.seconds) *
+                1000,
+          ).toISOString();
+        } else end = instant(details.endDate, component, "dtend");
+        if (Date.parse(end) <= Date.parse(start)) {
+          if (component.hasProperty("dtend") || duration)
+            throw new Error("Nonpositive event duration.");
+          if (details.startDate.isDate) {
+            const next = details.startDate.clone();
+            next.day += 1;
+            end = instant(next, component);
+          } else {
+            end = new Date(Date.parse(start) + 1800000).toISOString();
+            warnings.push(
+              `No end time for ${item.summary || "an event"}; using a 30-minute planning allowance.`,
+            );
+          }
+        }
+        if (Date.parse(start) >= rangeEnd || Date.parse(end) <= rangeStart)
+          return;
+        data = {
           id: `ics:${master.uid}:${occurrence.toString()}`,
           title: item.summary || "Untitled event",
           start,
@@ -354,10 +434,37 @@ export function importIcs(text, { from, to } = {}) {
           busy: component.getFirstPropertyValue("transp") !== "TRANSPARENT",
           source: "ics",
           readOnly: true,
-        }),
-      );
-      if (events.length > 10000)
-        throw new Error("Import fewer than 10,000 events at a time.");
+        };
+      } catch {
+        warnings.push(
+          `Skipped an occurrence of ${master.summary || "an event"} with an invalid time zone or duration.`,
+        );
+        return;
+      }
+      store(data);
+    };
+    // Moved-in exceptions can have nominal recurrence dates outside the imported range.
+    for (const exception of exceptions)
+      if (!isCancelled(exception.component)) append(exception.recurrenceId);
+    const iterator = master.iterator();
+    let occurrence;
+    // Include instances shifted back by THISANDFUTURE, with room for a DST transition.
+    const cutoff =
+      rangeEnd + backwardShift + (backwardShift > 0 ? 86400000 : 0);
+    while ((occurrence = iterator.next())) {
+      if (++iterations > 100000)
+        throw new Error(
+          "This calendar has too many recurrence instances. Export a smaller date range.",
+        );
+      try {
+        if (Date.parse(instant(occurrence, comp)) >= cutoff) break;
+      } catch {
+        warnings.push(
+          `Unsupported time zone for ${master.summary || "an event"}.`,
+        );
+        break;
+      }
+      append(occurrence);
       if (!master.isRecurring()) break;
     }
   }
@@ -369,31 +476,31 @@ export function importIcs(text, { from, to } = {}) {
       warnings.push("Skipped a task without a date.");
       continue;
     }
-    const start = instant(
-      due,
-      task,
-      task.hasProperty("due") ? "due" : "dtstart",
-    );
+    let start;
+    try {
+      start = instant(due, task, task.hasProperty("due") ? "due" : "dtstart");
+    } catch {
+      warnings.push("Skipped a task with an unsupported time zone.");
+      continue;
+    }
     if (Date.parse(start) < rangeStart || Date.parse(start) >= rangeEnd)
       continue;
-    events.push(
-      validateEvent({
-        id: `ics-task:${task.getFirstPropertyValue("uid")}`,
-        title: task.getFirstPropertyValue("summary") || "Task",
-        start,
-        end: new Date(Date.parse(start) + 60000).toISOString(),
-        allDay: due.isDate,
-        busy: false,
-        kind: "task",
-        source: "ics",
-        readOnly: true,
-        completed: task.getFirstPropertyValue("status") === "COMPLETED",
-        location: "",
-      }),
-    );
+    store({
+      id: `ics-task:${task.getFirstPropertyValue("uid")}`,
+      title: task.getFirstPropertyValue("summary") || "Task",
+      start,
+      end: new Date(Date.parse(start) + 60000).toISOString(),
+      allDay: due.isDate,
+      busy: false,
+      kind: "task",
+      source: "ics",
+      readOnly: true,
+      completed: task.getFirstPropertyValue("status") === "COMPLETED",
+      location: "",
+    });
   }
   return {
-    events: [...new Map(events.map((e) => [e.id, e])).values()].sort(
+    events: [...events.values()].sort(
       (a, b) => Date.parse(a.start) - Date.parse(b.start),
     ),
     warnings,
