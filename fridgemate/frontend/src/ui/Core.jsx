@@ -1,8 +1,8 @@
-import {CUISINES,TASTES} from "../domain/preferences.js";
+import {CUISINES,GOALS,TASTES,withGoal} from "../domain/preferences.js";
 import {MealWindowPicker} from "./MealWindowPicker.jsx";
 import {contextForWindow} from "../domain/mealWindow.js";
 import { knownPresentAllergens, hasAllergenAbsenceCoverage } from "../domain/allergens.js";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { EQUIPMENT } from "../domain/generatedMeals";
 import { catalog } from "../data/catalog";
 import { byId } from "../data/suggestions";
@@ -25,6 +25,8 @@ import { money, num, niceTime } from "./format";
 import { today } from "../domain/state";
 
 import { interpretFoodRequest, replyFromPatch } from "../adapters/assistant";
+import { askAgent, planTurn, restoreNote, writeNote } from "../adapters/agent";
+import { listen, speakReply, stopSpeaking, transcribe, voiceHints, voiceSupported } from "../adapters/voice";
 
 const flags = capabilities();
 const modeName = (mode) => (mode === "cook" ? "Cook at home" : "Eat out");
@@ -54,6 +56,12 @@ function Icon({ name, size = 20 }) {
       </>
     ),
     wallet: <path d="M20 7H4V4h14v3M4 7v13h17V7zM21 11h-6v5h6" />,
+    mic: (
+      <>
+        <rect x="9" y="3" width="6" height="11" rx="3" />
+        <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+      </>
+    ),
     spark: (
       <path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5zM21 2v4m-2-2h4" />
     ),
@@ -354,6 +362,16 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                 </select>
               </label>
               <label>
+                Main goal
+                <select
+                  value={profile.goal ?? ""}
+                  onChange={(e) => setProfile(withGoal(profile, e.target.value))}
+                >
+                  <option value="">No particular goal</option>
+                  {Object.entries(GOALS).map(([key, goal]) => <option key={key} value={key}>{goal.label}</option>)}
+                </select>
+              </label>
+              <label>
                 Strict meal budget ($)
                 <input
                   type="number"
@@ -466,7 +484,7 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
           <details className="allowances">
             <summary>Optional daily nutrition goals</summary>
             <p className="muted">
-              Your own goals, compared with confirmed intake. No preset targets.
+              Daily targets suggested by your main goal. Adjust them here and compare with confirmed intake.
             </p>
             {profile.goals.map((goal, i) => (
               <div className="goal-editor" key={i}>
@@ -1149,26 +1167,198 @@ const ASSISTANT_PROMPTS = [
   "Something lighter tonight",
 ];
 
-function Assistant({ state, onAction, onClose }) {
+const AGENT_PROMPTS = [
+  "What can I cook with my groceries?",
+  "Plan meals around tomorrow’s schedule",
+  "Something lighter tonight",
+  "Show my grocery list",
+];
+
+// The conversation outlives the dialog, so Undo still works after the assistant takes you somewhere.
+const chat = { messages: [], listeners: new Set() };
+const subscribeChat = (listener) => {
+  chat.listeners.add(listener);
+  return () => chat.listeners.delete(listener);
+};
+const readChat = () => chat.messages;
+function updateChat(update) {
+  chat.messages = update(chat.messages);
+  chat.listeners.forEach((listener) => listener());
+}
+// Only the most recent change that is still in place can be undone (Undo restores the state before it).
+const latestTurn = (messages) =>
+  messages.findLastIndex((m) => m.turn && !m.turn.undone && (m.turn.before || m.turn.notes.length));
+// What the model sees of an earlier reply, including what really changed.
+const historyText = (m) =>
+  m.turn?.summaries.length
+    ? `${m.message} [${m.turn.undone ? "The user undid: " : "Changed: "}${m.turn.summaries.join("; ")}]`
+    : m.message;
+
+// Model replies sometimes use light Markdown (**bold**, bullet lines); show formatting, not symbols.
+function inlineMarks(line) {
+  return line
+    .split(/(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*\s][^*]*\*)/g)
+    .map((part, i) =>
+      /^(\*\*|__)[\s\S]+(\*\*|__)$/.test(part) ? (
+        <strong key={i}>{part.slice(2, -2)}</strong>
+      ) : /^\*[^*][\s\S]*\*$/.test(part) ? (
+        <em key={i}>{part.slice(1, -1)}</em>
+      ) : /^`[\s\S]+`$/.test(part) ? (
+        part.slice(1, -1)
+      ) : (
+        part
+      ),
+    );
+}
+function ReplyText({ text }) {
+  const blocks = [];
+  for (const raw of String(text).split("\n")) {
+    const line = raw.trim().replace(/^#{1,6}\s+/, "");
+    if (!line) continue;
+    const item = line.match(/^(?:[-*•]|\d+[.)])\s+(.*)$/);
+    if (item) {
+      const last = blocks.at(-1);
+      if (last?.list) last.items.push(item[1]);
+      else blocks.push({ list: true, items: [item[1]] });
+    } else blocks.push({ list: false, text: line });
+  }
+  return blocks.map((block, i) =>
+    block.list ? (
+      <ul key={i} style={{ margin: "4px 0", paddingLeft: 18 }}>
+        {block.items.map((entry, k) => (
+          <li key={k}>{inlineMarks(entry)}</li>
+        ))}
+      </ul>
+    ) : (
+      <p key={i} style={{ margin: i ? "6px 0 0" : 0 }}>
+        {inlineMarks(block.text)}
+      </p>
+    ),
+  );
+}
+
+// Spoken answers to an open question, and phrases that end a hands-free conversation.
+const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|confirm|please do|sounds good)\b/i;
+const NO = /^(no|nope|cancel|don'?t|never ?mind|not now)\b/i;
+const DONE_TALKING = /^(stop( listening)?|that'?s (all|it)|bye|goodbye|never ?mind)[.!]?$/i;
+const VOICE_STATUS = {
+  listening: "Listening… pause when you’re done",
+  hearing: "Got it, writing that down…",
+  speaking: "Speaking… tap the mic to cut in",
+};
+
+function Assistant({ state, onAction, onClose, agent }) {
+  const greeting = agent
+    ? "Hi — I can plan your meals and change your schedule, preferences and grocery list for you. Type, or tap the mic and just talk; you can undo anything I change."
+    : "Hi — I’m your food copilot. Ask in plain language, or tap a prompt below to start.";
+  const messages = useSyncExternalStore(subscribeChat, readChat);
+  const setMessages = updateChat;
   const [text, setText] = useState(""),
-    [messages, setMessages] = useState([
-      {
-        message:
-          "Hi — I’m your food copilot. Ask in plain language, or tap a prompt below to start.",
-      },
-    ]),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const listRef = useRef(null);
+  const undoable = latestTurn(messages);
+  // Voice: tap the mic and talk; replies are read aloud and the mic reopens for a follow-up.
+  const canTalk = Boolean(agent) && voiceSupported();
+  const [voice, setVoice] = useState("idle"),
+    [level, setLevel] = useState(0),
+    [voiceOut, setVoiceOut] = useState(() => {
+      try {
+        return localStorage.getItem("daywell-voice-replies") !== "off";
+      } catch {
+        return true;
+      }
+    });
+  const mic = useRef(null),
+    handsFree = useRef(false),
+    alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      mic.current?.cancel();
+      stopSpeaking();
+    };
+  }, []);
+
+  function toggleVoiceOut() {
+    const next = !voiceOut;
+    setVoiceOut(next);
+    if (!next) stopSpeaking();
+    try {
+      localStorage.setItem("daywell-voice-replies", next ? "on" : "off");
+    } catch {
+      /* the choice just isn't remembered */
+    }
+  }
+
+  async function toggleMic() {
+    if (voice === "listening") return mic.current?.stop();   // done talking: use what was said
+    stopSpeaking();
+    handsFree.current = true;
+    await hear(8000);
+  }
+
+  async function hear(waitMs) {
+    setError("");
+    let recorder;
+    try {
+      recorder = await listen({ onLevel: setLevel, waitMs });
+    } catch (err) {
+      handsFree.current = false;
+      setVoice("idle");
+      setError(err?.name === "NotAllowedError" ? "Allow microphone access to talk to the assistant." : "The microphone isn’t available.");
+      return;
+    }
+    if (!alive.current) return recorder.cancel();
+    mic.current = recorder;
+    setVoice("listening");
+    const wav = await recorder.result;
+    mic.current = null;
+    setLevel(0);
+    if (!alive.current) return;
+    if (!wav) {
+      handsFree.current = false;   // nobody spoke: end the conversation quietly
+      setVoice("idle");
+      return;
+    }
+    setVoice("hearing");
+    let words = "";
+    try {
+      words = await transcribe(wav, { hints: voiceHints(agent.current()) });
+    } catch (err) {
+      setError(err.message);
+    }
+    if (!alive.current) return;
+    setVoice("idle");
+    if (!words || DONE_TALKING.test(words)) {
+      if (!words) setError((e) => e || "I didn’t catch that. Tap the mic to try again.");
+      handsFree.current = false;
+      return;
+    }
+    await sendPrompt(words, true);
+  }
+
+  // Spoken requests are answered out loud; then the mic opens again for a follow-up.
+  async function replyAloud(words) {
+    if (words && voiceOut && alive.current) {
+      setVoice("speaking");
+      await speakReply(words);
+    }
+    if (!alive.current) return;
+    setVoice("idle");
+    if (handsFree.current) await hear(6000);
+  }
 
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, busy]);
 
-  async function sendPrompt(raw) {
+  async function sendPrompt(raw, spoken = false) {
     const sent = raw.trim();
     if (!sent || busy) return;
+    if (agent) return sendToAgent(sent, spoken);
 
     // 1. Try local command interpreter first
     let response;
@@ -1376,6 +1566,140 @@ function Assistant({ state, onAction, onClose }) {
     }
   }
 
+  // The agent: the model picks app actions, checked here with the app's own rules, then applied
+  // at once with Undo (or after "Yes, go ahead" for risky steps like removing an allergy).
+  async function sendToAgent(sent, spoken = false) {
+    const from = chat.messages.length;
+    if (!spoken) handsFree.current = false;
+    // "Yes" or "cancel" answers an open question directly, without another model call.
+    const asking = from - 1;
+    if (chat.messages[asking]?.confirm && (YES.test(sent) || NO.test(sent))) {
+      setText("");
+      setMessages((prev) => [...prev, { user: true, message: sent }]);
+      if (YES.test(sent)) await confirmTurn(asking);
+      else cancelConfirm(asking);
+      if (spoken) await replyAloud(chat.messages[asking]?.message);
+      return;
+    }
+    const history = chat.messages
+      .filter((m) => !m.pending && typeof m.message === "string" && m.message.trim())
+      .slice(-8)
+      .map((m) => ({ role: m.user ? "user" : "assistant", text: historyText(m).slice(0, 1500) }));
+    setBusy(true);
+    setText("");
+    setError("");
+    setMessages((prev) => [...prev, { user: true, message: sent }, { message: "Thinking…", pending: true }]);
+    let failed = "";
+    try {
+      const data = await askAgent({ message: sent, history, state: agent.current(), ui: agent.ui });
+      await finishTurn(data.reply, data.actions ?? []);
+    } catch (err) {
+      failed = err.message || "The assistant could not answer right now.";
+      setError(failed);
+    } finally {
+      setMessages((prev) => prev.filter((m) => !m.pending));
+      setBusy(false);
+    }
+    if (spoken)
+      await replyAloud(failed || chat.messages.slice(from).filter((m) => !m.user && !m.pending && typeof m.message === "string").map((m) => m.message).join(" "));
+  }
+
+  const cancelConfirm = (index) =>
+    setMessages((prev) => prev.map((m, j) => (j === index ? { message: "Okay — I left everything as it was." } : m)));
+
+  async function finishTurn(reply, calls) {
+    let undid = null;
+    if (calls.some((c) => c.tool === "undo_last")) {
+      const last = latestTurn(chat.messages);
+      undid = last >= 0 && (await undoTurn(last, true));
+    }
+    const rest = calls.filter((c) => c.tool !== "undo_last");
+    const plan = planTurn(agent.current(), rest);
+    setMessages((prev) => prev.filter((m) => !m.pending));
+    if (!plan.ok) {
+      setMessages((prev) => [...prev, { message: `I couldn't do that: ${plan.error} Nothing was changed.` }]);
+      return;
+    }
+    if (plan.confirm.length) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          message: `This would ${plan.confirm.join(" and ")}. Should I go ahead?`,
+          confirm: { calls: rest, reply, summaries: plan.summaries },
+        },
+      ]);
+      return;
+    }
+    if (undid) plan.summaries.unshift("Undid my last changes");
+    await commit(undid === false && !rest.length ? "There's nothing of mine to undo right now." : reply, plan);
+  }
+
+  async function commit(reply, plan, index = -1) {
+    const before = plan.actions.length ? await agent.apply(plan.actions) : null;
+    const notes = plan.effects
+      .filter((e) => e.type === "note")
+      .map((e) => ({ date: e.date, text: writeNote(e.date, e.text) }));
+    const turn = { summaries: plan.summaries, before, after: before && agent.current(), notes, undone: false };
+    const msg = { message: reply, turn };
+    setMessages((prev) => (index < 0 ? [...prev, msg] : prev.map((m, j) => (j === index ? msg : m))));
+    // Then take the user where they asked to go.
+    const moves = plan.effects.filter((e) => ["go", "suggest", "show"].includes(e.type));
+    try {
+      for (const effect of moves) {
+        if (effect.type === "suggest")
+          setMessages((prev) => [...prev, { message: "Finding meal ideas…", pending: true }]);
+        await agent.effect(effect);
+      }
+      if (moves.some((e) => e.type !== "show")) onClose();
+    } catch (err) {
+      setError(err.message || "I couldn't open that.");
+    } finally {
+      setMessages((prev) => prev.filter((m) => !m.pending));
+    }
+  }
+
+  async function confirmTurn(index) {
+    const asked = chat.messages[index]?.confirm;
+    if (!asked || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const plan = planTurn(agent.current(), asked.calls);
+      if (plan.ok) await commit(asked.reply, plan, index);
+      else
+        setMessages((prev) =>
+          prev.map((m, j) => (j === index ? { message: `I couldn't do that anymore: ${plan.error} Nothing was changed.` } : m)),
+        );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const setTurn = (index, patch) =>
+    setMessages((prev) => prev.map((m, j) => (j === index ? { ...m, turn: { ...m.turn, ...patch } } : m)));
+
+  async function undoTurn(index, force = false) {
+    const turn = chat.messages[index]?.turn;
+    if (!turn || turn.undone) return false;
+    // Undo restores the whole state from before the turn, so warn if anything changed since.
+    if (!force && turn.after && JSON.stringify(agent.current()) !== JSON.stringify(turn.after)) {
+      setTurn(index, { warn: true });
+      return false;
+    }
+    try {
+      if (turn.before) await agent.restore(turn.before);
+      for (const note of [...turn.notes].reverse()) restoreNote(note.date, note.text);
+      setTurn(index, { undone: true, warn: false });
+      setError("");
+      return true;
+    } catch (err) {
+      setError(err.message);
+      return false;
+    }
+  }
+
   return (
     <Modal
       title="WhatsCooking.ai"
@@ -1390,9 +1714,20 @@ function Assistant({ state, onAction, onClose }) {
     >
       <div className="assistant-status">
         <span className="assistant-pulse" aria-hidden="true" />
-        <span>Listening for meal help</span>
+        <span>{VOICE_STATUS[voice] ?? "Listening for meal help"}</span>
+        {canTalk && (
+          <button type="button" className="text-button" style={{ marginLeft: "auto", fontSize: 11 }} aria-pressed={voiceOut} onClick={toggleVoiceOut}>
+            {voiceOut ? "Voice replies on" : "Voice replies off"}
+          </button>
+        )}
       </div>
       <div className="chat-messages" aria-live="polite" ref={listRef}>
+        <div className="chat-row">
+          <span className="chat-avatar" aria-hidden="true">
+            <Icon name="spark" size={14} />
+          </span>
+          <div className="chat-bubble">{greeting}</div>
+        </div>
         {messages.map((msg, i) => (
           <div
             className={
@@ -1416,8 +1751,52 @@ function Assistant({ state, onAction, onClose }) {
                   <i />
                   <i />
                 </span>
-              ) : (
+              ) : msg.user ? (
                 msg.message
+              ) : (
+                <ReplyText text={msg.message} />
+              )}
+              {(msg.turn?.summaries.length > 0 || msg.confirm) && (
+                <ul style={{ listStyle: "none", margin: "8px 0 0", padding: 0 }}>
+                  {(msg.confirm ? msg.confirm.summaries : msg.turn.summaries).map((line, k) => (
+                    <li key={k} style={msg.turn?.undone ? { textDecoration: "line-through", opacity: 0.6 } : undefined}>
+                      {msg.confirm ? "• " : "✓ "}
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {msg.confirm && (
+                <div className="assistant-proposal">
+                  <button className="assistant-apply-link" disabled={busy} onClick={() => confirmTurn(i)}>
+                    Yes, go ahead →
+                  </button>
+                  <button
+                    className="assistant-dismiss-link"
+                    disabled={busy}
+                    onClick={() => cancelConfirm(i)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+              {msg.turn?.undone && <div className="assistant-proposal">Undone.</div>}
+              {i === undoable && (
+                <div className="assistant-proposal">
+                  {msg.turn.warn && <span>You changed things since — undo puts everything back to before this request.</span>}
+                  <button
+                    className={msg.turn.warn ? "assistant-apply-link" : "assistant-dismiss-link"}
+                    disabled={busy}
+                    onClick={() => undoTurn(i, msg.turn.warn)}
+                  >
+                    {msg.turn.warn ? "Undo anyway" : "Undo"}
+                  </button>
+                  {msg.turn.warn && (
+                    <button className="assistant-dismiss-link" onClick={() => setTurn(i, { warn: false })}>
+                      Keep
+                    </button>
+                  )}
+                </div>
               )}
               {msg.proposal && (
                 <div className="assistant-proposal">
@@ -1460,9 +1839,27 @@ function Assistant({ state, onAction, onClose }) {
           </div>
         ))}
       </div>
-      {messages.length < 3 && (
+      {agent?.nudges.length > 0 && (
+        <div className="assistant-prompts" role="group" aria-label="Suggestions for you">
+          {agent.nudges.map((nudge) => (
+            <button
+              key={nudge.id}
+              type="button"
+              className="assistant-chip"
+              disabled={busy}
+              onClick={() => {
+                agent.dismissNudge(nudge.id);
+                sendPrompt(nudge.prompt);
+              }}
+            >
+              {nudge.text}
+            </button>
+          ))}
+        </div>
+      )}
+      {messages.length < 2 && !agent?.nudges.length && (
         <div className="assistant-prompts" role="group" aria-label="Try asking">
-          {ASSISTANT_PROMPTS.map((prompt) => (
+          {(agent ? AGENT_PROMPTS : ASSISTANT_PROMPTS).map((prompt) => (
             <button
               key={prompt}
               type="button"
@@ -1490,9 +1887,26 @@ function Assistant({ state, onAction, onClose }) {
           value={text}
           disabled={busy}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Ask anything about meals…"
+          placeholder={agent ? (canTalk ? "Ask, or tap the mic and talk…" : "Ask, or tell me what to change…") : "Ask anything about meals…"}
           autoComplete="off"
         />
+        {canTalk && (
+          <button
+            type="button"
+            className="assistant-send"
+            onClick={toggleMic}
+            disabled={(busy && voice !== "listening") || voice === "hearing"}
+            aria-label={voice === "listening" ? "Stop listening and send" : "Talk to the assistant"}
+            aria-pressed={voice === "listening"}
+            style={
+              voice === "listening"
+                ? { background: "linear-gradient(145deg, #e8743b, #b9531f)", color: "#fff", boxShadow: `0 0 0 ${3 + Math.round(level * 10)}px #e8743b33`, transition: "box-shadow 0.1s" }
+                : { background: "transparent", color: "#2f5538", border: "1px solid #c9d6bc" }
+            }
+          >
+            <Icon name="mic" size={18} />
+          </button>
+        )}
         <button
           className="primary assistant-send"
           type="submit"
@@ -1644,7 +2058,7 @@ async function analyzeGroceryOnBackend(items) {
   };
   const urls = [
     "/api/nutrition/analyze-list",
-    "http://127.0.0.1:8000/nutrition/analyze-list",
+    "/api/nutrition/analyze-list",
   ];
   let lastError = "Could not reach nutrition API.";
   for (const url of urls) {

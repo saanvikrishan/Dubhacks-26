@@ -2,8 +2,7 @@ import { buildUwDiningCatalog, prepareUwDiningMeal, currentWalking } from "../do
 import { sourcedCookCandidate, enrichCookFacts, recipeFingerprint } from "../domain/foodFacts.js";
 import { TASTES, preferenceFit } from "../domain/preferences.js";
 import { useFoodReference, refreshFoodReference } from "../adapters/foodReference.js";
-import { withSourcedWalking } from "../domain/uwDining.js";
-import { useUwWalking, refreshWalking } from "../adapters/uwWalking.js";
+import { useUwWalking } from "../adapters/uwWalking.js";
 import { UwDiningCatalog, UwMenuPreview, UwWalkingSummary } from "./UwDining.jsx";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Icon, Modal } from "./Core";
@@ -12,6 +11,7 @@ import {
   isMealPlaceholder,
   photoState,
   photoVersion,
+  photoRequestFor,
   subscribePhotos,
   trackMealPhotos,
   mealImage,
@@ -55,17 +55,20 @@ function PhotoWait() {
   );
 }
 
-function MealPhoto({ meal, alt, className, label = "AI image" }) {
-  const initial = mealImage(meal);
-  const [src, setSrc] = useState(() => initial);
-  const [showReal, setShowReal] = useState(() => !isMealPlaceholder(initial));
+function MealPhoto(props) {
+  const {meal} = props;
+  const key = JSON.stringify([photoRequestFor(meal), meal?.id, meal?.name, meal?.imageSearch, meal?.imageUrl, meal?.photo]);
+  return <MealPhotoContent key={key} {...props} />;
+}
+
+function MealPhotoContent({ meal: initialMeal, alt, className, label = "AI image" }) {
+  // A changed photo identity remounts this component; parent rerenders keep the same request.
+  const [meal] = useState(initialMeal);
+  const [src, setSrc] = useState(() => mealImage(meal));
+  const [showReal, setShowReal] = useState(() => !isMealPlaceholder(src));
   const failed = useRef(new Set());
   useEffect(() => {
     let cancelled = false;
-    failed.current = new Set();
-    const next = mealImage(meal);
-    setSrc(next);
-    setShowReal(!isMealPlaceholder(next));
     resolveMealImage(meal).then((url) => {
       if (cancelled || !url || failed.current.has(url)) return;
       if (isMealPlaceholder(url)) {
@@ -78,7 +81,7 @@ function MealPhoto({ meal, alt, className, label = "AI image" }) {
     return () => {
       cancelled = true;
     };
-  }, [meal?.id, meal?.name, meal?.imageSearch, meal?.imageUrl, meal?.photo]);
+  }, [meal]);
   const generated = typeof src === "string" && src.startsWith("/api/food/image/");
   return (
     <span className={`meal-photo ${className || ""}`.trim()}>
@@ -122,15 +125,21 @@ function MealPhoto({ meal, alt, className, label = "AI image" }) {
   );
 }
 import { catalog, pantryItems } from "../data/catalog";
-import { buildSourcedCatalog } from "../data/sourcedCatalog";
 import { byId } from "../data/suggestions";
-import { clockTime, evaluate, recommend } from "../domain/engine";
+import { clockTime, evaluate, openEnded, recommend } from "../domain/engine";
 import { discoverCookMeals } from "../domain/discovery";
 import { requestRecipeDrafts, cookingMinutes } from "../adapters/recipes";
 import { recordSkip } from "../adapters/mealFeedback";
 import { nutritionDisplayRows, usdaConfidenceExplain } from "../domain/nutrition";
 import { mealSubstitutions, pantryCovers, substitutionLine } from "../domain/substitutions";
-import { prettyDate, eventsForDay, blocksMealPlanning } from "../domain/calendar";
+import { prettyDate, eventsForDay, blocksMealPlanning, dayKey } from "../domain/calendar";
+
+// A window the user picked shows its exact length; the automatic one is "next meal", limited only by the calendar.
+function windowLabel(context) {
+  if (context.manuallySet || context.date !== dayKey(new Date()))
+    return `${prettyDate(context.date, { month: "short" })} · ${context.start} · ${context.available} min`;
+  return `Next meal · ${context.start} · ${openEnded(context) ? "no time limit" : `free until ${context.commitmentTime}`}`;
+}
 import {
   DEAL_SOURCE,
   UW_MAP_SOURCE,
@@ -239,7 +248,7 @@ export function CookStart({ state, onSuggested, onEatOut, onBrowseLocal, onUnava
       controller.current=new AbortController();
       const pantry=Object.fromEntries(ingredients.filter(name=>quantities[name]!==undefined && quantities[name]!=='' && Number(quantities[name])>=0).map(name=>[name,Number(quantities[name])]));
       const meals=await requestRecipeDrafts({state,ingredients,pantry,signal:AbortSignal.any([controller.current.signal,AbortSignal.timeout(60000)])});
-      if(!meals.length) throw new Error('No recipes matched those inputs. Adjust the cooking window or browse local recipes.');
+      if(!meals.length) throw new Error('No recipes came back for those groceries. Try again, add more, or browse local recipes.');
       await onSuggested(meals,ingredients,pantry);
     } catch (err) {
       if (err.name === "AbortError") return;
@@ -285,7 +294,7 @@ export function CookStart({ state, onSuggested, onEatOut, onBrowseLocal, onUnava
             Type what you have, or upload a fridge photo—we’ll spot ingredients,
             then suggest meals you can swipe through.
           </p>
-          <p className="fine-print">{cookingMinutes(state)} min for preparation and cooking · ${state.profile.budget.toFixed(2)} portion budget. Eating, cleanup, travel and buffer are reserved.</p>
+          <p className="fine-print">{openEnded(state.context) ? "Nothing on your calendar after this meal, so no time limit" : `${cookingMinutes(state)} min to cook before ${state.context.commitment || "your next event"} at ${state.context.commitmentTime}`} · ${state.profile.budget.toFixed(2)} portion budget.</p>
           <div className="dialog-actions"><button className="text-button" onClick={onWindow}>Adjust meal window</button><button className="text-button" onClick={onPreferences}>Diet, budget & equipment</button></div>
           <div className="cook-start-photo">
             <label className="cook-start-photo-button">
@@ -578,7 +587,7 @@ export function FoodDiscovery({
     [moreError, setMoreError] = useState("");
 
   // Notify parent whenever flavorFilter changes so moreIdeas/prepareMore can use it.
-  useEffect(() => { onFlavorChange?.(flavorFilter); }, [flavorFilter]);
+  useEffect(() => { onFlavorChange?.(flavorFilter); }, [flavorFilter, onFlavorChange]);
   // On success the parent swaps in the new batch, which starts a fresh deck.
   async function getMoreIdeas() {
     setMoreLoading(true);
@@ -604,10 +613,6 @@ export function FoodDiscovery({
   }, [usingGemini, geminiMeals]);
   const walking = useUwWalking(mode === "eatOut");
   const food = useFoodReference();
-  const sourced = buildSourcedCatalog().map(record => {
-    const item = withSourcedWalking(record, walking.routes);
-    return {meal:item, ...evaluate(item, state)};
-  });
   const input=usingGemini?geminiMeals:[...catalog,...(state.generatedMeals??[]).filter(m=>m.review?.confirmed && !m.sourceRecipeId)];
   const unique=new Map();
   for(const original of input.filter(m=>m?.id && m.mode==='cook')) {
@@ -652,6 +657,15 @@ export function FoodDiscovery({
   const savedMeal = saved ? byId[saved.mealId] : null;
   const savedCheck =
     savedMeal ? evaluate(savedMeal, state) : null;
+  // When no recipe fits, say the real reason: no groceries yet, not enough time, or what's at home.
+  const hasGroceries = Object.values(state.pantry).some((g) => g > 0);
+  const blocked = all.evaluations.filter((r) => !r.feasible);
+  const onlyTime = blocked.length > 0 && blocked.every((r) => r.reasons.every((x) => /^(Needs \d+ minutes|Overlaps |The next commitment)/.test(x)));
+  const cookEmpty = !hasGroceries
+    ? { title: "Add your groceries to get meal ideas.", text: "Tell us what you have, or snap a photo, and we’ll suggest meals you can make right now. Or explore UW dining.", button: "Add groceries", act: onChangeGroceries }
+    : onlyTime
+      ? { title: `Not enough time before ${state.context.commitment || "your next event"}.`, text: `You’re free until ${state.context.commitmentTime}. Pick a later time, or explore UW dining.`, button: "Choose meal time", act: onWindow }
+      : { title: "None of these recipes match your groceries yet.", text: "Get fresh ideas made from what you have, or see why below. Your food restrictions stay in place.", button: "Suggest meals from my groceries", act: onChangeGroceries };
   return (
     <div className="food-layout">
       <section className="food-discovery">
@@ -680,12 +694,11 @@ export function FoodDiscovery({
           </div>
           <button className="window-button" onClick={onWindow}>
             <Icon name="clock" size={16} />
-            {prettyDate(state.context.date, { month: "short" })} ·{" "}
-            {state.context.start} · {state.context.available} min{" "}
+            {windowLabel(state.context)}{" "}
             <span>Adjust</span>
           </button>
         </div>
-        {mode === "cook" && onChangeGroceries && <button className="secondary" onClick={onChangeGroceries}>Your groceries & photo scan</button>}
+        {mode === "cook" && onChangeGroceries && <button className="secondary" style={{ margin: "16px 0 12px", padding: "12px 22px" }} onClick={onChangeGroceries}>Your groceries & photo scan</button>}
         {mode === "cook" ? (
           <div className="food-filters">
             <label>
@@ -971,7 +984,7 @@ export function FoodDiscovery({
               <div className="swipe-actions">
                 <button
                   className="decline-button"
-                  onClick={() => pass(venue.id)}
+                  onClick={() => pass(schoolMeal?.id ?? venue.id)}
                   aria-label="Pass on this restaurant"
                 >
                   ✕
@@ -1004,14 +1017,14 @@ export function FoodDiscovery({
                 ? "You’ve seen these options."
                 : mode==='cook' && ['not_requested','loading'].includes(food.status) ? 'Checking food prices…'
                 : mode==='cook' && food.status==='unavailable' ? 'Food prices could not be loaded.'
-                : mode==='cook' ? "No meals fit this window." : "No UW locations open at this time."}
+                : mode==='cook' ? cookEmpty.title : "No UW locations open at this time."}
             </h2>
             <p>
               {passed.length
                 ? "Bring back passed cards or change your mood."
                 : mode==='cook' && ['not_requested','loading'].includes(food.status) ? 'Checking ingredient prices and nutrition. Your meal options will update shortly.'
                 : mode==='cook' && food.status==='unavailable' ? 'Retry the price lookup. Missing prices have not been replaced with guesses.'
-                : mode==='cook' ? (Object.values(state.pantry).some(g => g > 0) ? "Choose a later time or review the reasons below. Your food restrictions stay in place." : "Add the groceries you have, or explore UW dining. You can plan for today or a future date.") : "Change the meal time or include locations outside their published hours."}
+                : mode==='cook' ? cookEmpty.text : "Change the meal time or include locations outside their published hours."}
             </p>
             {canGetMore && passed.length > 0 && (
               <button className="primary" disabled={moreLoading} onClick={getMoreIdeas}>
@@ -1023,9 +1036,9 @@ export function FoodDiscovery({
             <button
               className={canGetMore && passed.length > 0 ? "secondary" : "primary"}
               disabled={mode==='cook' && ['not_requested','loading'].includes(food.status)}
-              onClick={() => passed.length ? setPassed([]) : mode==='cook' && food.status==='unavailable' ? refreshFoodReference() : mode==='cook' ? (Object.values(state.pantry).some(g => g > 0) ? onWindow() : onChangeGroceries()) : setOpenOnly(false)}
+              onClick={() => passed.length ? setPassed([]) : mode==='cook' && food.status==='unavailable' ? refreshFoodReference() : mode==='cook' ? cookEmpty.act() : setOpenOnly(false)}
             >
-              {passed.length ? "Show passed cards" : mode==='cook' && ['not_requested','loading'].includes(food.status) ? 'Checking prices…' : mode==='cook' && food.status==='unavailable' ? 'Retry price lookup' : mode==='cook'?(Object.values(state.pantry).some(g => g > 0)?'Choose meal time':'Add groceries'):"Show all locations"}
+              {passed.length ? "Show passed cards" : mode==='cook' && ['not_requested','loading'].includes(food.status) ? 'Checking prices…' : mode==='cook' && food.status==='unavailable' ? 'Retry price lookup' : mode==='cook' ? cookEmpty.button : "Show all locations"}
             </button>
           </div>
         )}
@@ -1081,7 +1094,7 @@ export function FoodDiscovery({
             </div>
             <div>
               <dt>Next commitment</dt>
-              <dd>{state.context.commitmentTime}</dd>
+              <dd>{openEnded(state.context) ? "None today" : `${state.context.commitment} · ${state.context.commitmentTime}`}</dd>
             </div>
           </dl>
           <button className="text-button" onClick={onPreferences}>
@@ -1091,57 +1104,23 @@ export function FoodDiscovery({
         <details className="small-panel how-decisions">
           <summary>How Daywell chooses</summary>
           <p>
-            Cook cards come from{" "}
-            {catalog.filter((m) => m.mode === "cook").length} curated recipes.
+            Cook cards use {catalog.filter((m) => m.mode === "cook").length} curated recipes
+            and reviewed Gemini drafts made from your groceries.
             Rules remove meals that conflict with your ingredients, equipment,
             diet, budget, time or calendar. Your selected priority then orders
-            the rest.
+            the rest, guided by your food and cuisine preferences.
           </p>
           <p>
-            Eat at school uses real UW dining locations and published menu
-            links. A venue choice does not verify a particular dish or its
-            allergens.
+            Eat at school uses dated UW dishes and published facts when they
+            fit, with walking estimates from the HUB. Venue browsing remains
+            available when no verified dish fits; stock and cross-contact stay unknown.
           </p>
           <p>
-            No weighted score or language model is deciding for you. The
-            assistant currently supports local food commands.
+            Gemini interprets assistant requests; the same rules check proposed
+            meals and changes. You can undo local assistant changes, and sensitive
+            actions ask for confirmation. Daily nutrition goals guide progress.
           </p>
         </details>
-        {mode === "cook" && <details className="small-panel" aria-label="Sourced records">
-          <summary>More sourced records</summary>
-          <button className="secondary" disabled={walking.status === "loading"} onClick={refreshWalking}>Retrieve Google walking routes</button>
-          {walking.status === "unavailable" && <p className="fine-print">Refresh failed. Previously retrieved routes retain their original timestamps and expire after five minutes.</p>}
-          <p className="fine-print">
-            USDA ingredient estimates and published UW HFS rows. They stay out
-            of the swipe deck until price, travel, service, and hours are
-            known. Straight-line distance is meters, not walking minutes.
-          </p>
-          {sourced.map(({ meal: item, feasible, reasons }) => {
-            const place = uwDining.find(
-              (venue) =>
-                venue.name === item.venue?.name ||
-                venue.name === item.provenance?.locationReference?.name,
-            );
-            return (
-              <p className="fine-print" key={item.id}>
-                <strong>{item.name}</strong> — {feasible ? "Feasible" : "Not feasible"}
-                {" · "}
-                {item.nutrition?.kind ?? "unknown source"}
-                {" · "}
-                {item.cost == null ? "Price unknown" : money(item.cost)}
-                {" · "}
-                {item.provenance?.fields.walking?.status === "retrieved_route"
-                  ? `${item.timing.outbound} min walking · ${item.provenance.fields.walking.distanceMeters} m route · Google Maps · retrieved ${new Date(item.provenance.fields.walking.checkedAt).toLocaleTimeString()}`
-                  : item.timing?.outbound == null ? "Travel time unknown" : `${item.timing.outbound} min stated travel`}
-                {item.venue?.opens == null && item.mode === "eatOut"
-                  ? " · Hours unknown"
-                  : ""}
-                {place ? ` · ${distanceMeters(place)} m straight-line from the HUB` : ""}
-                {!feasible && reasons.length ? `. ${reasons.join(" ")}` : ""}
-              </p>
-            );
-          })}
-        </details>}
         {mode === "cook" &&
           !usingGemini &&
           all.evaluations.some(

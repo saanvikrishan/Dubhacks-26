@@ -300,7 +300,7 @@ export function scheduleMealsForDay(events, date) {
             start: timeKey(cursor),
             available: Math.min(available, 90), // cap at 90 min for planning
             commitmentTime: windowEnd,
-            commitment: "End of meal window",
+            commitment: "No further commitment",   // nothing on the calendar after it: no time limit
           };
         }
         break;
@@ -332,8 +332,15 @@ export function scheduleMealsForDay(events, date) {
   return result;
 }
 
-export function nextMealWindow(events, date, now = new Date(), desired = 60) {
-  const dayStart = Date.parse(localInstant(date, "08:00")),
+/** The next meal: from now until the next busy calendar item, or with no time limit when nothing is scheduled. */
+export function nextMealContext(state, meals, now = new Date()) {
+  const busy = scheduledItems(state, meals), date = dayKey(now);
+  const window = nextMealWindow(busy, date, now, 1440, "00:00") ?? nextMealWindow(busy, addDays(date, 1), now, 1440);
+  return window && { ...window, manuallySet: false };
+}
+
+export function nextMealWindow(events, date, now = new Date(), desired = 60, earliest = "08:00") {
+  const dayStart = Date.parse(localInstant(date, earliest)),
     dayEnd = Date.parse(localInstant(date, "23:59"));
   let cursor = Math.max(
     dayStart,

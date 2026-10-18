@@ -51,6 +51,10 @@ export function dailyGoalFit(meal,state) {
   });
 }
 
+/** With nothing on the calendar after the meal, time never rules a meal out. */
+export const NO_COMMITMENT = "No further commitment";
+export const openEnded = (context) => context?.commitment === NO_COMMITMENT;
+
 export function evaluate(meal, state, c = config) {
   const { profile: p, context: ctx, pantry } = state;
   const reasons = [],
@@ -144,9 +148,9 @@ export function evaluate(meal, state, c = config) {
     reasons.push(
       "The next commitment must follow the meal start on the same day.",
     );
-  if (duration !== null && duration > window)
+  if (duration !== null && duration > window && !openEnded(ctx))
     reasons.push(
-      `Needs ${duration} minutes; your window is ${Math.max(0, window)} ${window === 1 ? "minute" : "minutes"}.`,
+      `Needs ${duration} minutes; you have ${Math.max(0, window)} ${window === 1 ? "minute" : "minutes"} before ${ctx.commitment || "your next event"}.`,
     );
   if (meal.mode === "eatOut") {
     const v = meal.venue;

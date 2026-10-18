@@ -118,10 +118,11 @@ function applyAction(state, action, c = config) {
   }
   if (action.type === "saveEvent") {
     requireCapability("calendarView", c);
-    // Manual entries are meal slots only — classes/workouts/tasks come from calendar import.
+    // Preserve the activity type supplied by local UI and assistant actions. validateEvent
+    // checks supported kinds; imported records remain protected below.
     const event = {
       ...action.event,
-      kind: "meal",
+      kind: action.event?.kind ?? "meal",
       source: "manual",
       readOnly: false,
     };
@@ -238,6 +239,10 @@ function applyAction(state, action, c = config) {
       requireCapability("nutritionGoals", c);
     validateInputs(action.profile, action.context, state.pantry);
     return { ...state, profile: action.profile, context: action.context };
+  }
+  if (action.type === "agentRestore") {
+    // Undo for an assistant turn: restore the exact state from before it, re-validated.
+    return validateState(structuredClone(action.state));
   }
   if (action.type === "updateContext") {
     requireCapability("manualSchedule", c);

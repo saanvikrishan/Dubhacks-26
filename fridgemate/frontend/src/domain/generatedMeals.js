@@ -1,3 +1,4 @@
+import {dietConflict} from './allergens.js';
 import { byId as catalogById } from '../data/catalog.js';
 import { nutrientInfo } from './nutrition.js';
 import { CUISINES, TASTES } from './preferences.js';
@@ -63,7 +64,8 @@ export function reviewGeneratedMeal(draft, review, profile) {
   const priced=Number.isFinite(sourced.cost) && review.cost===sourced.cost;
   draft={...draft,nutrition:sourced.nutrition,...(priced?{pricing:sourced.pricing}:{pricing:null})};
   const listed=[...new Set(review.allergens)];
-  const diets=dietsFromIngredients(draft.ingredients);
+  // Unknown ingredient names leave the diet unknown; the user's OK settles it unless an ingredient clearly breaks it.
+  const diets=dietsFromIngredients(draft.ingredients) ?? (review.dietConfirmed===true && profile.diet!=='anything' && !dietConflict(draft.ingredients,profile.diet) ? (profile.diet==='vegan'?['vegan','vegetarian']:[profile.diet]) : null);
   return {...structuredClone(draft),cost:review.cost,timing:{prep:review.prep,cook:review.cook,outbound:0},equipment:[...new Set(review.equipment)],diets,allergens:null,
     dietary:{knownPresent:listed,allergenAbsence:"not_established",crossContact:"unknown"},
     review:{confirmed:true,checkedAt:new Date().toISOString(),source:'user_confirmed',diet:profile.diet,dietConfirmed:review.dietConfirmed===true,allergensConfirmed:review.allergensConfirmed===true},

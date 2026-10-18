@@ -1,8 +1,27 @@
 export const CUISINES = ['Chinese','Indian','Italian','Japanese','Korean','Mexican','Mediterranean','Middle Eastern','Thai','Vietnamese','American'];
 export const TASTES = ['Spicy','Mild','Savory','Sweet','Tangy','Fresh'];
 const terms = value => String(value ?? '').toLowerCase().split(/[,;]+/).map(s=>s.trim()).filter(Boolean);
+/** Goals picked in onboarding; each suggests daily nutrition targets the user can change later. */
+export const GOALS = {
+  muscle: {label: 'Build muscle', targets: [{nutrient: 'protein_g', mode: 'minimum', value: 120}]},
+  lean: {label: 'Lose weight', targets: [{nutrient: 'energy_kcal', mode: 'maximum', value: 1800}, {nutrient: 'protein_g', mode: 'minimum', value: 90}]},
+  healthy: {label: 'Eat healthier', targets: [{nutrient: 'fiber_g', mode: 'minimum', value: 28}, {nutrient: 'added_sugar_g', mode: 'maximum', value: 50}, {nutrient: 'sodium_mg', mode: 'maximum', value: 2300}]},
+  energy: {label: 'Fuel my workouts', targets: [{nutrient: 'carbohydrate_g', mode: 'minimum', value: 250}, {nutrient: 'protein_g', mode: 'minimum', value: 100}]},
+  budget: {label: 'Save money', targets: []},
+  easy: {label: 'Just feed me', targets: []},
+};
+/** A profile with the goal set and its suggested targets (replacing earlier goal targets). */
+export function withGoal(profile, goal) {
+  if (goal !== '' && !GOALS[goal]) return profile;
+  if (goal === (profile.goal ?? '')) return profile;
+  const old = new Set((GOALS[profile.goal]?.targets ?? []).map((t) => t.nutrient));
+  const targets = GOALS[goal]?.targets ?? [];
+  const kept = (profile.goals ?? []).filter((g) => !old.has(g.nutrient) && !targets.some((t) => t.nutrient === g.nutrient));
+  return {...profile, goal, goals: [...kept, ...targets], ...(goal === 'budget' && profile.budget > 7 ? {budget: 7} : {})};
+}
+
 export function foodPreferences(profile={}) {
-  return {preferred: String(profile.preferred??'').slice(0,160), cuisines:(profile.cuisines??[]).filter(c=>CUISINES.includes(c)), tastes:(profile.tastes??[]).filter(t=>TASTES.includes(t)), dislikes:String(profile.dislikes??'').slice(0,160), avoidCuisines:(profile.avoidCuisines??[]).filter(c=>CUISINES.includes(c))};
+  return {goal: GOALS[profile.goal] ? profile.goal : '', preferred: String(profile.preferred??'').slice(0,160), cuisines:(profile.cuisines??[]).filter(c=>CUISINES.includes(c)), tastes:(profile.tastes??[]).filter(t=>TASTES.includes(t)), dislikes:String(profile.dislikes??'').slice(0,160), avoidCuisines:(profile.avoidCuisines??[]).filter(c=>CUISINES.includes(c))};
 }
 const cues = {
   chinese:['chinese','fried rice','lo mein','chow mein','kung pao','mapo','dumpling','bok choy'], indian:['indian','dal','chana','masala','paneer','tikka','biryani'], italian:['italian','pasta','risotto','pizza','penne','marinara','pesto','lasagna'], japanese:['japanese','miso','soba','teriyaki','ramen','udon','sushi','katsu'], korean:['korean','kimchi','bibimbap','gochujang','bulgogi','japchae','tteok'], mexican:['mexican','taco','burrito','quesadilla','enchilada','salsa','tortilla'], mediterranean:['mediterranean','hummus','greek','tzatziki','feta'], 'middle eastern':['middle eastern','falafel','tahini','shawarma','za\'atar'], thai:['thai','pad thai','green curry','red curry','basil chicken'], vietnamese:['vietnamese','pho','banh mi','bun ','spring roll'], american:['american','burger','mac and cheese','bbq','sandwich'],

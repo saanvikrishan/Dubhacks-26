@@ -55,6 +55,23 @@ test('different inputs never use a prepared batch, and a failed preparation is r
   assert.equal(attempts, 2);
 });
 
+test('newly excluded recipes are removed from a prepared batch; a fully repeated batch requests fresh ideas', async () => {
+  const {calls,predraws,fetchImpl}=recipeServer([['already-shown','fresh-idea']]);
+  const s=state();
+  prepareRecipeDrafts({state:s,ingredients:['spinach']},{fetchImpl});
+  const meals=await requestRecipeDrafts({state:s,ingredients:['spinach'],exclude:['Already-Shown'],fetchImpl});
+  assert.deepEqual(meals.map(m=>m.name),['fresh-idea']);
+  assert.deepEqual(predraws[0].requests.map(r=>r.name),['fresh-idea']);
+  assert.equal(calls.length,1);
+
+  const repeated=recipeServer([['repeat'],['new-recipe']]);
+  prepareRecipeDrafts({state:s,ingredients:['oats']},{fetchImpl:repeated.fetchImpl});
+  const next=await requestRecipeDrafts({state:s,ingredients:['oats'],exclude:['repeat'],fetchImpl:repeated.fetchImpl});
+  assert.deepEqual(next.map(m=>m.name),['new-recipe']);
+  assert.equal(repeated.calls.length,2);
+  assert.deepEqual(repeated.calls[1].body.exclude,['repeat']);
+});
+
 test('opening Cook warms photos once, and prepares a saved-pantry batch only for users with history', async () => {
   const calls = [];
   let events = 1;

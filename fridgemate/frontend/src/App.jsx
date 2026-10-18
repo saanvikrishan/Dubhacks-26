@@ -25,6 +25,7 @@ import {
 import { CookStart, FoodDiscovery, VenueDetails } from "./ui/FoodViews";
 import { money, num, mealImage, prefetchMealImages } from "./ui/format";
 import { RecipeReview } from "./ui/RecipeReview";
+import { Onboarding } from "./ui/Onboarding";
 import { byId, rememberMeal, rememberSuggestions, restoreSuggestions } from "./data/suggestions";
 import { capabilities } from "./domain/config";
 import { clockTime, minutes } from "./domain/engine";
@@ -33,7 +34,7 @@ import {
   dayKey,
   localInstant,
   mealWindowStillOpen,
-  nextMealWindow,
+  nextMealContext,
   prettyDate,
   scheduledItems,
   scheduleMealsForDay,
@@ -44,6 +45,7 @@ import { storageAdapter } from "./adapters/storage";
 import { persistSavedMeal, savePantryItems } from "./adapters/database";
 import { recordActionFeedback } from "./adapters/mealFeedback";
 import { prepareCook, prepareRecipeDrafts, requestRecipeDrafts } from "./adapters/recipes";
+import { computeNudges, dismissedNudges, dismissNudge } from "./domain/nudges";
 import { directionsUrl } from "./data/uwDining";
 import "./App.css";
 import "./ui/redesign.css";
@@ -67,8 +69,11 @@ export default function App() {
     async function loadState() {
       try {
         const loaded = await storageAdapter.load(window.localStorage);
-        stateRef.current=loaded.state;
         restoreSuggestions(recipeSnapshots(loaded.state));
+        // A saved "next meal" goes stale; start from now and the calendar.
+        const next = loaded.state.context?.manuallySet && mealWindowStillOpen(loaded.state.context) ? null : nextMealContext(loaded.state, byId);
+        if (next) try { loaded.state = transition(loaded.state, { type: "updateContext", context: next }); } catch { /* keep the saved one */ }
+        stateRef.current=loaded.state;
         const drafts=(loaded.state.generatedMeals??[]).filter(m=>m.suggestion===true && !m.sourceRecipeId);
         if(drafts.length) {setGeminiMeals(drafts.map(m=>m.id));setGroceryList(loaded.state.groceryList??[]);}
         setState(loaded.state);
@@ -89,6 +94,8 @@ export default function App() {
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  const [, setNudgeTick] = useState(0);
+  const [nudgesSeen, setNudgesSeen] = useState(false);
   
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60000);
@@ -128,6 +135,9 @@ export default function App() {
     summary = dailyNutrition(state.logs, byId, day),
     logs = state.logs.filter((l) => l.date === day);
   const close = () => setDialog(null);
+  // Proactive suggestions from the user's own data (no model calls); dismissed ones stay hidden.
+  const hidden = dismissedNudges();
+  const nudges = computeNudges(state, { now: new Date(now), today: day, meals: byId }).filter((n) => !hidden.has(n.id));
   async function dispatch(action) {
     if (storageError) throw new Error(storageError);
     const next = transition(stateRef.current, action);
@@ -166,7 +176,7 @@ export default function App() {
       undoLog: "Last meal-log change undone.",
       removeLog: "Meal log removed. Your intake has been recalculated.",
     };
-    if (messages[action.type]) setNotice(messages[action.type]);
+    if (messages[action.type] && !action.quiet) setNotice(messages[action.type]);
     if (
       (action.type === "updateProfile" || action.type === "configure") &&
       (action.profile?.phone || "").trim() &&
@@ -199,7 +209,7 @@ export default function App() {
       .filter((event) => /^([01]\d|2[0-3]):[0-5]\d$/.test(event.time));
     if (!payload.length) return;
     try {
-      await fetch("http://127.0.0.1:8000/sync-schedule-events", {
+      await fetch("/api/sync-schedule-events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: "demo", events: payload }),
@@ -217,16 +227,17 @@ export default function App() {
       return false;
     }
   }
+  // Your next meal starts now and runs until the next busy thing on your calendar (no limit if
+  // nothing is scheduled), so nobody has to pick a time first. A window you picked stays while it's open.
+  async function refreshNextMeal() {
+    const c = stateRef.current.context;
+    if (c.manuallySet && mealWindowStillOpen(c, new Date())) return true;
+    const next = nextMealContext(stateRef.current, byId);
+    if (!next || ["date", "start", "available", "commitment", "commitmentTime", "manuallySet"].every((k) => c[k] === next[k])) return true;
+    return safe({ type: "updateContext", context: next, quiet: true });
+  }
   async function goFood(nextMode) {
-    if (tab === "Today" && !mealWindowStillOpen(state.context, new Date(now))) {
-      const window = nextMealWindow(
-        items,
-        day,
-        new Date(now),
-        Math.max(45, state.context.available),
-      );
-      if (window && !(await safe({ type: "updateContext", context: { ...window, manuallySet: false } }))) return;
-    }
+    if (!(await refreshNextMeal())) return;
     setMode(nextMode);
     if (nextMode === "cook") {
       // Preserve an active grocery session (Gemini meals already generated).
@@ -249,6 +260,51 @@ export default function App() {
       setCookPhase("discover");
     }
   }
+  // New recipe drafts from the grocery screen or the assistant: persisted, then shown in Cook.
+  async function acceptSuggestions(meals, ingredients, pantry) {
+    // Drafts and explicit grocery quantities are persisted together. No invented stock.
+    await dispatch({type:'addGeneratedMeals',meals,pantry,groceryList:ingredients});
+    prefetchMealImages(meals);
+    setGeminiMeals(meals.map(m=>m.id));
+    setGroceryList(ingredients || []);
+    setCookPhase("discover");
+  }
+  // What the assistant agent may do: apply a checked turn, undo it, and take the user places.
+  const agentBridge = {
+    ui: { screen: tab, mode: mode === "eatOut" ? "school" : "cook" },
+    nudges,
+    current: () => stateRef.current,
+    dismissNudge: (id) => { dismissNudge(id); setNudgeTick((n) => n + 1); },
+    async apply(actions) {
+      const before = stateRef.current;
+      try {
+        for (const action of actions) await dispatch(action);
+      } catch (err) {
+        await dispatch({ type: "agentRestore", state: before });   // never leave half a turn applied
+        throw err;
+      }
+      return before;
+    },
+    restore: (before) => dispatch({ type: "agentRestore", state: before }),
+    async effect(effect) {
+      if (effect.type === "go") {
+        if (effect.mode) setMode(effect.mode);
+        setTab(effect.tab);
+      } else if (effect.type === "show") {
+        openDetails(effect.meal);
+      } else if (effect.type === "suggest") {
+        const current = stateRef.current;
+        const names = effect.ingredients.length ? effect.ingredients : Object.keys(current.pantry).filter((k) => current.pantry[k] > 0).slice(0, 30);
+        if (!names.length) throw new Error("Tell me which groceries you have first.");
+        const pantry = effect.ingredients.length ? {} : Object.fromEntries(names.map((n) => [n, current.pantry[n]]));
+        const meals = await requestRecipeDrafts({ state: current, ingredients: names, pantry, signal: AbortSignal.timeout(60000) });
+        if (!meals.length) throw new Error("No recipes came back for those groceries. Try again or add more.");
+        await acceptSuggestions(meals, names, pantry);
+        setMode("cook");
+        setTab("Let's eat");
+      }
+    },
+  };
   // A fresh batch of AI recipes that avoids every recipe already suggested.
   const shownRecipeNames = () => (state.generatedMeals ?? []).filter((m) => m.suggestion === true).map((m) => m.name);
   // Next 3 recipes requested quietly on the last card, so "More ideas" only waits for photos.
@@ -257,13 +313,13 @@ export default function App() {
   }
   async function moreIdeas() {
     const meals = await requestRecipeDrafts({ state, ingredients: groceryList, exclude: shownRecipeNames(), signal: AbortSignal.timeout(60000) });
-    if (!meals.length) throw new Error("No new recipes fit right now. Try other groceries or a longer meal window.");
+    if (!meals.length) throw new Error("No new recipes came back. Try again, or change your groceries.");
     await dispatch({ type: "addGeneratedMeals", meals, pantry: {}, groceryList });
     prefetchMealImages(meals);
     setGeminiMeals(meals.map((m) => m.id));
   }
   async function choose(meal) {
-    if(meal.sourceRecipeId && !byId[meal.id] && !(await safe({type:"captureSourcedMeal",meal}))) return;
+    if(meal.sourceRecipeId && !byId[meal.id] && !(await safe({type:"captureSourcedMeal",meal}))) return false;
     rememberMeal(meal);
     // Check if the current context matches an open slot and fill it
     const openSlot = state.mealPlans.find(
@@ -284,7 +340,7 @@ export default function App() {
         // Update the photon_plans row so the reminder says "Let's Get Cooking!"
         // instead of the generic 5-min browse prompt.
         try {
-          await fetch("http://127.0.0.1:8000/sync-meal-plans", {
+          await fetch("/api/sync-meal-plans", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -301,8 +357,9 @@ export default function App() {
         close();
         setTab("Today");
         setError("");
+        return true;
       }
-      return;
+      return false;
     }
     const existing = state.mealPlans.find(
       (p) =>
@@ -313,7 +370,7 @@ export default function App() {
     );
     if (existing && existing.mealId !== meal.id) {
       setDialog({ type: "replace", meal, existing });
-      return;
+      return true;
     }
     if (await safe({ type: "choose", mealId: meal.id })) {
       const saved = await persistSavedMeal(meal);
@@ -325,7 +382,9 @@ export default function App() {
       close();
       setTab("Today");
       setError("");
+      return true;
     }
+    return false;
   }
   async function reviseMeal(plan) {
     const begin = Date.parse(localInstant(plan.date, plan.start));
@@ -381,7 +440,7 @@ export default function App() {
           date: plan.date,
           start: plan.start,
           available: plan.available ?? plan.duration,
-          commitment: plan.commitment ?? "End of meal window",
+          commitment: plan.commitment ?? "No further commitment",
           commitmentTime: plan.commitmentTime ?? "23:59",
           manuallySet: false,
         },
@@ -486,7 +545,8 @@ export default function App() {
               <button
                 key={name}
                 aria-current={tab === name ? "page" : undefined}
-                onClick={() => {
+                onClick={async () => {
+                  if (name === "Let's eat" && tab !== name) await refreshNextMeal();
                   setTab(name);
                   setError("");
                 }}
@@ -815,7 +875,7 @@ export default function App() {
                     try {
                       const slots = scheduleMealsForDay(items, date);
                       if (slots.length) {
-                        await fetch("http://127.0.0.1:8000/sync-meal-plans", {
+                        await fetch("/api/sync-meal-plans", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({
@@ -857,14 +917,7 @@ export default function App() {
             <CookStart
               key={`cook-start-${JSON.stringify(state.pantry)}`}
               state={state}
-              onSuggested={async (meals, ingredients, pantry) => {
-                // Drafts and explicit grocery quantities are persisted together. No invented stock.
-                await dispatch({type:'addGeneratedMeals',meals,pantry,groceryList:ingredients});
-                prefetchMealImages(meals);
-                setGeminiMeals(meals.map(m=>m.id));
-                setGroceryList(ingredients || []);
-                setCookPhase("discover");
-              }}
+              onSuggested={acceptSuggestions}
               onBrowseLocal={()=>{setGeminiMeals(null);setCookPhase('discover');}}
               onUnavailable={(message)=>{setGeminiMeals(null);setCookPhase('discover');setError(message);}}
               onWindow={()=>setDialog({type:'time'})}
@@ -925,12 +978,19 @@ export default function App() {
       </main>
       <button
         className="floating-assistant"
-        aria-label="Open food assistant"
-        onClick={() => setDialog({ type: "assistant" })}
+        aria-label={nudges.length && !nudgesSeen ? "Open food assistant (new suggestion)" : "Open food assistant"}
+        onClick={() => { setNudgesSeen(true); setDialog({ type: "assistant" }); }}
       >
         <Icon name="spark" size={22} />
+        {nudges.length > 0 && !nudgesSeen && (
+          <span aria-hidden="true" style={{ position: "absolute", top: 6, right: 6, width: 10, height: 10, borderRadius: "50%", background: "#e8743b", boxShadow: "0 0 0 2px #fff" }} />
+        )}
       </button>
-      {dialog?.type === "reviewRecipe" && <RecipeReview meal={dialog.meal} state={state} onSave={dispatch} onClose={close}/> }
+      {/* First run: a quick setup (goal, diet, allergies, tastes), by taps or one spoken sentence. */}
+      {!dialog && !state.profile.onboarded && (
+        <Onboarding state={state} agent={agentBridge} onSave={dispatch} onClose={() => setNotice("You're all set. Change anything later in Food preferences.")} />
+      )}
+      {dialog?.type === "reviewRecipe" && <RecipeReview meal={dialog.meal} state={state} onSave={dispatch} onChoose={(id) => choose(stateRef.current.generatedMeals.find((m) => m.id === id) ?? dialog.meal)} onClose={close}/> }
       {dialog?.type === "calendar" && (
         <CalendarConnect
           state={state}
@@ -979,7 +1039,7 @@ export default function App() {
         </Modal>
       )}
       {dialog?.type === "assistant" && (
-        <Assistant state={state} onAction={dispatch} onClose={close} />
+        <Assistant state={state} onAction={dispatch} onClose={close} agent={agentBridge} />
       )}
       {dialog?.type === "intake" && (
         <Modal title="Your confirmed meal log" onClose={close} wide>
@@ -1137,41 +1197,46 @@ export default function App() {
               </p>
             </section>
             <section>
-              <h3>The current “agent”</h3>
+              <h3>How meals are chosen</h3>
               <p>
                 A deterministic planner checks calendar conflicts, full activity
                 time, budget, ingredients, equipment and dietary restrictions.
-                It uses a curated recipe library and your chosen priority.
-                Weighted scoring and Gemini are not active. The assistant
-                supports explicit local commands.
+                It checks both the curated library and Gemini recipe drafts.
+                Your food and cuisine preferences guide the order; daily nutrition
+                goals show progress. The assistant can update your local schedule,
+                preferences and groceries, with Undo and confirmation for sensitive
+                changes. Gemini interprets requests; these checks decide what fits.
               </p>
             </section>
             <section>
               <h3>Real UW places, clear data limits</h3>
               <p>
                 Restaurant locations, public hours and menu links come from
-                official UW HFS pages. Distances use official UW building pins
-                from the HUB and are straight-line, not routed walking
-                distances. Current ratings, exact dish nutrition, stock and
-                queues are not loaded. Google Maps provides routes and reviews.
+                official UW HFS pages. Dated dish listings retain their published
+                prices, portions and nutrition when available. Walking estimates
+                come from Google Routes starting at the HUB; venue browsing falls
+                back to straight-line distances when routes are unavailable.
+                Unpublished nutrients, cross-contact, stock and queues stay unknown.
               </p>
             </section>
             <section>
               <h3>Food images & nutrition</h3>
               <p>
                 Meal pictures are AI-generated representative illustrations.
-                Cook recipe nutrient values remain labeled demo estimates. Real
-                venue cards do not inherit fake calories or ratings.
+                Cook nutrition is estimated from reviewed USDA ingredient records
+                and recipe grams. Missing values stay unknown; partial nutrient
+                subtotals are labeled. Campus dishes keep their official UW facts.
               </p>
             </section>
             <section>
               <h3>Your data</h3>
               <p>
-                Apple Calendar is read through a local Mac helper after
-                permission. .ics import is also available. Imported events are
-                read-only; local activities and meal blocks are stored in this
-                browser. There are no orders, payments, notifications or
-                external calendar writes.
+                Apple Calendar uses a local Mac helper after permission; Google
+                Calendar and .ics import are also available. Imported events are
+                read-only. Plans and logs stay in this browser; optional backend
+                integrations save pantry items, recipes and food preferences.
+                Phone reminders require setup. The app does not order food or
+                write to your external calendars.
               </p>
             </section>
           </div>

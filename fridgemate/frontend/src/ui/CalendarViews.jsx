@@ -60,6 +60,13 @@ function SidebarNotesForDate({ date }) {
     window.localStorage.setItem(NOTES_KEY, JSON.stringify(map));
   }, [key, text]);
 
+  // The assistant can add notes too; show them right away.
+  useEffect(() => {
+    const reload = () => setText(loadNotesMap()[key] || "");
+    window.addEventListener("daywell-notes-changed", reload);
+    return () => window.removeEventListener("daywell-notes-changed", reload);
+  }, [key]);
+
   useEffect(() => {
     let ticking = false;
     const onScroll = () => {
@@ -115,7 +122,7 @@ export function Agenda({
   return (
     <section className={`agenda-panel ${compact ? "compact" : ""}`}>
       <div className="panel-title">
-        <h2>My Meal Plan</h2>
+        <h2>Your schedule</h2>
         <button
           className="icon-button"
           onClick={() => onAdd(date)}

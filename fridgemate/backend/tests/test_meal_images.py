@@ -57,8 +57,8 @@ class MealImageTests(unittest.IsolatedAsyncioTestCase):
         first = await self.service.image(client, REQUEST)
         self.assertEqual(first['status'], 'generated'); self.assertTrue(first['checked'])
         self.assertEqual(first['url'], f"/api/food/image/{image_key(REQUEST)}.jpg")
-        saved = Image.open(self.service.path(image_key(REQUEST)))
-        self.assertEqual((saved.format, saved.width), ('JPEG', 768))
+        with Image.open(self.service.path(image_key(REQUEST))) as saved:
+            self.assertEqual((saved.format, saved.width), ('JPEG', 768))
         again = await self.service.image(client, REQUEST)
         self.assertEqual(again['status'], 'cached'); self.assertEqual(client.draws, 1)
 

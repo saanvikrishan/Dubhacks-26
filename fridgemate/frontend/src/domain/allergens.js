@@ -8,9 +8,48 @@ export function knownPresentAllergens(meal) {
 }
 
 export function hasAllergenAbsenceCoverage(meal) {
+  // A recipe the user confirmed after its ingredients were checked for their allergens counts as covered.
+  if (meal.review?.confirmed === true && meal.review.allergensConfirmed === true) return true;
   // Only the pre-existing illustrative demo catalog treats its list as complete.
   // No generated/sourced import currently supplies verified absence evidence.
   return Array.isArray(meal.allergens) && !meal.provenance && !meal.suggestion &&
     !["unknown", "gemini_suggestion"].includes(meal.nutrition?.kind) &&
     !meal.dietary;
+}
+
+// A quick read of what a recipe's ingredient names contain (plant "milks" and nut butters are not dairy).
+const NOT_DAIRY = /\b(?:peanut|almond|cashew|nut|apple|cocoa|shea|sunflower|soy) butter\b|\b(?:coconut|oat|soy|almond|rice|cashew) (?:milk|cream|yogurt)\b|\bcream of tartar\b/g;
+const ALLERGEN_WORDS = {
+  soy: /\b(?:soy|soya|tofu|tempeh|edamame|miso|tamari)\b/,
+  egg: /\beggs?\b|\bmayo(?:nnaise)?\b|\bmeringue\b/,
+  milk: /\b(?:milk|cheese|butter|cream|yogurt|yoghurt|ghee|whey|casein|parmesan|mozzarella|cheddar|feta|ricotta|paneer)\b/,
+  wheat: /\b(?:wheat|flour|bread|pasta|spaghetti|noodles?|tortillas?|couscous|bulgur|seitan|breadcrumbs?|panko|udon|ramen|pita|bagels?|crackers?|soy sauce)\b/,
+  peanut: /\bpeanuts?\b/,
+  "tree nut": /\b(?:almonds?|cashews?|walnuts?|pecans?|pistachios?|hazelnuts?|macadamias?|brazil nuts?|pine nuts?)\b/,
+  sesame: /\b(?:sesame|tahini)\b/,
+  fish: /\b(?:fish|salmon|tuna|cod|tilapia|anchov\w*|sardines?|trout|halibut|mackerel)\b/,
+  shellfish: /\b(?:shrimp|prawns?|crab|lobster|scallops?|clams?|mussels?|oysters?|crawfish|crayfish)\b/,
+};
+const MEAT = /\b(?:chicken|beef|pork|bacon|ham|turkey|lamb|mutton|sausages?|salami|pepperoni|prosciutto|chorizo|veal|duck|goat|steak|meat|gelatin|lard|anchov\w*|fish|salmon|tuna|cod|tilapia|trout|sardines?|shrimp|prawns?|crab|lobster|scallops?|clams?|mussels?|oysters?|squid|octopus)\b/;
+const ANIMAL = /\b(?:eggs?|milk|cheese|butter|cream|yogurt|yoghurt|honey|ghee|whey|mayo(?:nnaise)?|parmesan|mozzarella|cheddar|feta|ricotta|paneer)\b/;
+const names = (ingredients) => (ingredients ?? []).map((i) => String(i?.name ?? i).toLowerCase()).join(" | ");
+
+export function allergensInIngredients(ingredients) {
+  const text = names(ingredients);
+  const forMilk = text.replace(NOT_DAIRY, " "), forWheat = text.replace(/\b(?:rice|glass|soba) noodles?\b/g, " ");
+  return Object.entries(ALLERGEN_WORDS).filter(([name, words]) => words.test(name === "milk" ? forMilk : name === "wheat" ? forWheat : text)).map(([name]) => name);
+}
+
+/** The first ingredient that breaks a vegetarian or vegan diet, or null. */
+export function dietConflict(ingredients, diet) {
+  const text = names(ingredients);
+  if (diet === "vegetarian" || diet === "vegan") {
+    const meat = text.match(MEAT);
+    if (meat) return meat[0];
+  }
+  if (diet === "vegan") {
+    const animal = text.replace(NOT_DAIRY, " ").match(ANIMAL);
+    if (animal) return animal[0];
+  }
+  return null;
 }

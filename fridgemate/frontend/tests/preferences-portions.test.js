@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {catalog} from '../src/data/catalog.js';
 import {enrichCookFacts,deriveCookNutrition} from '../src/domain/foodFacts.js';
 import {nutritionDisplayRows,portionNutrition} from '../src/domain/nutrition.js';
-import {comparePreferences,foodPreferences} from '../src/domain/preferences.js';
+import {comparePreferences,foodPreferences,withGoal} from '../src/domain/preferences.js';
 import {createDemoState,testPantry,transition,validateState} from '../src/domain/state.js';
 import {requestRecipeDrafts} from '../src/adapters/recipes.js';
 
@@ -34,13 +34,24 @@ test('food, cuisine, taste and dislikes affect ordering without replacing dietar
   assert.ok(comparePreferences(rice,pasta,{cuisines:['Chinese'],tastes:['Savory']})<0);
   assert.ok(comparePreferences(pasta,rice,{cuisines:['Italian'],dislikes:'pasta'})>0);
   const remembered=foodPreferences({...createDemoState().profile,cuisines:['Italian'],tastes:['Spicy'],dislikes:'olives',events:[{title:'private'}]});
-  assert.deepEqual(Object.keys(remembered).sort(),['avoidCuisines','cuisines','dislikes','preferred','tastes']);
+  assert.deepEqual(Object.keys(remembered).sort(),['avoidCuisines','cuisines','dislikes','goal','preferred','tastes']);
 });
 test('recipe requests carry soft preferences and still use the existing bounded recipe service',async()=>{
   const state=createDemoState();state.profile={...state.profile,cuisines:['Italian'],tastes:['Mild'],dislikes:'olives'};
   let body;
   await requestRecipeDrafts({state,ingredients:['tomatoes'],fetchImpl:async(url,options)=>{assert.equal(url,'/api/recipes');body=JSON.parse(options.body);return {ok:true,text:async()=>JSON.stringify({meals:[]})};}});
   assert.deepEqual(body.cuisines,['Italian']);assert.deepEqual(body.tastes,['Mild']);assert.equal(body.dislikes,'olives');assert.equal(body.diet,'vegetarian');
+});
+test('goals can be cleared, and saving the same goal preserves customized daily targets',()=>{
+  const muscle=withGoal(createDemoState().profile,'muscle');
+  assert.equal(muscle.goals.find(g=>g.nutrient==='protein_g').value,120);
+  const customized={...muscle,goals:[{nutrient:'protein_g',mode:'minimum',value:140},{nutrient:'fiber_g',mode:'minimum',value:30}]};
+  assert.deepEqual(withGoal(customized,'muscle'),customized);
+  const cleared=withGoal(customized,'');
+  assert.equal(cleared.goal,'');
+  assert.deepEqual(cleared.goals,[{nutrient:'fiber_g',mode:'minimum',value:30}]);
+  assert.equal(foodPreferences(cleared).goal,'');
+  assert.deepEqual(withGoal(customized,'invalid'),customized);
 });
 test('main open meal slots survive reload, holidays do not block them, and filling a slot enforces eligibility',()=>{
   let state=createDemoState();state.pantry={...testPantry};state.context.date='2026-10-18';

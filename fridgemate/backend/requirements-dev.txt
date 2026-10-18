@@ -1,0 +1,3 @@
+-r requirements.txt
+# Current Starlette TestClient transport; keep the app's existing httpx client.
+httpx2==2.13.1

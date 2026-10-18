@@ -1,16 +1,17 @@
 import {foodPreferences} from "../domain/preferences.js";
 import {getUserId} from './mealFeedback.js';
-import {minutes} from '../domain/engine.js';
+import {minutes, openEnded} from '../domain/engine.js';
 import {normalizeGeneratedMeal} from '../domain/generatedMeals.js';
 import {photoRequestFor} from '../ui/format.js';
 export function cookingMinutes(state) {
   const c=state.context;
+  if(openEnded(c)) return 1440;   // nothing scheduled after this meal: no time limit
   return Math.max(0,Math.min(c.available,minutes(c.commitmentTime)-minutes(c.start))-c.eating-c.cleanup-c.onward-c.buffer);
 }
 
 function recipeBody({state,ingredients,pantry={},exclude=[]}) {
   const time=cookingMinutes(state);
-  if (time<1) throw new Error('No cooking time remains after eating, cleanup, travel and buffer. Adjust your meal window first.');
+  if (time<1) throw new Error(`No cooking time before ${state.context.commitment||'your next event'}. Try Eat at school instead.`);
   return {...foodPreferences(state.profile),userId:getUserId(),exclude:[...new Set(exclude)].slice(-40),ingredients,pantry,diet:state.profile.diet,time,budget:state.profile.budget,equipment:state.profile.equipment,exclusions:state.profile.exclusions};
 }
 
@@ -20,7 +21,7 @@ async function sendRecipeRequest(body,fetchImpl,signal) {
   if(raw.length>64000) throw new Error('Recipe response was too large. Try again.');
   let data;
   try{data=JSON.parse(raw);}catch{throw new Error('Recipe service did not return JSON. Check that the backend is running on port 8000.');}
-  if(!response.ok) throw new Error(typeof data.detail==='string'?data.detail:response.status===422?'Recipe inputs were rejected. Check your groceries and meal window.':'Recipe service unavailable. Try the local recipe options.');
+  if(!response.ok) throw new Error(typeof data.detail==='string'?data.detail:response.status===422?'Recipe inputs were rejected. Check your groceries.':'Recipe service unavailable. Try the local recipe options.');
   const meals=data.meals;
   if(!Array.isArray(meals)||meals.length>8) throw new Error('Recipe service returned invalid meals.');
   const normalized=meals.map(normalizeGeneratedMeal);
@@ -59,7 +60,8 @@ export async function requestRecipeDrafts({state,ingredients,pantry={},exclude=[
   if(ready && Date.now()-ready.at<PREPARED_FOR_MS) {
     prepared.delete(key);
     try {
-      const meals=await ready.promise;
+      const excluded=new Set(exclude.map(name=>name.trim().toLowerCase()));
+      const meals=(await ready.promise).filter(meal=>!excluded.has(meal.name.trim().toLowerCase()));
       if(meals.length) {predrawPhotos(meals,fetchImpl);return meals;}
     } catch { /* the prepared request failed; ask again below */ }
   }

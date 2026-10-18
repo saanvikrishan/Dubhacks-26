@@ -32,14 +32,17 @@ test('drafts are not feasible and review changes only explicitly confirmed stock
   const done=reviewed(); assert.equal(evaluate(done.generatedMeals[0],done).feasible,true);
   assert.deepEqual(done.generatedMeals[0].diets,['vegan','vegetarian']);
   assert.equal(done.generatedMeals[0].allergens,null);
-  const peanut=structuredClone(done); peanut.profile.exclusions=['peanut'];
+  const peanut=structuredClone(done); peanut.profile.exclusions=['peanut']; peanut.generatedMeals[0].review.allergensConfirmed=false;
   assert.equal(evaluate(peanut.generatedMeals[0],peanut).feasible,false);
   assert.match(evaluate(peanut.generatedMeals[0],peanut).reasons.join(' '),/Allergen information is unknown/);
   const unknownDiet=transition(createDemoState(),{type:'addGeneratedMeals',meals:[{...raw('gemini-unknown-diet'),ingredients:[{name:'mystery sauce',grams:20},{name:'chickpeas',grams:100}]}]});
-  const checked=transition(unknownDiet,{type:'reviewGeneratedMeal',mealId:'gemini-unknown-diet',review,pantry:{'mystery sauce':20,chickpeas:100}});
+  // The user's OK settles an unknown diet (unless an ingredient clearly breaks it); without it the diet stays unknown.
+  const okayed=transition(unknownDiet,{type:'reviewGeneratedMeal',mealId:'gemini-unknown-diet',review,pantry:{'mystery sauce':20,chickpeas:100}});
+  assert.deepEqual(okayed.generatedMeals[0].diets,['vegetarian']);
+  const checked=transition(unknownDiet,{type:'reviewGeneratedMeal',mealId:'gemini-unknown-diet',review:{...review,dietConfirmed:false,allergensConfirmed:false},pantry:{'mystery sauce':20,chickpeas:100}});
   assert.equal(checked.generatedMeals[0].diets,null);
   assert.equal(checked.generatedMeals[0].allergens,null);
-  assert.equal(checked.generatedMeals[0].review.dietConfirmed,true);
+  assert.equal(checked.generatedMeals[0].review.dietConfirmed,false);
   checked.profile.diet='vegetarian'; checked.profile.exclusions=['peanut'];
   const rejected=evaluate(checked.generatedMeals[0],checked);
   assert.equal(rejected.feasible,false);
@@ -57,7 +60,7 @@ test('the original soy + $100 + 135min bypass cannot select a meal',()=>{
 });
 test('reviewed generated meals enforce every hard rule and stale previews are rechecked',()=>{
   const start=reviewed();const m=start.generatedMeals[0];
-  for(const change of [s=>s.pantry.chickpeas=149,s=>s.profile.budget=1,s=>s.profile.cooking=false,s=>s.context.available=1,s=>{s.generatedMeals[0].equipment=['stove'];s.profile.equipment=[];},s=>{s.generatedMeals[0].diets=['vegetarian'];s.profile.diet='vegan';},s=>{s.generatedMeals[0].allergens=null;s.profile.exclusions=['peanut'];},s=>s.events=[{id:'busy',title:'Class',start:`${today()}T12:00:00-07:00`,end:`${today()}T13:00:00-07:00`,busy:true,kind:'class'}]]) {
+  for(const change of [s=>s.pantry.chickpeas=149,s=>s.profile.budget=1,s=>s.profile.cooking=false,s=>s.context.available=1,s=>{s.generatedMeals[0].equipment=['stove'];s.profile.equipment=[];},s=>{s.generatedMeals[0].diets=['vegetarian'];s.profile.diet='vegan';},s=>{s.generatedMeals[0].allergens=null;s.generatedMeals[0].review.allergensConfirmed=false;s.profile.exclusions=['peanut'];},s=>s.events=[{id:'busy',title:'Class',start:`${today()}T12:00:00-07:00`,end:`${today()}T13:00:00-07:00`,busy:true,kind:'class'}]]) {
     const s=structuredClone(start);change(s);assert.equal(evaluate(s.generatedMeals[0],s).feasible,false);assert.throws(()=>transition(s,{type:'choose',mealId:m.id}));
   }
 });

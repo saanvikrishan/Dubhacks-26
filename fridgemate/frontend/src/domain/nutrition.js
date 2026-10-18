@@ -239,8 +239,8 @@ export function assessGroceryNutrition(totals, itemNames = []) {
   const nutrients = Object.entries(GENERAL_DAILY_TARGETS).map(([key, meta]) => {
     const value = Number(totals?.[key]) || 0;
     const ratio = meta.target > 0 ? value / meta.target : 0;
-    let status = "gap";
-    let detail = "";
+    let status;
+    let detail;
     if (meta.mode === "minimum") {
       status = value >= meta.target ? "met" : "gap";
       detail =

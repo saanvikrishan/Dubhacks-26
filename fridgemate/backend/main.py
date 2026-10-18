@@ -12,7 +12,7 @@ from backboard import BackboardClient
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
@@ -27,6 +27,8 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 load_dotenv(ROOT.parent / ".env")
 
+import agent as daywell_agent
+import voice as daywell_voice
 import db as store
 import substitutions as swaps
 import usda
@@ -1839,6 +1841,30 @@ async def warm_common_dishes():
     # Optional: prepare everyday dishes when the server starts (bounded by MEAL_IMAGE_WARM_LIMIT).
     if os.getenv("MEAL_IMAGE_WARM") == "1":
         meal_images.warm_common(client, popular=await meal_images.index.popular_dishes() if meal_images.index else None)
+
+
+@app.post("/assistant/transcribe")
+async def assistant_transcribe(request: daywell_voice.TranscribeRequest):
+    """Speech to text for the assistant; the words then go to /assistant/agent like typed text."""
+    enforce_rate_limit()
+    return await daywell_voice.transcribe(client, types, request)
+
+
+@app.post("/assistant/speak")
+async def assistant_speak(request: daywell_voice.SpeakRequest):
+    """Reads an assistant reply aloud in a natural Gemini voice (WAV)."""
+    enforce_rate_limit()
+    audio = await daywell_voice.speak(client, types, request.text)
+    return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/assistant/agent")
+async def assistant_agent(request: daywell_agent.AgentRequest):
+    """Chat that can change the app: returns validated tool calls; the browser applies them with Undo."""
+    enforce_rate_limit()
+    if blocked_user_text(request.message):
+        reject_blocked_text()
+    return await daywell_agent.run(client, backboard_client, request, types)
 
 
 @app.post("/food/image/predraw")

@@ -4,6 +4,22 @@ import { calendarApi } from "./server/calendar-bridge.js";
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), calendarApi()],
+  build: {
+    // The complete reviewed USDA reference is one ~604 kB module (~54 kB gzip).
+    // Keep it separately cached and allow that data size without dropping source facts.
+    chunkSizeWarningLimit: 650,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: "food-reference", test: /[\\/]src[\\/]data[\\/]food[\\/]/ },
+            { name: "campus-reference", test: /[\\/]src[\\/]data[\\/]uw[\\/]/ },
+            { name: "vendor", test: /[\\/]node_modules[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
   server: {
     proxy: {
       "/api/food": {
@@ -27,6 +43,11 @@ export default defineConfig({
         rewrite: () => "/",
       },
       // FastAPI backend (Gemini recipes + Backboard preferences)
+      "/api/assistant": {
+        target: process.env.DAYWELL_BACKEND_URL || process.env.DAYWELL_DINING_BACKEND_URL || "http://127.0.0.1:8000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ""),
+      },
       "/api/dining": {
         target: process.env.DAYWELL_DINING_BACKEND_URL || "http://127.0.0.1:8000",
         changeOrigin: true,
@@ -76,7 +97,7 @@ export default defineConfig({
       // FastAPI backend (Gemini, USDA nutrition, pantry, …)
       // /api/calendar/* is handled by calendarApi middleware instead.
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: process.env.DAYWELL_BACKEND_URL || process.env.DAYWELL_DINING_BACKEND_URL || "http://127.0.0.1:8000",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },

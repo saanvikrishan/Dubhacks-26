@@ -992,6 +992,39 @@ dialog::backdrop {
   gap: 10px;
   margin-top: 24px;
 }
+/* Long dialogs scroll: the title and close button stay at the top, and a form's
+   final buttons stay at the bottom, so neither ever needs scrolling to reach. */
+dialog:not(.assistant-dialog) > .dialog-header {
+  position: sticky;
+  top: -27px;
+  z-index: 3;
+  margin: -27px -27px 15px;
+  padding: 27px 27px 12px;
+  background: #fffefb;
+}
+dialog:not(.assistant-dialog) form > .dialog-actions:last-child,
+dialog:not(.assistant-dialog) .sticky-actions {
+  position: sticky;
+  bottom: -27px;
+  z-index: 3;
+  margin: 24px -27px -27px;
+  padding: 14px 27px 27px;
+  background: #fffefb;
+  box-shadow: 0 -10px 18px -14px #14281b40;
+}
+@media (max-width: 560px) {
+  dialog:not(.assistant-dialog) > .dialog-header {
+    top: -21px;
+    margin: -21px -21px 15px;
+    padding: 21px 21px 12px;
+  }
+  dialog:not(.assistant-dialog) form > .dialog-actions:last-child,
+  dialog:not(.assistant-dialog) .sticky-actions {
+    bottom: -21px;
+    margin: 21px -21px -21px;
+    padding: 12px 21px 21px;
+  }
+}
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
