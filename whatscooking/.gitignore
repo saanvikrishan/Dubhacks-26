@@ -44,3 +44,6 @@ backend/**/__pycache__/
 
 # Generated meal photos (regenerated on demand)
 backend/generated-images/
+
+# Private per-user memory kept locally when Backboard is unavailable
+backend/.memory/

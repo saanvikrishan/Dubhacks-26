@@ -55,7 +55,8 @@ export function buildSnapshot(state, {screen = 'Today', mode = 'cook', days = 7}
     groceryList: (state.shoppingList ?? []).map((i) => ({name: i.name, qty: i.qty, checked: i.checked})),
     pantryGrams: state.pantry,
     recentLogs: (state.logs ?? []).slice(-6).map((l) => ({date: l.date, meal: meals[l.mealId]?.name ?? l.mealId, servings: l.servings})),
-    meals: Object.values(meals).filter((m) => m?.id && !m.legacyHistory).slice(0, 40).map((m) => ({id: m.id, name: m.name, mode: m.mode,
+    // Sample demo venues are not real dishes, so the assistant never plans or logs them.
+    meals: Object.values(meals).filter((m) => m?.id && !m.legacyHistory && m.nutrition?.kind !== 'illustrative_demo').slice(0, 40).map((m) => ({id: m.id, name: m.name, mode: m.mode,
       ...(m.mode === 'cook' ? {ready: (m.ingredients ?? []).every((i) => (state.pantry?.[lower(i.name)] ?? 0) >= (i.grams ?? 0))} : {})})),
   };
 }

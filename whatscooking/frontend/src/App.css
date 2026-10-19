@@ -1266,9 +1266,6 @@ dialog:not(.assistant-dialog) .sticky-actions {
   .header-inner {
     gap: 22px;
   }
-  .brand-dot {
-    display: none;
-  }
   .header-inner nav {
     gap: 1px;
   }
@@ -1765,4 +1762,15 @@ dialog:not(.assistant-dialog) .sticky-actions {
   height: 18px;
   accent-color: var(--green, #3a6b3a);
   flex-shrink: 0;
+}
+
+/* Onboarding choice chips: a chosen chip stays readable while hovered. */
+.assistant-chip.chip-choice {
+  font-size: 13px;
+}
+.chip-choice[aria-pressed="true"],
+.chip-choice[aria-pressed="true"]:hover:not(:disabled) {
+  background: #2f5538;
+  border-color: #2f5538;
+  color: #fff;
 }

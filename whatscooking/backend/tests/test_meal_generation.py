@@ -39,8 +39,25 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
     async def test_malformed_output_falls_back_without_fabricating(self):
         client,call=fake([SimpleNamespace(text='{bad'),SimpleNamespace(text=json.dumps({'recipes':[DRAFT]}))]);g=RecipeGenerator(models=['bad','good']);self.assertEqual((await g.generate(client,RecipeRequest()))['model'],'good')
     async def test_empty_no_fit_and_over_budget_time_equipment_are_not_overridden(self):
-        client,call=fake();g=RecipeGenerator(models=['test']);result=await g.generate(client,RecipeRequest(time=1));self.assertEqual(result['meals'],[])
+        # Too long for the free time: still returned (the app labels it), with the reason; never an empty screen.
+        client,call=fake();g=RecipeGenerator(models=['test']);result=await g.generate(client,RecipeRequest(time=1));self.assertEqual(len(result['meals']),1);self.assertIn('longer than your free time',result['message'])
         client,call=fake();call.return_value=SimpleNamespace(text='{"recipes":[]}');result=await RecipeGenerator(models=['test']).generate(client,RecipeRequest());self.assertEqual(result['meals'],[])
+    def test_allergies_and_diet_are_never_relaxed_but_time_and_tools_only_order(self):
+        from meal_generation import choose_drafts, RecipeDraft, Ingredient
+        def draft(name, ingredient, minutes, tools):
+            return RecipeDraft.model_validate({'name': name, 'description': 'x', 'cuisine': 'Other', 'tastes': [], 'dishType': 'bowl',
+                'ingredients': [{'name': ingredient, 'grams': 100.0}], 'equipment': tools, 'prep': minutes, 'cook': 0, 'steps': ['Cook it.'], 'photo': 'tofu'})
+        request = RecipeRequest(time=20, equipment=['stove'], exclusions=['peanut'], diet='vegetarian', exclude=['Old Bowl'])
+        meals, message = choose_drafts([draft('Slow Oven Potato', 'potato', 50, ['oven']), draft('Peanut Noodles', 'peanut butter', 10, ['stove']),
+                                        draft('Chicken Rice', 'chicken thigh', 10, ['stove']), draft('Quick Tofu', 'tofu', 10, ['stove'])], request)
+        self.assertEqual([m['name'] for m in meals], ['Quick Tofu', 'Slow Oven Potato'])
+        self.assertEqual(message, 'Review recipe details before choosing.')
+        # A doubled portion (300 g dry rice is over 1,000 kcal) goes after normal servings.
+        meals, _ = choose_drafts([draft('Mountain Rice', 'white rice', 10, ['stove']).model_copy(update={'ingredients': [Ingredient(name='white rice', grams=300.0)]}),
+                                  draft('Quick Tofu', 'tofu', 10, ['stove'])], request)
+        self.assertEqual([m['name'] for m in meals], ['Quick Tofu', 'Mountain Rice'])
+        meals, message = choose_drafts([draft('Peanut Noodles', 'peanut butter', 10, ['stove'])], request)
+        self.assertEqual(meals, []); self.assertIn('allergies', message)
     async def test_failures_are_sanitized_and_no_key_does_not_make_call(self):
         g=RecipeGenerator(models=['test']);client,call=fake([ProviderError(403)])
         with self.assertRaises(HTTPException) as caught: await g.generate(client,RecipeRequest())

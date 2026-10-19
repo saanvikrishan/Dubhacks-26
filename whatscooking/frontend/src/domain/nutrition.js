@@ -198,6 +198,20 @@ const FOOD_GROUP_PATTERNS = [
   },
 ];
 
+// Condiments, oils and spices are used by the spoonful, so they never stand in for a food group.
+const CONDIMENT = /\b(?:oil|sauce|vinegar|broth|stock|bouillon|seasoning|powder|spices?|flakes|syrup|ketchup|mayo|mayonnaise|mustard|dressing|paste|sriracha|gochujang|extract|salt|black pepper|white pepper)\b/i;
+/** Typical amount bought or used when the list gives none: a spoonful for condiments, a portion for foods. */
+export function typicalGrams(name) {
+  const n = String(name || "").toLowerCase();
+  if (/\b(?:salt|black pepper|white pepper|powder|spices?|flakes|seasoning|cumin|paprika|cinnamon|oregano|turmeric|extract)\b/.test(n)) return 2;
+  if (/\b(?:broth|stock)\b/.test(n)) return 240;
+  if (/\b(?:peanut|almond|nut|cashew) butter\b|\btahini\b/.test(n)) return 32;
+  if (/\b(?:oil|butter|ghee)\b/.test(n)) return 14;
+  if (CONDIMENT.test(n) || /\b(?:honey|jam)\b/.test(n)) return 15;
+  if (/\b(?:garlic|ginger|cilantro|basil|parsley|mint|herbs?|chili|jalape)/.test(n)) return 10;
+  return 150;
+}
+
 /** Parse a free-text qty into estimated grams (default 150 g per item). */
 export function estimateGrams(qty, fallback = 150) {
   const text = String(qty || "").trim().toLowerCase();
@@ -220,7 +234,8 @@ export function estimateGrams(qty, fallback = 150) {
 export function foodGroupCoverage(itemNames) {
   const names = (itemNames || []).map((n) => String(n || ""));
   return FOOD_GROUP_PATTERNS.map((group) => {
-    const hits = names.filter((n) => group.pattern.test(n));
+    // A condiment counts only as a healthy fat when it is an oil (fish sauce is not a protein food).
+    const hits = names.filter((n) => group.pattern.test(n) && (!CONDIMENT.test(n) || (group.id === "fats" && /\boil\b/i.test(n))));
     return {
       id: group.id,
       label: group.label,

@@ -84,7 +84,12 @@ test('discovery separates drafts from feasible cards and never falls back to rej
   let s=transition(createDemoState(),{type:'addGeneratedMeals',meals:[raw()]});
   let result=discoverCookMeals(s.generatedMeals,s);assert.equal(result.cards.length,0);assert.equal(result.drafts.length,1);assert.equal(result.display[0].feasible,false);
   s=reviewed();result=discoverCookMeals(s.generatedMeals,s);assert.equal(result.cards.length,1);assert.equal(result.drafts.length,0);
-  s.context.available=1;result=discoverCookMeals(s.generatedMeals,s);assert.equal(result.display.length,0);assert.ok(result.evaluations[0].reasons.length);
+  // Too little time: still shown as a closest match (never as a choosable card).
+  s.context.available=1;result=discoverCookMeals(s.generatedMeals,s);assert.equal(result.cards.length,0);assert.equal(result.nearMiss,true);
+  assert.ok(result.display.every(r=>r.nearMiss && !r.feasible));assert.ok(result.evaluations[0].reasons.length);
+  // A diet or allergy conflict is never offered, not even as a closest match.
+  const vegan=reviewed();vegan.profile.diet='vegan';vegan.generatedMeals[0].diets=['vegetarian'];
+  assert.equal(discoverCookMeals(vegan.generatedMeals,vegan).display.length,0);
 });
 test('priority and mood use the same engine for generated recipes, with unknown protein last',()=>{
   const s=reviewed(),a=s.generatedMeals[0];

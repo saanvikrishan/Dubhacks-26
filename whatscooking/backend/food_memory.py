@@ -1,7 +1,10 @@
 """Per-user Backboard memory of meal choices. Current explicit preferences stay authoritative."""
 import asyncio
+import json
+import os
 import re
 import time
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,6 +40,36 @@ def valid_user(user_id):
     return isinstance(user_id, str) and bool(USER_ID.match(user_id))
 
 
+# Backboard is the primary memory. When it is unavailable or its writes fail, memories are kept in a
+# small private store on this server (one JSON file per anonymous user id, never committed), so the
+# app still remembers. Reads always combine both.
+LOCAL_DIR = Path(os.getenv('WHATSCOOKING_MEMORY_DIR') or Path(__file__).with_name('.memory'))
+
+
+def local_memories(user_id):
+    if not valid_user(user_id):
+        return []
+    try:
+        rows = json.loads((LOCAL_DIR / f'{user_id}.json').read_text())
+        return rows if isinstance(rows, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def save_local(user_id, content, metadata):
+    if not valid_user(user_id):
+        return False
+    rows = (local_memories(user_id) + [{'content': content, 'metadata': metadata}])[-300:]
+    try:
+        LOCAL_DIR.mkdir(parents=True, exist_ok=True)
+        temp = LOCAL_DIR / f'{user_id}.json.tmp'
+        temp.write_text(json.dumps(rows))
+        temp.replace(LOCAL_DIR / f'{user_id}.json')
+        return True
+    except OSError:
+        return False
+
+
 def empty_learned(status):
     return {'status': status, 'likedCuisines': [], 'likedTastes': [], 'likedIngredients': [],
             'avoidCuisines': [], 'recentMeals': [], 'repeatedlySkipped': [], 'events': 0}
@@ -68,32 +101,35 @@ def _clean(values, limit=40):
 
 async def record_feedback(client, event: MealFeedback):
     """Store one explicit meal event. Duplicate event ids are ignored."""
-    if client is None:
-        return {'status': 'missing_configuration'}
     if not valid_user(event.user):
         raise ValueError('Invalid user id')
     sent = _sent.setdefault(event.user, set())
     if event.eventId in sent:
         return {'status': 'duplicate'}
+    cuisines, tastes = _clean(event.cuisines), _clean(event.tastes)
+    verb = {'chose': 'Chose', 'logged': 'Ate and logged', 'skipped': 'Skipped'}[event.kind]
+    details = ', '.join(cuisines + tastes)
+    content = f"{verb} {event.name.strip()}" + (f" ({details})" if details else '') + \
+        (' at a UW dining location.' if event.mode == 'eatOut' else ' to cook.')
+    metadata = {'type': 'meal_feedback', 'kind': event.kind, 'eventId': event.eventId,
+                'mealId': event.mealId, 'name': event.name.strip(), 'mode': event.mode,
+                'cuisines': cuisines, 'tastes': tastes,
+                'mainIngredients': _clean(event.mainIngredients, 60), 'at': event.at}
+    status = 'saved'
     try:
+        if client is None:
+            raise RuntimeError('Backboard is not configured')
         ident = await user_assistant(client, event.user, create=True)
-        cuisines, tastes = _clean(event.cuisines), _clean(event.tastes)
-        verb = {'chose': 'Chose', 'logged': 'Ate and logged', 'skipped': 'Skipped'}[event.kind]
-        details = ', '.join(cuisines + tastes)
-        content = f"{verb} {event.name.strip()}" + (f" ({details})" if details else '') + \
-            (' at a UW dining location.' if event.mode == 'eatOut' else ' to cook.')
-        metadata = {'type': 'meal_feedback', 'kind': event.kind, 'eventId': event.eventId,
-                    'mealId': event.mealId, 'name': event.name.strip(), 'mode': event.mode,
-                    'cuisines': cuisines, 'tastes': tastes,
-                    'mainIngredients': _clean(event.mainIngredients, 60), 'at': event.at}
         await asyncio.wait_for(client.add_memory(ident, content, metadata=metadata), timeout=10)
     except Exception:
-        return {'status': 'unavailable'}
+        if not save_local(event.user, content, metadata):
+            return {'status': 'unavailable'}
+        status = 'saved_locally'
     sent.add(event.eventId)
     if len(sent) > 500:
         sent.clear()
     _learned.pop(event.user, None)
-    return {'status': 'saved'}
+    return {'status': status}
 
 
 def summarize_feedback(body):
@@ -147,21 +183,24 @@ def summarize_feedback(body):
 
 
 async def learned_preferences(client, user_id):
-    if client is None:
-        return empty_learned('missing_configuration')
     if not valid_user(user_id):
         return empty_learned('missing_user')
     cached = _learned.get(user_id)
     if cached and cached[0] > time.monotonic():
         return cached[1]
-    try:
-        ident = await user_assistant(client, user_id)
-        if not ident:
-            result = empty_learned('no_history')
-        else:
-            memories = await asyncio.wait_for(client.get_memories(ident, page_size=100), timeout=5)
-            result = summarize_feedback(memories)
-    except Exception:
-        result = empty_learned('unavailable')
+    rows, status = [], ('no_history' if client is not None else 'missing_configuration')
+    if client is not None:
+        try:
+            ident = await user_assistant(client, user_id)
+            if ident:
+                body = await asyncio.wait_for(client.get_memories(ident, page_size=100), timeout=5)
+                body = body.model_dump() if hasattr(body, 'model_dump') else body
+                rows = list(body.get('memories', []) if isinstance(body, dict) else [])
+        except Exception:
+            status = 'unavailable'
+    rows += local_memories(user_id)
+    result = summarize_feedback({'memories': rows}) if rows else empty_learned(status)
+    if client is None:
+        return result   # nothing remote to spare; local reads are cheap and always current
     _learned[user_id] = (time.monotonic() + (60 if result['status'] in ('retrieved', 'no_history') else 15), result)
     return result

@@ -1,5 +1,7 @@
 // Self-authored fixtures. These numbers are deliberately NOT real venue/menu data.
 // Field-level nulls exercise incomplete nutrition. Replace through the catalog adapter.
+// Cook recipes: per-serving values calculated from the USDA ingredient records (tests/nutrition-accuracy).
+// Venues below remain self-authored demo fixtures.
 const nutrients = (
   energy_kcal,
   protein_g,
@@ -9,13 +11,14 @@ const nutrients = (
   sodium_mg,
 ) => ({ energy_kcal, protein_g, carbohydrate_g, fat_g, fiber_g, sodium_mg });
 const ingredient = (name, grams) => ({ name, grams });
-const nutrition = (values, basis = "per_serving", yieldServings = 1) => ({
+const nutrition = (values, basis = "per_serving", yieldServings = 1, calculated = false) => ({
   values,
   basis,
   yieldServings,
-  kind: "illustrative_demo",
-  source:
-    "WhatsCooking.ai self-authored demo fixture v1; not a nutrition database or verified menu.",
+  kind: calculated ? "ingredient_estimate" : "illustrative_demo",
+  source: calculated
+    ? "Calculated from USDA FoodData Central records for the listed ingredient amounts (no unlisted salt or toppings)."
+    : "WhatsCooking.ai self-authored demo fixture v1; not a nutrition database or verified menu.",
   checkedAt: "2026-10-17",
   preparation: "Cooked, edible weight; no unlisted toppings.",
 });
@@ -45,7 +48,7 @@ const cook = (
       : id === "tomato-pasta"
         ? "1 plate"
         : "1 bowl",
-  nutrition: nutrition(values),
+  nutrition: nutrition(values, "per_serving", 1, true),
   timing: { prep: timing[0], cook: timing[1], outbound: 0 },
   diets,
   allergens,
@@ -104,7 +107,7 @@ export const catalog = [
     ],
     4.8,
     455,
-    nutrients(520, 27, 62, 18, 9, 410),
+    nutrients(553, 35, 63, 20, 12, 98),
     [5, 15],
     ["vegetarian", "vegan"],
     ["soy"],
@@ -128,7 +131,7 @@ export const catalog = [
     ],
     3.6,
     300,
-    nutrients(480, 20, 59, 17, 4, 780),
+    nutrients(421, 19, 49, 16, 3, 699),
     [5, 10],
     ["vegetarian"],
     ["egg", "soy", "wheat"],
@@ -151,7 +154,7 @@ export const catalog = [
     ],
     4.2,
     425,
-    nutrients(460, 22, 68, 11, 12, 390),
+    nutrients(430, 19, 74, 7, 14, 51),
     [5, 5],
     ["vegetarian"],
     ["milk"],
@@ -175,7 +178,7 @@ export const catalog = [
     ],
     3.9,
     400,
-    nutrients(550, 23, 78, 16, 7, 540),
+    nutrients(533, 20, 76, 17, 5, 210),
     [5, 18],
     ["vegetarian"],
     ["wheat", "milk"],
@@ -198,7 +201,7 @@ export const catalog = [
     ],
     2.8,
     285,
-    nutrients(410, 16, 61, 12, 10, 450),
+    nutrients(455, 21, 70, 11, 14, 374),
     [5, 0],
     ["vegetarian", "vegan"],
     ["wheat"],
@@ -209,10 +212,10 @@ export const catalog = [
       "Spoon chickpeas and cucumber onto ready-to-eat bread.",
     ],
   ),
-  cook("tofu-cucumber", "Tofu, cucumber & rice salad", "Fresh, no-cook tofu and rice with crisp cucumber.", [ingredient("tofu",150),ingredient("cooked brown rice",150),ingredient("cucumber",100),ingredient("olive oil",5)],4.4,405,nutrients(475,26,54,17,5,180),[5,0],["vegetarian","vegan"],["soy"],[],["Use ready-to-eat tofu and already-cooked rice.","Dice tofu and cucumber. Toss with olive oil and rice."]),
-  cook("tomato-rice", "Garlicky tomato rice", "A warm, comforting bowl using rice, tomatoes and garlic.",[ingredient("cooked brown rice",200),ingredient("tomatoes",150),ingredient("garlic",5),ingredient("olive oil",5)],2.9,360,nutrients(390,9,66,10,7,140),[5,5],["vegetarian","vegan"],[],["stove","pan"],["Chop tomatoes and garlic.","Warm oil and garlic, then add tomatoes. Stir in already-cooked rice until thoroughly hot, about 5 minutes."]),
-  cook("chickpea-rice-salad", "Chickpea rice picnic bowl", "A fresh, no-cook mix of chickpeas, rice and cucumber.",[ingredient("chickpeas",150),ingredient("cooked brown rice",150),ingredient("cucumber",100),ingredient("olive oil",5)],3.8,405,nutrients(490,18,77,13,12,220),[5,0],["vegetarian","vegan"],[],[],["Drain and rinse already-cooked chickpeas.","Dice cucumber and toss with cooked rice, chickpeas and olive oil."]),
-  cook("egg-toast", "Egg & tomato toast", "A quick, comforting egg toast for a smaller meal window.",[ingredient("eggs",100),ingredient("bread",80),ingredient("tomatoes",100),ingredient("olive oil",5)],3.2,285,nutrients(440,23,44,19,5,520),[3,5],["vegetarian"],["egg","wheat"],["stove","pan"],["Slice tomatoes and warm a pan with oil.","Scramble eggs until fully cooked, about 5 minutes. Serve on ready-to-eat bread with tomato."]),
+  cook("tofu-cucumber", "Tofu, cucumber & rice salad", "Fresh, no-cook tofu and rice with crisp cucumber.", [ingredient("tofu",150),ingredient("cooked brown rice",150),ingredient("cucumber",100),ingredient("olive oil",5)],4.4,405,nutrients(460, 31, 46, 20, 6, 29),[5,0],["vegetarian","vegan"],["soy"],[],["Use ready-to-eat tofu and already-cooked rice.","Dice tofu and cucumber. Toss with olive oil and rice."]),
+  cook("tomato-rice", "Garlicky tomato rice", "A warm, comforting bowl using rice, tomatoes and garlic.",[ingredient("cooked brown rice",200),ingredient("tomatoes",150),ingredient("garlic",5),ingredient("olive oil",5)],2.9,360,nutrients(325, 7, 59, 7, 5, 16),[5,5],["vegetarian","vegan"],[],["stove","pan"],["Chop tomatoes and garlic.","Warm oil and garlic, then add tomatoes. Stir in already-cooked rice until thoroughly hot, about 5 minutes."]),
+  cook("chickpea-rice-salad", "Chickpea rice picnic bowl", "A fresh, no-cook mix of chickpeas, rice and cucumber.",[ingredient("chickpeas",150),ingredient("cooked brown rice",150),ingredient("cucumber",100),ingredient("olive oil",5)],3.8,405,nutrients(490, 18, 83, 10, 14, 19),[5,0],["vegetarian","vegan"],[],[],["Drain and rinse already-cooked chickpeas.","Dice cucumber and toss with cooked rice, chickpeas and olive oil."]),
+  cook("egg-toast", "Egg & tomato toast", "A quick, comforting egg toast for a smaller meal window.",[ingredient("eggs",100),ingredient("bread",80),ingredient("tomatoes",100),ingredient("olive oil",5)],3.2,285,nutrients(407, 23, 39, 18, 6, 511),[3,5],["vegetarian"],["egg","wheat"],["stove","pan"],["Slice tomatoes and warm a pan with oil.","Scramble eggs until fully cooked, about 5 minutes. Serve on ready-to-eat bread with tomato."]),
   venue(
     "campus-bowl",
     "Campus tofu grain bowl",

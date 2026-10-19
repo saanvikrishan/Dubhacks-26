@@ -23,11 +23,11 @@ function stockedState() {
 import { storageAdapter, STORAGE_KEY } from "../src/adapters/storage.js";
 import { interpretFoodRequest } from "../src/adapters/assistant.js";
 
-test("catalog supports both modes and keeps demo provenance", () => {
+test("catalog supports both modes; recipes use USDA-calculated values, sample venues stay labeled demo", () => {
   for (const mode of ["cook", "eatOut"])
     assert.ok(catalog.filter((m) => m.mode === mode).length >= 4);
   for (const meal of catalog) {
-    assert.equal(meal.nutrition.kind, "illustrative_demo");
+    assert.equal(meal.nutrition.kind, meal.mode === "cook" ? "ingredient_estimate" : "illustrative_demo");
     assert.ok(meal.nutrition.source);
   }
 });
@@ -144,14 +144,14 @@ test("changing dormant weights has no effect; activating them fails startup", ()
   assert.throws(() => validateConfig(altered), /unvalidated/);
 });
 test("per-serving, per-100g, and recipe-yield nutrition scale correctly", () => {
-  const meal = structuredClone(byId["tofu-bowl"]);
-  assert.equal(portionNutrition(meal, 0.5).energy_kcal, 260);
+  const meal = structuredClone(byId["tofu-bowl"]);   // 553 kcal per serving (USDA-calculated)
+  assert.equal(portionNutrition(meal, 0.5).energy_kcal, 276.5);
   meal.nutrition.basis = "per_100g";
   meal.portionGrams = 200;
-  assert.equal(portionNutrition(meal, 0.5).energy_kcal, 520);
+  assert.equal(portionNutrition(meal, 0.5).energy_kcal, 553);
   meal.nutrition.basis = "per_recipe";
   meal.nutrition.yieldServings = 4;
-  assert.equal(portionNutrition(meal, 2).energy_kcal, 260);
+  assert.equal(portionNutrition(meal, 2).energy_kcal, 276.5);
   meal.nutrition.yieldServings = 0;
   assert.throws(() => portionNutrition(meal), /basis or recipe yield/);
   assert.throws(() => portionNutrition(meal, 0), /greater than zero/);
@@ -163,12 +163,12 @@ test("partial nutrient coverage retains known values and blocks unreliable goal 
   ];
   const result = dailyNutrition(logs, byId, today());
   assert.deepEqual(result.sodium_mg, {
-    value: 205,
+    value: 49,
     known: 1,
     total: 2,
     complete: false,
   });
-  assert.equal(result.energy_kcal.value, 690);
+  assert.equal(result.energy_kcal.value, 706.5);
   assert.match(
     goalStatus(result.sodium_mg, { mode: "maximum", value: 1000 }),
     /unavailable/,
@@ -218,9 +218,9 @@ test("core loop preserves original plan during delay, then replaces and logs hal
   });
   assert.equal(
     dailyNutrition(state.logs, byId, today()).energy_kcal.value,
-    230,
+    215,
   );
-  assert.equal(dailyNutrition(state.logs, byId, today()).protein_g.value, 11);
+  assert.equal(dailyNutrition(state.logs, byId, today()).protein_g.value, 9.5);
   assert.equal(state.pantry.chickpeas, 400);
 });
 test("confirmation retries do not duplicate consumption; editing and removal recalculate", () => {
@@ -237,7 +237,7 @@ test("confirmation retries do not duplicate consumption; editing and removal rec
   state = transition(state, { ...action, type: "editLog", servings: 0.5 });
   assert.equal(
     dailyNutrition(state.logs, byId, today()).energy_kcal.value,
-    260,
+    276.5,
   );
   state = transition(state, { type: "removeLog", id: "same" });
   assert.equal(state.logs.length, 0);

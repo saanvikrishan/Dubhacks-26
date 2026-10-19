@@ -450,6 +450,7 @@ export function EventDialog({
     [end, setEnd] = useState(event ? timeKey(event.end) : "12:45"),
     [location, setLocation] = useState(event?.location ?? ""),
     [busy, setBusy] = useState(event ? blocksMealPlanning(event) : true),
+    [kind, setKind] = useState(event?.kind ?? "meal"),
     [error, setError] = useState("");
   if (event?.plan)
     return (
@@ -518,12 +519,11 @@ export function EventDialog({
     );
   return (
     <Modal
-      title={event && !event.draft ? "Edit meal" : "Schedule a meal"}
+      title={event && !event.draft ? (kind === "meal" ? "Edit meal" : "Edit activity") : kind === "meal" ? "Schedule a meal" : "Add to your schedule"}
       onClose={onClose}
     >
       <p className="muted" style={{ marginBottom: 12 }}>
-        You can only schedule meals here. Classes, workouts, and other events
-        should come from your connected calendar.
+        Add a meal, class, workout or anything else. Events imported from your calendar stay read-only.
       </p>
       <form
         onSubmit={async (e) => {
@@ -533,10 +533,10 @@ export function EventDialog({
               type: "saveEvent",
               event: {
                 id: event?.id ?? crypto.randomUUID(),
-                title: title.trim() || "Meal",
+                title: title.trim() || (kind === "meal" ? "Meal" : "Activity"),
                 start: localInstant(eventDate, start),
                 end: localInstant(eventDate, end),
-                kind: "meal",
+                kind,
                 location,
                 busy,
                 source: "manual",
@@ -550,12 +550,12 @@ export function EventDialog({
         }}
       >
         <label>
-          Meal title
+          Title
           <input
             required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Lunch · tofu stir-fry"
+            placeholder={kind === "meal" ? "e.g. Lunch · tofu stir-fry" : "e.g. Chem lab"}
           />
         </label>
         <div className="form-grid">
@@ -570,7 +570,13 @@ export function EventDialog({
           </label>
           <label>
             Type
-            <input type="text" value="Meal" disabled readOnly />
+            <select value={kind} onChange={(e) => setKind(e.target.value)}>
+              <option value="meal">Meal</option>
+              <option value="class">Class</option>
+              <option value="workout">Workout</option>
+              <option value="event">Event</option>
+              <option value="task">Task</option>
+            </select>
           </label>
           <label>
             Starts
@@ -622,11 +628,11 @@ export function EventDialog({
                 onClose();
               }}
             >
-              Remove meal
+              Remove
             </button>
           )}
           <button className="primary" type="submit">
-            Save meal
+            {kind === "meal" ? "Save meal" : "Save"}
           </button>
         </div>
       </form>

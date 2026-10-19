@@ -1,9 +1,10 @@
 import { minutes } from "../domain/engine.js";
 export const money = (n) => (n == null ? "Unknown price" : `$${n.toFixed(2)}`);
+// Nutrition reads naturally: whole numbers from 10 up (613 kcal), one decimal below (5.7 g).
 export const num = (n) =>
   n == null
     ? "Unknown"
-    : new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(n);
+    : new Intl.NumberFormat("en-US", { maximumFractionDigits: Math.abs(n) >= 10 ? 0 : 1 }).format(n);
 export const niceTime = (t) => {
   const m = minutes(t);
   return `${Math.floor(m / 60) % 12 || 12}:${String(m % 60).padStart(2, "0")} ${m >= 720 ? "PM" : "AM"}`;

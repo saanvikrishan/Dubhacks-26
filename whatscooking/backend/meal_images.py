@@ -170,11 +170,33 @@ COMMON = [MealImageRequest(name=n, dishType=d, ingredients=i, cuisine=c) for n, 
 
 
 class PhotoIndex:
-    """Shared Backboard memory of verified photos: searchable by dish description, no personal data."""
+    """Shared Backboard memory of verified photos: searchable by dish description, no personal data.
+    A local copy next to the photos answers first, so a slow or failing Backboard never delays a photo."""
     NAME = 'whatscooking.ai dish photos'
+    PAUSE = 300   # after a Backboard failure, skip it for five minutes
 
-    def __init__(self, backboard):
+    def __init__(self, backboard, directory=IMAGE_DIR):
         self.backboard, self.ident, self.lock = backboard, None, asyncio.Lock()
+        self.local_path, self.paused_until = Path(directory) / 'index.json', 0.0
+
+    def _local(self):
+        try:
+            rows = json.loads(self.local_path.read_text())
+            return rows if isinstance(rows, list) else []
+        except (OSError, ValueError):
+            return []
+
+    def _match(self, rows, request, exists):
+        for meta in rows:
+            if not isinstance(meta, dict) or meta.get('type') != 'dish_photo' or not KEY.match(str(meta.get('key', ''))):
+                continue
+            same = MealImageRequest(name=meta.get('name') or 'x', dishType=meta.get('dishType'), ingredients=meta.get('mainIngredients') or [])
+            if dish_words(same) == dish_words(request) and main_ingredients(same) == main_ingredients(request) and exists(meta['key']):
+                return meta['key']
+        return None
+
+    def _healthy(self):
+        return self.backboard is not None and time.monotonic() >= self.paused_until
 
     @staticmethod
     def describe(request):
@@ -197,33 +219,39 @@ class PhotoIndex:
 
     async def find(self, request, exists):
         """Key of an existing photo of the same dish, or None. Search proposes; the strict rule decides."""
+        local = self._match(self._local(), request, exists)
+        if local or not self._healthy():
+            return local
         try:
             ident = await self._assistant()
             if not ident:
                 return None
-            found = await asyncio.wait_for(self.backboard.search_memories(ident, self.describe(request), limit=5), timeout=3)
+            found = await asyncio.wait_for(self.backboard.search_memories(ident, self.describe(request), limit=5), timeout=2)
             rows = found.get('memories', []) if isinstance(found, dict) else getattr(found, 'memories', []) or []
-            for row in rows:
-                meta = (row.get('metadata') if isinstance(row, dict) else getattr(row, 'metadata', None)) or {}
-                if meta.get('type') != 'dish_photo' or not KEY.match(str(meta.get('key', ''))):
-                    continue
-                same = MealImageRequest(name=meta.get('name') or 'x', dishType=meta.get('dishType'), ingredients=meta.get('mainIngredients') or [])
-                if dish_words(same) == dish_words(request) and main_ingredients(same) == main_ingredients(request) and exists(meta['key']):
-                    return meta['key']
+            return self._match([(r.get('metadata') if isinstance(r, dict) else getattr(r, 'metadata', None)) or {} for r in rows], request, exists)
         except Exception:
+            self.paused_until = time.monotonic() + self.PAUSE
             return None
-        return None
 
     async def add(self, request, key, checked):
+        meta = {'type': 'dish_photo', 'key': key, 'name': request.name, 'dishType': request.dishType,
+                'mainIngredients': request.ingredients[:MAIN], 'cuisine': request.cuisine, 'checked': checked,
+                'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+        try:
+            self.local_path.parent.mkdir(parents=True, exist_ok=True)
+            temp = self.local_path.with_suffix('.tmp')
+            temp.write_text(json.dumps((self._local() + [meta])[-2000:]))
+            temp.replace(self.local_path)
+        except OSError:
+            pass
+        if not self._healthy():
+            return
         try:
             ident = await self._assistant()
             if ident:
-                await asyncio.wait_for(self.backboard.add_memory(ident, self.describe(request), metadata={
-                    'type': 'dish_photo', 'key': key, 'name': request.name, 'dishType': request.dishType,
-                    'mainIngredients': request.ingredients[:MAIN], 'cuisine': request.cuisine, 'checked': checked,
-                    'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}), timeout=10)
+                await asyncio.wait_for(self.backboard.add_memory(ident, self.describe(request), metadata=meta), timeout=10)
         except Exception:
-            pass
+            self.paused_until = time.monotonic() + self.PAUSE
 
     async def popular_dishes(self):
         """How often each dish type has been drawn for anyone: a hint for warm-up order."""

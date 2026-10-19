@@ -29,7 +29,8 @@ import { Onboarding } from "./ui/Onboarding";
 import { byId, rememberMeal, rememberSuggestions, restoreSuggestions } from "./data/suggestions";
 import { capabilities } from "./domain/config";
 import { clockTime, minutes } from "./domain/engine";
-import { dailyNutrition } from "./domain/nutrition";
+import { dailyNutrition, goalStatus, nutrientInfo } from "./domain/nutrition";
+import { GOALS } from "./domain/preferences";
 import {
   dayKey,
   localInstant,
@@ -46,7 +47,6 @@ import { persistSavedMeal, savePantryItems } from "./adapters/database";
 import { recordActionFeedback } from "./adapters/mealFeedback";
 import { prepareCook, prepareRecipeDrafts, requestRecipeDrafts } from "./adapters/recipes";
 import { computeNudges, dismissedNudges, dismissNudge } from "./domain/nudges";
-import { directionsUrl } from "./data/uwDining";
 import "./App.css";
 import "./ui/redesign.css";
 const flags = capabilities();
@@ -92,6 +92,7 @@ export default function App() {
   }, []);
   const [dialog, setDialog] = useState(null),
     [notice, setNotice] = useState(""),
+    [logNotice, setLogNotice] = useState(false),
     [error, setError] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const [, setNudgeTick] = useState(0);
@@ -175,8 +176,11 @@ export default function App() {
       undo: "Plan change undone.",
       undoLog: "Last meal-log change undone.",
       removeLog: "Meal log removed. Your intake has been recalculated.",
+      log: "Meal logged. Your intake is updated.",
+      editLog: "Meal log updated.",
     };
     if (messages[action.type] && !action.quiet) setNotice(messages[action.type]);
+    setLogNotice(["log", "editLog", "removeLog", "undoLog"].includes(action.type));   // its Undo only follows a log change
     if (
       (action.type === "updateProfile" || action.type === "configure") &&
       (action.profile?.phone || "").trim() &&
@@ -376,8 +380,8 @@ export default function App() {
       const saved = await persistSavedMeal(meal);
       setNotice(
         saved.status === "ok"
-          ? `${meal.name} added to My Meal Plan and saved to Postgres.`
-          : `${meal.name} added to My Meal Plan.`,
+          ? `${meal.name} added to your plan.`
+          : `${meal.name} added to your plan.`,
       );
       close();
       setTab("Today");
@@ -494,6 +498,26 @@ export default function App() {
         : { type: "removeLog", id: latest.id },
     );
   }
+  // A closest-match recipe: put what it still needs on the grocery list (planning waits until you have it).
+  async function needGroceries(meal, missing = []) {
+    if (!missing.length) return openDetails(meal);
+    const list = stateRef.current.shoppingList ?? [];
+    const add = missing.filter((name) => !list.some((i) => i.name.toLowerCase() === name.toLowerCase()));
+    if (add.length && !(await safe({ type: "updateShoppingList", shoppingList: [...list, ...add.map((name) => ({ id: crypto.randomUUID(), name, qty: "", checked: false }))] }))) return;
+    setNotice(add.length ? `Added ${add.join(", ")} to your grocery list for ${meal.name}.` : `Everything for ${meal.name} is already on your grocery list.`);
+  }
+  // Swiping right on campus puts the visit (and the dish, if one is shown) on your schedule;
+  // walking directions stay in the venue details for later.
+  async function planCampus(meal, venue) {
+    const start = localInstant(state.context.date, state.context.start);
+    const event = { id: crypto.randomUUID(), title: meal ? `${meal.name} at ${venue.name}` : `Meal at ${venue.name}`, start,
+      end: localInstant(state.context.date, clockTime(Math.min(1439, minutes(state.context.start) + 30))),
+      kind: "meal", location: venue.location, source: "manual", busy: true, readOnly: false, venueId: venue.id };
+    if (await safe({ type: "saveEvent", event })) {
+      setNotice(`${event.title} added to your schedule. Walking directions are under Menu & details.`);
+      setTab("Today");
+    }
+  }
   function planVisit(venue) {
     setDialog({
       type: "event",
@@ -532,7 +556,7 @@ export default function App() {
               <Icon name="spark" size={22} />
             </span>
             <span className="brand-word">
-              whatscooking<span className="brand-dot">.ai</span>
+              WhatsCooking<span className="brand-dot">.ai</span>
             </span>
           </a>
           <nav aria-label="Main navigation">
@@ -644,7 +668,7 @@ export default function App() {
           <div className="notice compact-notice" role="status">
             <span>{notice}</span>
             <div>
-              {state.logUndo && (
+              {state.logUndo && logNotice && (
                 <button
                   className="text-button"
                   onClick={() => safe({ type: "undoLog" })}
@@ -735,7 +759,7 @@ export default function App() {
                     <strong>{lastMeal.name}</strong>
                     <p>
                       {lastPlan.start} · {lastPlan.duration} min ·{" "}
-                      {money(lastMeal.cost)} estimate
+                      {lastMeal.cost == null || lastMeal.review?.costAssumed ? "price not found" : `${money(lastMeal.cost)} estimate`}
                     </p>
                   </div>
                   <div className="today-saved-actions">
@@ -795,9 +819,30 @@ export default function App() {
                   </div>
                   <div>
                     <strong>{logs.length}</strong>
-                    <span>confirmed logs</span>
+                    <span>{logs.length === 1 ? "confirmed log" : "confirmed logs"}</span>
                   </div>
                 </div>
+                {state.profile.goals?.length > 0 && (
+                  <div className="goal-progress" style={{ display: "grid", gap: 8, margin: "14px 0 6px" }}>
+                    <strong style={{ fontSize: 13 }}>{GOALS[state.profile.goal]?.label ?? "Your daily goals"}</strong>
+                    {state.profile.goals.map((goal) => {
+                      const eaten = summary[goal.nutrient]?.value ?? 0, target = goal.mode === "target_range" ? goal.upper : goal.value;
+                      const [label, unit] = nutrientInfo[goal.nutrient] ?? [goal.nutrient, ""];
+                      const status = logs.length ? goalStatus(summary[goal.nutrient] ?? { complete: false }, goal) : goal.mode === "maximum" ? "Nothing logged yet" : `${num(target)} ${unit} to go`;
+                      return (
+                        <div key={goal.nutrient} style={{ fontSize: 12 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                            <span>{label} {goal.mode === "maximum" ? "(limit)" : ""}</span>
+                            <span>{num(eaten)} / {num(target)} {unit} · {status}</span>
+                          </div>
+                          <div style={{ height: 6, borderRadius: 3, background: "#e3eadb", overflow: "hidden" }}>
+                            <div style={{ width: `${Math.min(100, target ? (eaten / target) * 100 : 0)}%`, height: "100%", background: goal.mode === "maximum" && eaten > target ? "#c4622d" : "#2f7a55" }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <p className="fine-print">
                   {logs.length
                     ? `${summary.energy_kcal.known}/${logs.length} logs have energy data. `
@@ -866,6 +911,8 @@ export default function App() {
               <button
                 className="secondary"
                 style={{ marginLeft: "auto" }}
+                disabled={date < day}
+                title={date < day ? "This day has passed" : undefined}
                 onClick={async () => {
                   const ok = await safe({ type: "scheduleDayMeals", date });
                   if (ok !== false) {
@@ -934,9 +981,7 @@ export default function App() {
               onMode={setFoodMode}
               onChoose={choose}
               onVenue={(venue) => setDialog({ type: "venue", venue })}
-              onVenueDirections={(venue) => {
-                window.location.assign(directionsUrl(venue));
-              }}
+              onPlanCampus={planCampus}
               onDetails={openDetails}
               onPreferences={() => setDialog({ type: "profile" })}
               onWindow={() => setDialog({ type: "time" })}
@@ -947,6 +992,7 @@ export default function App() {
               }}
               geminiMeals={mode === "cook" && geminiMeals ? geminiMeals.map(id=>byId[id]).filter(Boolean) : null}
               onReview={meal=>setDialog({type:"reviewRecipe",meal})}
+              onNeedGroceries={needGroceries}
               groceryList={groceryList}
               onMoreIdeas={geminiMeals ? moreIdeas : null}
               onPrepareMore={geminiMeals ? prepareMore : null}
@@ -964,7 +1010,7 @@ export default function App() {
           <span>WhatsCooking.ai · meals that fit your day</span>
           <button
             className="text-button"
-            onClick={() => setDialog({ type: "about" })}
+            onClick={() => setDialog({ type: "about", focus: "sources" })}
           >
             Sources & app status
           </button>
@@ -988,7 +1034,7 @@ export default function App() {
       </button>
       {/* First run: a quick setup (goal, diet, allergies, tastes), by taps or one spoken sentence. */}
       {!dialog && !state.profile.onboarded && (
-        <Onboarding state={state} agent={agentBridge} onSave={dispatch} onClose={() => setNotice("You're all set. Change anything later in Food preferences.")} />
+        <Onboarding state={state} onSave={dispatch} onClose={() => setNotice("You're all set. Change anything later in Food preferences.")} />
       )}
       {dialog?.type === "reviewRecipe" && <RecipeReview meal={dialog.meal} state={state} onSave={dispatch} onChoose={(id) => choose(stateRef.current.generatedMeals.find((m) => m.id === id) ?? dialog.meal)} onClose={close}/> }
       {dialog?.type === "calendar" && (
@@ -1186,8 +1232,10 @@ export default function App() {
         </Confirm>
       )}
       {dialog?.type === "about" && (
-        <Modal title="How this version works" onClose={close} wide>
+        <Modal title={dialog.focus === "sources" ? "Sources & app status" : "How this version works"} onClose={close} wide>
           <div className="about-sections">
+            {/* "Sources & app status" shows only where the data comes from; "About this build" shows everything. */}
+            {dialog.focus !== "sources" && <>
             <section>
               <h3>Today, My Meal Plan, Let’s eat, Grocery list</h3>
               <p>
@@ -1208,6 +1256,7 @@ export default function App() {
                 changes. Gemini interprets requests; these checks decide what fits.
               </p>
             </section>
+            </>}
             <section>
               <h3>Real UW places, clear data limits</h3>
               <p>

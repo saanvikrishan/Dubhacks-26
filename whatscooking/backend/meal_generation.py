@@ -12,7 +12,7 @@ from typing import Literal
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
-from usda import MATCHES, resolve_name
+from usda import DATA, MATCHES, nutrient_values, resolve_name
 from allergy_rules import normalize_exclusions
 
 # Reviewed USDA ingredient names; recipes that use them get calculable nutrition.
@@ -213,6 +213,51 @@ def personalization(request, learned=None):
     }
 
 
+def _energy_per_100g():
+    """kcal per 100 g for each reviewed ingredient, from the same USDA records the app shows."""
+    try:
+        records = {r['fdcId']: r for r in json.loads((DATA / 'usda-browser.json').read_text())['records']}
+        return {key: nutrient_values(records[m['fdcId']])[0].get('energy_kcal') for key, m in MATCHES.items() if m['fdcId'] in records}
+    except Exception:
+        return {}
+
+
+ENERGY = _energy_per_100g()
+SERVING_MAX_KCAL = 950   # a typical meal is 400-800 kcal; above this is usually a doubled portion
+
+
+def estimated_kcal(draft):
+    """Lower bound from known ingredients (unknown ones add nothing)."""
+    total = 0.0
+    for item in draft.ingredients:
+        key, _ = resolve_name(item.name)
+        if key and ENERGY.get(key) is not None:
+            total += ENERGY[key] * item.grams / 100
+    return total
+
+
+def choose_drafts(drafts, request):
+    """Allergies and diet are never relaxed. Time, equipment and already-shown names only order the
+    rest: recipes that fit come first, then the closest others, so a tight schedule or a short tool
+    list never leaves the user with nothing. The app re-checks every recipe and says what doesn't fit."""
+    safe = [d for d in drafts if not contains_excluded(d, request.exclusions)
+            and not diet_conflicts(request.model_copy(update={"ingredients": [i.name.lower() for i in d.ingredients]}))]
+    shown = {n.strip().lower() for n in request.exclude}
+    fresh = [d for d in safe if d.name.strip().lower() not in shown] or safe
+    missing_tools = lambda d: len(set(d.equipment) - set(request.equipment))
+    oversized = lambda d: estimated_kcal(d) > SERVING_MAX_KCAL
+    fits = lambda d: d.prep + d.cook <= request.time and not missing_tools(d) and not oversized(d)
+    ordered = [d for d in fresh if fits(d)] + sorted((d for d in fresh if not fits(d)), key=lambda d: (oversized(d), missing_tools(d), d.prep + d.cook))
+    meals = distinct(list({m["id"]: m for m in map(normalize_draft, ordered)}.values()))
+    if not drafts:
+        return meals, "No recipes came back for these groceries. Add a few more ingredients and try again."
+    if not safe:
+        return meals, "Every idea used something your diet or allergies rule out. Try other groceries."
+    if not any(fits(d) for d in fresh):
+        return meals, "These take longer than your free time or need other equipment; each card says what to change."
+    return meals, "Review recipe details before choosing."
+
+
 def distinct(meals):
     """Drop near-duplicates: same AI cuisine label and the same two main ingredients."""
     seen, out = set(), []
@@ -262,7 +307,8 @@ class RecipeGenerator:
         self.pending[key] = task
         try:
             result = await asyncio.shield(task)
-            self.cache[key] = (time.monotonic() + self.ttl, result)
+            if json.loads(result).get("meals"):   # an empty answer is retried next time, never cached
+                self.cache[key] = (time.monotonic() + self.ttl, result)
             while len(self.cache) > 32:
                 self.cache.popitem(last=False)
             return json.loads(result)
@@ -291,7 +337,8 @@ class RecipeGenerator:
             "Prefer not to repeat recentMeals or repeatedlySkipped, but allow them if needed. Label each recipe's cuisine "
             "(or Other) and up to 3 tastes honestly, and give a short generic dishType of 2-4 words "
             "(e.g. 'egg fried rice', 'tofu stir-fry', 'baked salmon'). Prefer the exact ingredient "
-            "names and raw/cooked forms in the provided pantry; grams are edible INPUT weights. "
+            "names and raw/cooked forms in the provided pantry; grams are edible INPUT weights for ONE serving "
+            "(about 400-800 kcal; dry rice, pasta or other grains 60-100 g, or use the 'cooked ...' names with 150-250 g). "
             "Do not silently substitute cooked rice for dry rice. Include EVERY ingredient, including "
             "oil, salt and sauces, with its grams. Do not assume staples are available. "
             "Prefer quantities within pantry stock and prep+cook within the supplied time, which "
@@ -325,16 +372,11 @@ class RecipeGenerator:
                 # Empty is an honest no-fit response, not a provider failure.
                 parsed = json.loads(response.text)
                 if parsed == {"recipes": []}:
-                    meals = []
+                    meals, message = choose_drafts([], request)
                 else:
                     drafts = RecipeResponse.model_validate(parsed, strict=True).recipes
-                    fitting = [d for d in drafts if d.prep + d.cook <= request.time and set(d.equipment).issubset(request.equipment)
-                               and not contains_excluded(d, request.exclusions)
-                               and not diet_conflicts(request.model_copy(update={"ingredients":[i.name.lower() for i in d.ingredients]}))
-                               and d.name.strip().lower() not in {n.lower() for n in request.exclude}]
-                    meals = distinct(list({m["id"]: m for m in map(normalize_draft, fitting)}.values()))
-                return json.dumps({"meals": meals, "recipes": meals, "model": model, "cached": False,
-                    "message": "Review recipe details before choosing." if meals else "No recipes fit the supplied ingredients and cooking time."})
+                    meals, message = choose_drafts(drafts, request)
+                return json.dumps({"meals": meals, "recipes": meals, "model": model, "cached": False, "message": message})
             except asyncio.TimeoutError:
                 self.cooldown[model] = time.monotonic() + 30
             except Exception as exc:

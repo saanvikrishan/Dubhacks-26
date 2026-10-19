@@ -121,7 +121,7 @@ test("Kevin: invalid source nutrients do not corrupt a partial daily subtotal or
     "2026-10-17",
   );
   assert.deepEqual(summary.protein_g, {
-    value: 13.5,
+    value: 17.5,
     known: 1,
     total: 2,
     complete: false,

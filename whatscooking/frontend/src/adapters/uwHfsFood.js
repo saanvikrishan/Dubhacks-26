@@ -67,6 +67,7 @@ export function normalizeUwHfsRow(
       protein_g: "Protein",
       carbohydrate_g: "Total Carbs",
       fat_g: "Total Fat",
+      saturated_fat_g: "Sat. Fat",
       fiber_g: "Fiber",
       sodium_mg: "Sodium",
     },
@@ -74,9 +75,11 @@ export function normalizeUwHfsRow(
     fields = {};
   for (const [key, column] of Object.entries(mapping)) {
     const raw = row[column] ?? null;
-    values[key] = published(raw, nutrientInfo[key][1]);
+    // US labels print "less than 1g" for 0.5 to under 1 g; use the middle of that range rather than unknown.
+    const underOne = typeof raw === "string" && /^(?:less than|<)\s*1\s*(?:g|mg)$/i.test(raw.trim());
+    values[key] = underOne ? 0.75 : published(raw, nutrientInfo[key][1]);
     fields[key] = {
-      status: values[key] === null ? "unknown" : "uw_published_approximate",
+      status: values[key] === null ? "unknown" : underOne ? "uw_published_less_than_1" : "uw_published_approximate",
       sourceUrl: page.sourceUrl,
       checkedAt: page.checkedAt,
       publishedColumn: column,

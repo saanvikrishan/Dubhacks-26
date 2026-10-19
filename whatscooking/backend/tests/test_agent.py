@@ -60,6 +60,19 @@ def request(message, **kw):
 class AgentTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         food_memory._assistants.clear(); food_memory._learned.clear(); food_memory._sent.clear(); food_memory._locks.clear()
+        import tempfile
+        self.local = tempfile.TemporaryDirectory(); self.addCleanup(self.local.cleanup)
+        patcher = patch.object(food_memory, 'LOCAL_DIR', Path(self.local.name)); patcher.start(); self.addCleanup(patcher.stop)
+
+    async def test_remember_still_works_when_backboard_cannot_save(self):
+        class Failing(MemoryBackboard):
+            async def add_memory(self, *a, **k): raise RuntimeError('500 Something went wrong')
+        gemini = ScriptedGemini(calls(('remember', {'fact': 'Allergic to kiwi'})), text('Noted.'))
+        result = await agent.run(gemini, Failing(), request('remember I am allergic to kiwi', user=USER_A), types)
+        self.assertTrue(result['actions'][0]['args']['saved'])
+        self.assertIn('Remembered: Allergic to kiwi', await agent.recall(Failing(), USER_A, 'dinner'))
+        self.assertIn('Remembered: Allergic to kiwi', await agent.recall(None, USER_A, 'dinner'))
+        self.assertEqual(await agent.recall(None, USER_B, 'dinner'), [])
 
     async def test_one_message_can_make_several_changes_in_order(self):
         gemini = ScriptedGemini(calls(

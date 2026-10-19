@@ -2862,9 +2862,6 @@ dialog.assistant-dialog .error {
     height: 33px;
     font-size: 10px;
   }
-  .brand-dot {
-    display: none;
-  }
   .redesigned-shell {
     padding: 19px 20px 0;
   }
@@ -4062,5 +4059,67 @@ dialog.assistant-dialog .error {
   }
   .notes-panel.is-expanded .notes-input {
     min-height: 88px;
+  }
+}
+
+/* ── Readability fixes (QA) ─────────────────────────────────────────────── */
+/* The pinned swipe buttons sit on a solid strip, so card text never shows through them. */
+.swipe-actions {
+  background: linear-gradient(180deg, rgba(247, 250, 243, 0) 0, #f7faf3 16px);
+  padding-top: 18px;
+}
+/* Week view: one-line titles so a short meal block still shows its time. */
+.week-event strong,
+.week-event small {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Phones: photos never cover card text, filters get full width, the nav fits on one row,
+   and the assistant button stays clear of the swipe buttons. */
+@media (max-width: 560px) {
+  .meal-path img {
+    width: 72px;
+    height: 72px;
+    right: -10px;
+    top: 10px;
+  }
+  .meal-path .path-copy {
+    width: 100%;
+    padding-right: 52px;
+  }
+  .meal-path p {
+    max-width: none;
+  }
+  .food-filters {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .food-filters label,
+  .food-filters select {
+    width: 100%;
+  }
+  .header-inner nav button {
+    flex-direction: column;
+    gap: 2px;
+    white-space: nowrap;
+    font-size: 10px;
+    line-height: 1.15;
+    padding: 6px 4px;
+  }
+  .agenda-item {
+    margin: 0;
+    grid-template-columns: 58px 7px minmax(0, 1fr);
+  }
+  .agenda-time {
+    font-size: 10px;
+  }
+  .floating-assistant {
+    bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+    right: 14px;
+    width: 50px;
+    height: 50px;
   }
 }

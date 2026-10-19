@@ -1,5 +1,5 @@
-import {AllergyPicker} from "./AllergyPicker";
-import {CUISINES,GOALS,TASTES,withGoal} from "../domain/preferences.js";
+import {Basics} from "./BasicsChips";
+import {CUISINES,TASTES} from "../domain/preferences.js";
 import {storageKeys, readStored} from '../domain/branding.js';
 import {MealWindowPicker} from "./MealWindowPicker.jsx";
 import {contextForWindow} from "../domain/mealWindow.js";
@@ -14,6 +14,7 @@ import {
   assessGroceryNutrition,
   dailyNutrition,
   estimateGrams,
+  typicalGrams,
   goalStatus,
   nutrientInfo,
   portionNutrition, nutritionDisplayRows,
@@ -263,6 +264,7 @@ function ContextFields({ value, onChange, state }) {
       <label>Ends<input type="time" required value={end==="Unknown"?value.commitmentTime:end} onChange={e=>range(value.date,value.start,e.target.value)}/></label>
       {number("available","Duration (minutes)",1,1440)}
     </div>
+    {value.commitment === "No further commitment" && <p className="fine-print">Nothing on your calendar after this, so there’s no time limit. Set an end time to plan a shorter meal.</p>}
     <MealWindowPicker state={state} value={value} onChange={onChange}/>
     <details className="allowances"><summary>Location & next commitment</summary><div className="form-grid"><label>Location / area<input value={value.location??""} onChange={e=>onChange({...value,location:e.target.value})}/></label><label>Next commitment<input value={value.commitment??""} onChange={e=>onChange({...value,commitment:e.target.value})}/></label><label>Next commitment at<input type="time" required value={value.commitmentTime} onChange={e=>onChange({...value,commitmentTime:e.target.value})}/></label></div></details>
     <details className="allowances"><summary>Meal time allowances</summary><div className="form-grid">{number("eating","Eating (min)")}{number("cleanup","Cleanup (min)")}{number("onward","Onward travel (min)")}{number("buffer","Buffer (min)")}{number("service","Dining service (min)")}</div></details>
@@ -349,44 +351,10 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
         </p>
         {!timeOnly && (
           <>
+            <h3 style={{ marginBottom: 0 }}>Your basics</h3>
+            <Basics profile={profile} onChange={setProfile} />
+            <h3 style={{ margin: "22px 0 8px" }}>More about your food</h3>
             <div className="form-grid">
-              <label>
-                Dietary restriction
-                <select
-                  value={profile.diet}
-                  onChange={(e) =>
-                    setProfile({ ...profile, diet: e.target.value })
-                  }
-                >
-                  <option value="anything">Anything</option>
-                  <option value="vegetarian">Vegetarian</option>
-                  <option value="vegan">Vegan</option>
-                </select>
-              </label>
-              <label>
-                Main goal
-                <select
-                  value={profile.goal ?? ""}
-                  onChange={(e) => setProfile(withGoal(profile, e.target.value))}
-                >
-                  <option value="">No particular goal</option>
-                  {Object.entries(GOALS).map(([key, goal]) => <option key={key} value={key}>{goal.label}</option>)}
-                </select>
-              </label>
-              <label>
-                Meal budget ($, optional)
-                <input
-                  type="number"
-                  min="0"
-                  max="1000"
-                  step="0.01"
-                  placeholder="No budget limit"
-                  value={profile.budget ?? ""}
-                  onChange={(e) =>
-                    setProfile({ ...profile, budget: e.target.value === "" ? null : Number(e.target.value) })
-                  }
-                />
-              </label>
               <label>
                 Preferred food (optional)
                 <input
@@ -398,16 +366,6 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                 />
               </label>
               <label>Foods you dislike (optional)<input maxLength={160} value={profile.dislikes??''} placeholder="e.g. mushrooms, olives" onChange={e=>setProfile({...profile,dislikes:e.target.value})}/></label>
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={profile.cooking}
-                  onChange={(e) =>
-                    setProfile({ ...profile, cooking: e.target.checked })
-                  }
-                />
-                I have cooking access
-              </label>
               <label>
                 Reminder phone
                 <input
@@ -427,17 +385,8 @@ function Setup({ state, onSave, onClose, timeOnly = false }) {
                 ? `Text ${profile.reminderFrom.trim()} once to activate reminders.`
                 : "Use international format, like +1XXXXXXXXXX. Saving a number enrolls it for iMessage reminders."}
             </p>
-            <fieldset><legend>Favorite cuisines</legend><div className="checks">{CUISINES.map(value=><label key={value}><input type="checkbox" checked={(profile.cuisines??[]).includes(value)} onChange={()=>toggle('cuisines',value)}/>{value}</label>)}</div></fieldset>
             <fieldset><legend>Cuisines to avoid</legend><div className="checks">{CUISINES.map(value=><label key={value}><input type="checkbox" checked={(profile.avoidCuisines??[]).includes(value)} onChange={()=>toggle('avoidCuisines',value)}/>{value}</label>)}</div></fieldset>
             <fieldset><legend>Tastes you enjoy</legend><div className="checks">{TASTES.map(value=><label key={value}><input type="checkbox" checked={(profile.tastes??[]).includes(value)} onChange={()=>toggle('tastes',value)}/>{value}</label>)}</div><p className="fine-print">These preferences guide meal suggestions. When connected, Backboard remembers your food, cuisine and taste choices.</p></fieldset>
-            <fieldset>
-              <legend>Exclude these allergens</legend>
-              <p className="muted">
-                Unknown allergen data is excluded when a restriction is set.
-                Demo labels cannot establish real allergen safety.
-              </p>
-              <AllergyPicker value={profile.exclusions} onChange={exclusions => setProfile({...profile, exclusions})}/>
-            </fieldset>
             <fieldset>
               <legend>Available equipment</legend>
               <div className="checks">
@@ -603,7 +552,7 @@ function Details({ meal, state, onClose, onChoose, onLog }) {
   return (
     <Modal title={meal.name} onClose={onClose} wide>
       <p className="muted">
-        {modeName(meal.mode)} · {meal.cost==null?'Cost needs a product match':`${money(meal.cost)} estimated`} ·{" "}
+        {modeName(meal.mode)} · {meal.cost==null||meal.review?.costAssumed?'Price not found':`${money(meal.cost)} estimated`} ·{" "}
         {meal.portionLabel}{meal.portionGrams==null?'':` (${meal.portionGrams} g)`}
       </p>
       {flags.nutritionDetails.available && (
@@ -656,7 +605,11 @@ function Details({ meal, state, onClose, onChoose, onLog }) {
                   {item.grams} g needed ·{" "}
                   {pantryCovers(item.name, state.pantry)
                     ? "on hand"
-                    : `${state.pantry[item.name] ?? 0} g on hand`}
+                    : state.pantry[item.name] > 0
+                      ? `${state.pantry[item.name]} g on hand`
+                      : (state.groceryList ?? []).some((g) => String(g).toLowerCase() === item.name.toLowerCase())
+                        ? "in your groceries"
+                        : "not in your groceries"}
                 </span>
               </li>
             ))}
@@ -1221,10 +1174,9 @@ function ReplyText({ text }) {
 // Spoken answers to an open question, and phrases that end a hands-free conversation.
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|confirm|please do|sounds good)\b/i;
 const NO = /^(no|nope|cancel|don'?t|never ?mind|not now)\b/i;
-const DONE_TALKING = /^(stop( listening)?|that'?s (all|it)|bye|goodbye|never ?mind)[.!]?$/i;
 const VOICE_STATUS = {
-  listening: "Listening… pause when you’re done",
-  hearing: "Got it, writing that down…",
+  listening: "Recording… tap the mic when you’re done",
+  hearing: "Turning that into text…",
   speaking: "Speaking… tap the mic to cut in",
 };
 
@@ -1251,7 +1203,7 @@ function Assistant({ state, onAction, onClose, agent }) {
       }
     });
   const mic = useRef(null),
-    handsFree = useRef(false),
+    dictated = useRef(false),
     alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -1273,20 +1225,16 @@ function Assistant({ state, onAction, onClose, agent }) {
     }
   }
 
+  // Voice never stops on its own: it records until the mic is tapped again, then the words appear
+  // in the box to check, edit and send.
   async function toggleMic() {
-    if (voice === "listening") return mic.current?.stop();   // done talking: use what was said
+    if (voice === "listening") return mic.current?.stop();
     stopSpeaking();
-    handsFree.current = true;
-    await hear(8000);
-  }
-
-  async function hear(waitMs) {
     setError("");
     let recorder;
     try {
-      recorder = await listen({ onLevel: setLevel, waitMs });
+      recorder = await listen({ onLevel: setLevel, autoStop: false });
     } catch (err) {
-      handsFree.current = false;
       setVoice("idle");
       setError(err?.name === "NotAllowedError" ? "Allow microphone access to talk to the assistant." : "The microphone isn’t available.");
       return;
@@ -1298,11 +1246,7 @@ function Assistant({ state, onAction, onClose, agent }) {
     mic.current = null;
     setLevel(0);
     if (!alive.current) return;
-    if (!wav) {
-      handsFree.current = false;   // nobody spoke: end the conversation quietly
-      setVoice("idle");
-      return;
-    }
+    if (!wav) return setVoice("idle");
     setVoice("hearing");
     let words = "";
     try {
@@ -1312,23 +1256,22 @@ function Assistant({ state, onAction, onClose, agent }) {
     }
     if (!alive.current) return;
     setVoice("idle");
-    if (!words || DONE_TALKING.test(words)) {
-      if (!words) setError((e) => e || "I didn’t catch that. Tap the mic to try again.");
-      handsFree.current = false;
+    if (!words) {
+      setError((e) => e || "I didn’t catch that. Tap the mic to try again.");
       return;
     }
-    await sendPrompt(words, true);
+    setText((current) => (current.trim() ? `${current.trim()} ${words}` : words));
+    dictated.current = true;
+    document.getElementById("chat-input")?.focus();
   }
 
-  // Spoken requests are answered out loud; then the mic opens again for a follow-up.
+  // Replies to dictated messages are read aloud (unless voice replies are off).
   async function replyAloud(words) {
     if (words && voiceOut && alive.current) {
       setVoice("speaking");
       await speakReply(words);
     }
-    if (!alive.current) return;
-    setVoice("idle");
-    if (handsFree.current) await hear(6000);
+    if (alive.current) setVoice("idle");
   }
 
   useEffect(() => {
@@ -1551,7 +1494,6 @@ function Assistant({ state, onAction, onClose, agent }) {
   // at once with Undo (or after "Yes, go ahead" for risky steps like removing an allergy).
   async function sendToAgent(sent, spoken = false) {
     const from = chat.messages.length;
-    if (!spoken) handsFree.current = false;
     // "Yes" or "cancel" answers an open question directly, without another model call.
     const asking = from - 1;
     if (chat.messages[asking]?.confirm && (YES.test(sent) || NO.test(sent))) {
@@ -1857,7 +1799,8 @@ function Assistant({ state, onAction, onClose, agent }) {
         className="chat-form assistant-composer"
         onSubmit={(e) => {
           e.preventDefault();
-          sendPrompt(text);
+          sendPrompt(text, dictated.current);
+          dictated.current = false;
         }}
       >
         <label className="sr-only" htmlFor="chat-input">
@@ -1877,7 +1820,7 @@ function Assistant({ state, onAction, onClose, agent }) {
             className="assistant-send"
             onClick={toggleMic}
             disabled={(busy && voice !== "listening") || voice === "hearing"}
-            aria-label={voice === "listening" ? "Stop listening and send" : "Talk to the assistant"}
+            aria-label={voice === "listening" ? "Stop recording" : "Talk to the assistant"}
             aria-pressed={voice === "listening"}
             style={
               voice === "listening"
@@ -2034,7 +1977,7 @@ async function analyzeGroceryOnBackend(items) {
     items: items.map((item) => ({
       name: item.name,
       qty: item.qty || "",
-      grams: estimateGrams(item.qty),
+      grams: estimateGrams(item.qty, typicalGrams(item.name)),
     })),
   };
   const urls = [

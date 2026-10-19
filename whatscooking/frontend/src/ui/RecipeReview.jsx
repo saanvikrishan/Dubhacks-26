@@ -49,13 +49,13 @@ export function RecipeReview({meal,state,onSave,onChoose,onClose}) {
       if (await onChoose(meal.id) === false) throw new Error('Recipe saved, but it could not be planned. Check your meal window and preferences, then try again.');
     } catch(err) {setError(err.message);} finally {setSaving(false);}
   }
-  const quick={cost:estimate??p.budget,prep:meal.timing.prep,cook:meal.timing.cook,equipment:meal.equipment,allergens:found};
+  const quick={cost:estimate??p.budget,costAssumed:estimate==null,prep:meal.timing.prep,cook:meal.timing.cook,equipment:meal.equipment,allergens:found};
 
-  return <Modal title={meal.name} subtitle={`${meal.timing.prep+meal.timing.cook} min · ${estimate!=null?`about ${money(estimate)} a portion`:p.budget === null ? "Price unknown" : `within your ${money(p.budget)} budget`}`} onClose={onClose} wide>
+  return <Modal title={meal.name} subtitle={`${meal.timing.prep+meal.timing.cook} min · ${estimate!=null?`about ${money(estimate)} a portion`:p.budget === null ? "Price unknown" : `price not found`}`} onClose={onClose} wide>
     {!editing ? <>
       <p className="muted">{meal.ingredients.map(i=>`${i.name} ${i.grams} g`).join(' · ')}</p>
       <details><summary>Steps</summary><ol className="recipe">{meal.steps.map((s,i)=><li key={i}>{s}</li>)}</ol></details>
-      {toBuy.length>0&&<p className="fine-print">Added to your grocery list: {toBuy.join(', ')}.</p>}
+      {toBuy.length>0&&<p className="fine-print">Will add to your grocery list: {toBuy.join(', ')}.</p>}
       {newTools.length>0&&<p className="fine-print">Uses {newTools.join(', ')}, which will be added to your kitchen.</p>}
       {blocked&&<p role="alert" className="error">{blocked}</p>}
       {error&&<p role="alert" className="error">{error}</p>}

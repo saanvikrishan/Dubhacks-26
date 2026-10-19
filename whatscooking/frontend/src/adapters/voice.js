@@ -40,7 +40,9 @@ export function encodeWav(chunks, inputRate, targetRate = TARGET_RATE) {
  * Starts the mic. Resolves `result` with a WAV Blob after you speak and pause, or null if nobody
  * spoke within `waitMs`. `stop()` ends now and keeps what was said; `cancel()` discards it.
  */
-export async function listen({onLevel, onSpeech, waitMs = 8000, pauseMs = 1300, maxMs = 30000} = {}) {
+export async function listen({onLevel, onSpeech, waitMs = 8000, pauseMs = 1300, maxMs, autoStop = true} = {}) {
+  // autoStop: false records until stop() is called (only a 5-minute safety limit ends it).
+  maxMs ??= autoStop ? 30000 : 300000;
   const stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}});
   const Context = globalThis.AudioContext || globalThis.webkitAudioContext;
   const context = new Context();
@@ -79,8 +81,8 @@ export async function listen({onLevel, onSpeech, waitMs = 8000, pauseMs = 1300, 
       loud = 0;
       floor = floor * 0.9 + rms * 0.1;
     }
-    if (spoke && now - lastVoice > pauseMs) end(true);
-    else if (!spoke && now - started > waitMs) end(false);
+    if (autoStop && spoke && now - lastVoice > pauseMs) end(true);
+    else if (autoStop && !spoke && now - started > waitMs) end(false);
     else if (now - started > maxMs) end(true);
   };
   return {result, stop: () => end(true), cancel: () => end(false)};

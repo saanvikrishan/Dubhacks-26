@@ -57,7 +57,7 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         gemini = FakeGemini()
         for request, status in ((voice.TranscribeRequest(audio=clip(), mime="video/mp4"), 422),
                                 (voice.TranscribeRequest(audio="not base64!" * 20), 422),
-                                (voice.TranscribeRequest(audio=clip(79)), 413)):
+                                (voice.TranscribeRequest(audio=clip(313)), 413)):
             with self.assertRaises(HTTPException) as caught:
                 await voice.transcribe(gemini, types, request)
             self.assertEqual(caught.exception.status_code, status)
@@ -72,6 +72,19 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(gemini.calls[0]["config"].response_modalities, ["AUDIO"])
         self.assertEqual(await voice.speak(gemini, types, "**Done!** Tofu is on your list.\n- spinach"), audio)
         self.assertEqual(len(gemini.calls), 1)
+
+    async def test_a_wav_from_the_model_is_not_played_as_noise(self):
+        # Newer voice models return a whole WAV file (header + trailing info chunk). Only the sound is kept.
+        inner = io.BytesIO()
+        with wave.open(inner, "wb") as f:
+            f.setnchannels(1); f.setsampwidth(2); f.setframerate(24000); f.writeframes(b"\x10\x00" * 2400)
+        packaged = inner.getvalue() + b"LIST\x0c\x00\x00\x00INFOhmicMedia"
+        audio = await voice.speak(FakeGemini(audio_reply(packaged, "audio/wav")), types, "Hello.")
+        with wave.open(io.BytesIO(audio)) as f:
+            frames = f.readframes(f.getnframes())
+            self.assertEqual((f.getframerate(), f.getnframes()), (24000, 2400))
+        self.assertNotIn(b"RIFF", frames); self.assertNotIn(b"hmic", frames)
+        self.assertEqual(frames[:2], b"\x00\x00")   # faded in, no click
 
     async def test_falls_back_to_the_next_voice_model_and_hides_provider_errors(self):
         gemini = FakeGemini(RuntimeError("secret-key-123"), audio_reply())

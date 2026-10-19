@@ -12,6 +12,13 @@ function moodFits(meal,mood) {
   if(mood==='comfort') return /warm|cook|bake|toast|simmer|heat|roast|fry/i.test(meal.steps.join(' '));
   return true;
 }
+// Never relaxed for a closest match: diet, allergens and cooking access.
+const SAFETY = /Does not meet your|Dietary suitability is unknown|Contains excluded|Allergen information is unknown|Cooking access is off|no longer exists|invalid mode|retained for history/i;
+/** Ingredients this recipe still needs (not enough at home). */
+export function missingIngredients(meal, state) {
+  return (meal.ingredients ?? []).filter((i) => !(Number(state.pantry?.[i.name]) >= i.grams)).map((i) => i.name);
+}
+
 /** Reviewable drafts are shown separately from feasible recommendations. No UI override. */
 export function discoverCookMeals(catalog,state,{sort='catalog',mood='any',flavor='any',passed=[],preferences=[]}={}) {
   const options={mode:'cook',sort,passed,preferences};
@@ -31,6 +38,16 @@ export function discoverCookMeals(catalog,state,{sort='catalog',mood='any',flavo
   if (!cards.length && !ordered.length && (mood !== 'any' || flavor !== 'any')) {
     const fallback = discoverCookMeals(catalog,state,{sort,passed,preferences});
     return {...fallback, softened: fallback.display.length > 0};
+  }
+  // There is always something to eat: when nothing fits yet, show the closest safe recipes
+  // (fewest groceries missing), each marked as a near miss with what it still needs.
+  if (!cards.length && !ordered.length) {
+    const near = all.evaluations
+      .filter((r) => r.meal.mode === 'cook' && !passed.includes(r.meal.id) && !(r.meal.suggestion && !r.meal.review?.confirmed) && !r.reasons.some((x) => SAFETY.test(x)))
+      .sort((a, b) => missingIngredients(a.meal, state).length - missingIngredients(b.meal, state).length || comparePreferences(a.meal, b.meal, state.profile))
+      .slice(0, config.recommendation.maxCards)
+      .map((r) => ({...r, nearMiss: true, missing: missingIngredients(r.meal, state)}));
+    if (near.length) return {...all, softened: false, nearMiss: true, cards, drafts: ordered, display: near};
   }
   return {...all,softened:false,cards,drafts:ordered,display:[...cards,...ordered].slice(0,config.recommendation.maxCards)};
 }

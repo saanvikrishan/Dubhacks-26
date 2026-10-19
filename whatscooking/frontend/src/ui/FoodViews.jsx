@@ -31,14 +31,14 @@ function usePhotoGate(entries, ahead = []) {
   useSyncExternalStore(subscribePhotos, photoVersion);
   const [expired, setExpired] = useState(false);
   useEffect(() => {
-    const timer = setTimeout(() => setExpired(true), 25000);
+    const timer = setTimeout(() => setExpired(true), 12000);
     return () => clearTimeout(timer);
   }, []);
   const upcoming = [...entries.map((e) => e.meal), ...ahead].filter(Boolean).slice(0, 12);
   const signature = upcoming.map((m) => m.id).join("|");
   // eslint-disable-next-line react-hooks/exhaustive-deps -- tracked by id; the list object changes every render
   useEffect(() => trackMealPhotos(upcoming), [signature]);
-  // Always: cards with photos first, still-drawing next, failed photos last. The 25 s limit only
+  // Always: cards with photos first, still-drawing next, failed photos last. The 12 s limit only
   // ends the "plating" wait, so an outage can never hide the deck.
   const by = (state) => entries.filter((e) => photoState(e.meal) === state);
   const ready = by("ready");
@@ -133,6 +133,8 @@ import { recordSkip } from "../adapters/mealFeedback";
 import { nutritionDisplayRows, usdaConfidenceExplain } from "../domain/nutrition";
 import { mealSubstitutions, pantryCovers, substitutionLine } from "../domain/substitutions";
 import { prettyDate, eventsForDay, blocksMealPlanning, dayKey } from "../domain/calendar";
+
+const DRINK = /\b(?:pepsi|coke|coca[- ]cola|soda|pop|fountain|coffee|latte|espresso|cappuccino|tea|juice|lemonade|smoothie|water|milkshake|drinks?|beverages?)\b/i;
 
 // A window the user picked shows its exact length; the automatic one is "next meal", limited only by the calendar.
 function windowLabel(context) {
@@ -248,7 +250,7 @@ export function CookStart({ state, onSuggested, onEatOut, onBrowseLocal, onUnava
       controller.current=new AbortController();
       const pantry=Object.fromEntries(ingredients.filter(name=>quantities[name]!==undefined && quantities[name]!=='' && Number(quantities[name])>=0).map(name=>[name,Number(quantities[name])]));
       const meals=await requestRecipeDrafts({state,ingredients,pantry,signal:AbortSignal.any([controller.current.signal,AbortSignal.timeout(60000)])});
-      if(!meals.length) throw new Error('No generated recipes fit. Showing local recipes for review; try different groceries or a longer meal window.');
+      if(!meals.length) throw new Error('No recipes came back for those groceries. Add a few more ingredients and try again.');
       await onSuggested(meals,ingredients,pantry);
     } catch (err) {
       if (err.name === "AbortError") return;
@@ -565,13 +567,14 @@ export function FoodDiscovery({
   onMode,
   onChoose,
   onVenue,
-  onVenueDirections,
+  onPlanCampus,
   onDetails,
   onPreferences,
   onWindow,
   onUndoPlan,
   onChangeGroceries,
   onReview,
+  onNeedGroceries,
   geminiMeals = null,
   groceryList = [],
   onMoreIdeas = null,
@@ -623,17 +626,17 @@ export function FoodDiscovery({
   const all=discoverCookMeals([...unique.values()],state,{sort,mood,flavor:flavorFilter,passed,preferences:food.preferences});
   const cookGate=usePhotoGate(mode==='cook'?all.display:[], mode==='cook'?[...unique.values()]:[]);
   const meals=cookGate.ordered;
-  const uwMenu=buildUwDiningCatalog().filter(m=>m.dining.recordType==='menu').map(m=>prepareUwDiningMeal(m,state,walking.routes).meal);
+  // Drinks are listed as dishes in UW menus; they are not a meal, so they never become a campus card.
+  const uwMenu=buildUwDiningCatalog().filter(m=>m.dining.recordType==='menu' && !DRINK.test(m.name)).map(m=>prepareUwDiningMeal(m,state,walking.routes).meal);
   const school=recommend(uwMenu,state,{mode:'eatOut',sort:'time',passed});
   const schoolGate=usePhotoGate(mode==='eatOut'?school.cards:[], mode==='eatOut'?school.evaluations.filter(r=>r.feasible && !passed.includes(r.meal.id)).map(r=>r.meal):[]);
   const schoolMeal=schoolGate.ordered[0]?.meal;
-  const venues = uwDining
-    .filter(
-      (v) =>
-        !passed.includes(v.id) &&
-        (!openOnly ||
-          (venueHours(v, state.context.date, state.context.start).open || venueHours(v, state.context.date, state.context.start).status === "unknown")),
-    )
+  const isOpen = (v) => venueHours(v, state.context.date, state.context.start).open || venueHours(v, state.context.date, state.context.start).status === "unknown";
+  const notPassed = uwDining.filter((v) => !passed.includes(v.id));
+  // If nothing is open at the meal time, show places for later rather than an empty card.
+  const showingLater = openOnly && notPassed.length > 0 && !notPassed.some(isOpen);
+  const venues = notPassed
+    .filter((v) => !openOnly || showingLater || isOpen(v))
     .sort((a, b) => distanceMeters(a) - distanceMeters(b));
   const meal = meals[0]?.meal,
     result = meals[0],
@@ -657,7 +660,11 @@ export function FoodDiscovery({
   const hasGroceries = Object.values(state.pantry).some((g) => g > 0);
   const blocked = all.evaluations.filter((r) => !r.feasible);
   const onlyTime = blocked.length > 0 && blocked.every((r) => r.reasons.every((x) => /^(Needs \d+ minutes|Overlaps |The next commitment)/.test(x)));
-  const cookEmpty = !hasGroceries
+  const cookEmpty = !state.profile.cooking
+    ? { title: "No kitchen? Campus food is ready for you.", text: "Turn on “I can cook” in Food preferences any time to get recipes.", button: "See campus food", act: () => onMode("eatOut") }
+    : all.evaluations.length && !all.evaluations.some((r) => !r.reasons.some((x) => /Does not meet your|Contains excluded|Allergen information is unknown|Dietary suitability is unknown/.test(x)))
+      ? { title: "No saved recipe fits your diet and allergies.", text: "Get recipes made for you from your groceries, or explore UW dining.", button: "Get recipes made for me", act: onChangeGroceries }
+    : !hasGroceries
     ? { title: "Add your groceries to get meal ideas.", text: "Tell us what you have, or snap a photo, and we’ll suggest meals you can make right now. Or explore UW dining.", button: "Add groceries", act: onChangeGroceries }
     : onlyTime
       ? { title: `Not enough time before ${state.context.commitment || "your next event"}.`, text: `You’re free until ${state.context.commitmentTime}. Pick a later time, or explore UW dining.`, button: "Choose meal time", act: onWindow }
@@ -793,10 +800,11 @@ export function FoodDiscovery({
             {mode === "cook"
               ? usingGemini
                 ? `${all.cards.length} fit · ${all.drafts.length} to review${groceryList.length ? ' · from your list' : ''}`
-                : `${all.cards.length} meals fit your groceries`
-              : schoolMeal?`${school.cards.length} dishes fit · ${venues.length} locations`:`${venues.length} UW locations · no verified dish fits this window`}
+                : all.nearMiss ? "No exact fit yet · closest recipes for you" : `${all.cards.length} meals fit your groceries`
+              : showingLater ? "Nothing is open right now · places for later"
+              : schoolMeal?`${school.cards.length} ${school.cards.length===1?'dish fits':'dishes fit'} · ${venues.length} ${venues.length===1?'location':'locations'}`:`${venues.length} UW ${venues.length===1?'location':'locations'} · no verified dish fits this window`}
           </span>
-          <span>← Pass · {mode === "cook" ? "Choose" : "Directions"} →</span>
+          <span>← Pass · {mode === "cook" ? "Choose" : "Add to plan"} →</span>
         </div>
         {(mode === "cook" && cookGate.waiting) || (mode === "eatOut" && schoolGate.waiting) ? (
           <PhotoWait />
@@ -805,7 +813,7 @@ export function FoodDiscovery({
             key={meal.id}
             label={`Meal swipe card: ${meal.name}`}
             onPass={() => pass(meal.id)}
-            onAccept={() => result.feasible ? onChoose(meal) : onReview(meal)}
+            onAccept={() => result.feasible ? onChoose(meal) : result.nearMiss ? onNeedGroceries(meal, result.missing) : onReview(meal)}
             onDetails={() => onDetails(meal)}
           >
             <button
@@ -828,9 +836,9 @@ export function FoodDiscovery({
                   <Icon name="clock" size={17} />
                   {result.duration ?? 'Unknown'} min total
                 </span>
-                <span>{meal.cost==null?'Cost needs a product match':`${money(meal.cost)} ingredient estimate`}</span>
+                <span>{meal.cost==null||meal.review?.costAssumed?'Price not found':`${money(meal.cost)} ingredient estimate`}</span>
                 {nutrition.map(row=><span key={row.key}>{num(row.value)} {row.key==='energy_kcal'?'kcal':'g protein'}{row.partial?' subtotal':''}</span>)}
-                {!nutrition.length&&<span>Nutrition needs an ingredient match</span>}
+                {!nutrition.length&&<span>Nutrition not found</span>}
               </div>
               <div
                 className="fits-line"
@@ -840,10 +848,14 @@ export function FoodDiscovery({
                     : undefined
                 }
               >
-                <Icon name="check" size={16} />
-                {result.feasible ? `Ingredients, equipment, budget and calendar checked${result.preferenceReason?" · Saved preference match":""}` : "Not ready to choose"}
+                {/* A new recipe only needs the quick check; the long list of reasons is for recipes that truly don't fit. */}
+                <Icon name={result.feasible ? "check" : meal.suggestion && !meal.review?.confirmed ? "spark" : result.nearMiss ? "cart" : "close"} size={16} />
+                {result.feasible ? `Ingredients, equipment, budget and calendar checked${result.preferenceReason?" · Saved preference match":""}`
+                  : meal.suggestion && !meal.review?.confirmed ? "New recipe — tap ✓ to check it and add it to your plan"
+                  : result.nearMiss ? (result.missing.length ? `Closest match — you’ll need: ${result.missing.slice(0, 4).join(", ")}${result.missing.length > 4 ? "…" : ""}` : "Closest match") : "Not ready to choose"}
               </div>
-              {!result.feasible && <div className="notice warning" role="status">{result.reasons.join(' ')}</div>}
+              {!result.feasible && !(meal.suggestion && !meal.review?.confirmed) && !(result.nearMiss && result.missing.length && result.reasons.every((x) => /confirmed ingredients/i.test(x))) &&
+                <div className="notice warning" role="status">{result.nearMiss ? result.reasons.filter((x) => !/confirmed ingredients/i.test(x)).join(' ') : result.reasons.join(' ')}</div>}
               {(() => {
                 const pantry = groceryList.length ? groceryList : state.pantry;
                 let alts = mealSubstitutions(meal, pantry).slice(0, 4);
@@ -904,14 +916,14 @@ export function FoodDiscovery({
                 </button>
                 <button
                   className="accept-button"
-                  onClick={() => result.feasible ? onChoose(meal) : onReview(meal)}
-                  aria-label={result.feasible ? "Choose this meal" : "Review recipe details"}
+                  onClick={() => result.feasible ? onChoose(meal) : result.nearMiss ? onNeedGroceries(meal, result.missing) : onReview(meal)}
+                  aria-label={result.feasible ? "Choose this meal" : result.nearMiss ? "Add what’s missing to my grocery list" : "Review recipe details"}
                 >
                   ✓
                 </button>
               </div>
               <p className="swipe-hint">
-                Swipe left to pass. Swipe right to {result.feasible?'choose':'review details'}. Tap for recipe and nutrition.
+                Swipe left to pass. Swipe right to {result.feasible ? 'choose' : result.nearMiss ? (result.missing.length ? 'add what’s missing to your grocery list' : 'see what to change') : 'review details'}. Tap for recipe and nutrition.
               </p>
             </div>
           </SwipeCard>
@@ -920,7 +932,7 @@ export function FoodDiscovery({
             key={schoolMeal?.id??venue.id}
             label={`Restaurant swipe card: ${schoolMeal?.name??venue.name}`}
             onPass={() => pass(schoolMeal?.id??venue.id)}
-            onAccept={() => onVenueDirections(venue)}
+            onAccept={() => onPlanCampus(schoolMeal, venue)}
             onDetails={() => onVenue(venue)}
           >
             <button
@@ -994,15 +1006,15 @@ export function FoodDiscovery({
                 </button>
                 <button
                   className="accept-button"
-                  onClick={() => onVenueDirections(venue)}
-                  aria-label="Open walking directions"
+                  onClick={() => onPlanCampus(schoolMeal, venue)}
+                  aria-label="Add to my plan"
                 >
                   ✓
                 </button>
               </div>
               <p className="swipe-hint">
-                Swipe right for Google Maps. Menu and nutrition stay one tap
-                away.
+                Swipe right to add it to your plan. Walking directions, menu and
+                nutrition are in Menu & details.
               </p>
             </div>
           </SwipeCard>

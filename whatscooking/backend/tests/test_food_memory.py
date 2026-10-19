@@ -74,6 +74,9 @@ class LearnedRuleTests(unittest.TestCase):
 class FeedbackStoreTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         food_memory._assistants.clear(); food_memory._learned.clear(); food_memory._sent.clear(); food_memory._locks.clear()
+        import tempfile
+        self.local = tempfile.TemporaryDirectory(); self.addCleanup(self.local.cleanup)
+        patcher = patch.object(food_memory, 'LOCAL_DIR', Path(self.local.name)); patcher.start(); self.addCleanup(patcher.stop)
 
     async def test_users_are_isolated_by_their_own_assistant(self):
         client = FakeBackboard()
@@ -98,7 +101,12 @@ class FeedbackStoreTests(unittest.IsolatedAsyncioTestCase):
         broken = SimpleNamespace(list_assistants=AsyncMock(side_effect=RuntimeError('secret-key')))
         result = await learned_preferences(broken, A)
         self.assertEqual(result['status'], 'unavailable'); self.assertNotIn('secret', json.dumps(result))
-        self.assertEqual((await record_feedback(broken, event(A, 'chose', 'Bulgogi', 1)))['status'], 'unavailable')
+        # When Backboard can't save, the event is kept on this server and still shapes suggestions.
+        for n in range(2):
+            self.assertEqual((await record_feedback(broken, event(A, 'chose', f'Bulgogi {n}', n)))['status'], 'saved_locally')
+        food_memory._learned.clear()
+        self.assertEqual((await learned_preferences(broken, A))['recentMeals'], ['Bulgogi 1', 'Bulgogi 0'])
+        self.assertEqual((await learned_preferences(None, B))['events'], 0)   # another user's local notes stay private
         self.assertEqual((await learned_preferences(FakeBackboard(), 'not-a-uuid'))['status'], 'missing_user')
 
 

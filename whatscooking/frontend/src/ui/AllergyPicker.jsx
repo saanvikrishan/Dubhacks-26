@@ -12,7 +12,7 @@ export function AllergyPicker({value, onChange}) {
   }
   return <>
     <div className="checks">{STANDARD_ALLERGENS.map(a => <label key={a}><input type="checkbox" checked={selected.includes(a)} onChange={() => toggle(a)}/>{a}</label>)}</div>
-    <div className="dialog-actions">
+    <div style={{display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap', margin: '12px 0 4px'}}>
       <label>Custom allergy<input value={draft} maxLength={60} placeholder="e.g. kiwi" onChange={e => setDraft(e.target.value)} onKeyDown={e => {if(e.key === 'Enter') {e.preventDefault(); add();}}}/></label>
       <button type="button" className="secondary" disabled={!draft.trim() || selected.length >= 30} onClick={add}>Add allergy</button>
     </div>

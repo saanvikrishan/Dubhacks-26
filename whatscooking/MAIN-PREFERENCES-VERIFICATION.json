@@ -1,0 +1,129 @@
+{
+  "checkedAt": "2026-10-18T09:14:23.574450+00:00",
+  "mainCommit": "c751607",
+  "merge": "Integrated locally without a merge commit; backup stash retained.",
+  "frontend": "whatscooking.ai/frontend",
+  "usdaRecords": 20,
+  "pricedProducts": 13,
+  "recipes": [
+    {
+      "name": "Tofu & roasted vegetable bowl",
+      "servings": 1,
+      "energyKcal": 552.7,
+      "proteinGrams": 35.01,
+      "cost": 3.88,
+      "assumptions": [],
+      "priceGaps": []
+    },
+    {
+      "name": "Creamy Garlic Fried Rice",
+      "servings": 1,
+      "energyKcal": 421.04999999999995,
+      "proteinGrams": 18.637,
+      "cost": 3.47,
+      "assumptions": [],
+      "priceGaps": []
+    },
+    {
+      "name": "Crispy Chickpea Bowl",
+      "servings": 1,
+      "energyKcal": 441.98890935,
+      "proteinGrams": 19.548128999999996,
+      "cost": null,
+      "assumptions": [
+        "For this recipe, yogurt means plain whole-milk yogurt."
+      ],
+      "priceGaps": [
+        "chickpeas"
+      ]
+    },
+    {
+      "name": "Cheesy Tomato Pasta",
+      "servings": 1,
+      "energyKcal": 534.65,
+      "proteinGrams": 20.377,
+      "cost": 1.95,
+      "assumptions": [
+        "For this recipe, cheese means cheddar cheese."
+      ],
+      "priceGaps": []
+    },
+    {
+      "name": "Chickpea & cucumber toast",
+      "servings": 1,
+      "energyKcal": 454.59999999999997,
+      "proteinGrams": 21.112,
+      "cost": null,
+      "assumptions": [
+        "For this recipe, bread means whole-wheat bread."
+      ],
+      "priceGaps": [
+        "chickpeas"
+      ]
+    },
+    {
+      "name": "Tofu, cucumber & rice salad",
+      "servings": 1,
+      "energyKcal": 459.7,
+      "proteinGrams": 30.665,
+      "cost": 4.97,
+      "assumptions": [],
+      "priceGaps": []
+    },
+    {
+      "name": "Garlicky tomato rice",
+      "servings": 1,
+      "energyKcal": 324.34999999999997,
+      "proteinGrams": 7.131000000000001,
+      "cost": 3.26,
+      "assumptions": [],
+      "priceGaps": []
+    },
+    {
+      "name": "Chickpea rice picnic bowl",
+      "servings": 1,
+      "energyKcal": 489.7,
+      "proteinGrams": 18.049999999999997,
+      "cost": null,
+      "assumptions": [],
+      "priceGaps": [
+        "chickpeas"
+      ]
+    },
+    {
+      "name": "Egg & tomato toast",
+      "servings": 1,
+      "energyKcal": 406.8,
+      "proteinGrams": 23.400000000000002,
+      "cost": 2.3,
+      "assumptions": [
+        "For this recipe, bread means whole-wheat bread."
+      ],
+      "priceGaps": []
+    }
+  ],
+  "pricedRecipes": 6,
+  "recipesWithCaloriesAndProtein": 9,
+  "checks": {
+    "javascript": 129,
+    "python": 34,
+    "lint": "pass",
+    "build": "pass"
+  },
+  "backboard": {
+    "read": "retrieved",
+    "usablePreferences": 0,
+    "write": "Implemented through existing preferences endpoint; automated tests mock writes and browser tests block external writes."
+  },
+  "calendar": {
+    "status": "authorized",
+    "consent": "User approved native macOS prompt and confirmed successful connection.",
+    "implementation": "Signed local macOS app bundle launched through Launch Services with an AppKit run loop.",
+    "eventRead": "Successful read of 16 events from 20 available calendars for the verification range; no event writes."
+  },
+  "browser": {
+    "nutrition": "Pasta shows $1.95, 534.65 kcal, 20.38 g protein; incomplete source nutrients shown as subtotals.",
+    "preferences": "Changing Italian to Chinese changes top card from pasta to fried rice.",
+    "teammateFeatures": "New branding, day notes and meal scheduling retained; open slots survive reload."
+  }
+}

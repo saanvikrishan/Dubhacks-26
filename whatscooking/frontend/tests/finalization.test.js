@@ -44,7 +44,8 @@ test('soft filters broaden locally but never bypass mandatory eligibility',()=>{
  s=transition(s,{type:'reviewGeneratedMeal',mealId:s.generatedMeals[0].id,review,pantry:{cucumber:100}});
  const result=discoverCookMeals(s.generatedMeals,s,{mood:'comfort',flavor:'Spicy'});
  assert.equal(result.softened,true);assert.equal(result.cards.length,1);
- s.context.available=1;assert.equal(discoverCookMeals(s.generatedMeals,s,{mood:'comfort',flavor:'Spicy'}).display.length,0);
+ s.context.available=1;const later=discoverCookMeals(s.generatedMeals,s,{mood:'comfort',flavor:'Spicy'});
+ assert.equal(later.cards.length,0);assert.ok(later.display.every(r=>r.nearMiss && !r.feasible));   // shown as a closest match, never choosable
 });
 test('custom restrictions and null budget reach the recipe API once, with no paid empty-result retry',async()=>{
  let calls=0,body;

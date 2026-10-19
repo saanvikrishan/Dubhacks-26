@@ -1431,9 +1431,9 @@ async def generate_recipes(request: RecipeRequest | IntentRequest):
     for meal, photo in zip(result.get("meals", []), photos):
         meal["photoKey"] = image_key(photo)   # the browser polls /food/image-status with this
     if not request.prepare:
+        # Photos start now; the deck shows "Plating your options" until the first is ready, so the
+        # recipe text is not held back here as well.
         meal_images.warm(client, photos)
-        # Hold the answer until the first photo exists, so the deck never opens on a blank card.
-        await meal_images.first_ready([meal["photoKey"] for meal in result.get("meals", [])])
     return result
 
 

@@ -5,6 +5,7 @@ exactly like a typed one, so every change still goes through the app's checks an
 spoken with a Gemini TTS voice. Errors never expose provider details.
 """
 
+import array
 import asyncio
 import base64
 import binascii
@@ -23,12 +24,12 @@ TRANSCRIBE_MODEL = os.getenv("GEMINI_TRANSCRIBE_MODEL") or os.getenv("GEMINI_AGE
 SPEECH_MODELS = list(dict.fromkeys(m for m in (os.getenv("GEMINI_TTS_MODEL"), "gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts") if m))
 VOICE = os.getenv("GEMINI_TTS_VOICE") or "Aoede"
 AUDIO_TYPES = {"audio/wav", "audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/aac", "audio/flac"}
-MAX_AUDIO_BYTES = 2_500_000   # about 75 seconds of 16 kHz speech
+MAX_AUDIO_BYTES = 10_000_000   # about 5 minutes of 16 kHz speech (recording runs until the user stops it)
 
 
 class TranscribeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    audio: str = Field(min_length=100, max_length=3_400_000, description="base64 audio")
+    audio: str = Field(min_length=100, max_length=13_500_000, description="base64 audio")
     mime: str = "audio/wav"
     hints: list[str] = Field(default_factory=list, max_length=60, description="Names that may be said: events, foods")
 
@@ -57,7 +58,7 @@ async def transcribe(client, types, request):
     except (binascii.Error, ValueError):
         raise HTTPException(422, "The recording could not be read.") from None
     if len(audio) > MAX_AUDIO_BYTES:
-        raise HTTPException(413, "That recording is too long. Keep voice messages under a minute.")
+        raise HTTPException(413, "That recording is too long. Keep voice messages under five minutes.")
     hints = ", ".join(dict.fromkeys(h.strip()[:60] for h in request.hints if h.strip()))[:1200]
     prompt = ("Transcribe this voice message to a meal-planning assistant word for word, in the language spoken. "
               "Output only the words said, with no quotes, labels or notes. If nobody speaks, output nothing."
@@ -67,7 +68,7 @@ async def transcribe(client, types, request):
             model=TRANSCRIBE_MODEL,
             contents=[types.Part.from_bytes(data=audio, mime_type=mime), prompt],
             config=types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_level="minimal")),
-        ), timeout=20)
+        ), timeout=20 + len(audio) / 200_000)   # longer recordings get more time
     except Exception as error:
         raise _fail(error, "Listening") from None
     text = re.sub(r"\s+", " ", (response.text or "")).strip().strip('"').strip()
@@ -81,7 +82,36 @@ def plain(text):
     return re.sub(r"\s+", " ", text).strip()[:800]
 
 
+def pcm_from(data, mime):
+    """(16-bit mono samples, rate). Some voice models already return a WAV file: its header and
+    trailing info chunk must not be played as sound (they were heard as a burst of noise)."""
+    if data[:4] == b"RIFF":
+        with wave.open(io.BytesIO(data)) as file:
+            frames, rate, width, channels = file.readframes(file.getnframes()), file.getframerate(), file.getsampwidth(), file.getnchannels()
+        if width == 2 and channels == 2:
+            frames = audioop_tomono(frames)
+        return frames, rate
+    rate = re.search(r"rate=(\d+)", mime or "")
+    return data, int(rate.group(1)) if rate else 24000
+
+
+def audioop_tomono(frames):
+    samples = array.array("h", frames)
+    return array.array("h", ((samples[i] + samples[i + 1]) // 2 for i in range(0, len(samples) - 1, 2))).tobytes()
+
+
+def faded(pcm, rate, ms=8):
+    """A few milliseconds of fade at each end, so clips start and stop without a click."""
+    samples = array.array("h", pcm[: len(pcm) // 2 * 2])
+    n = min(len(samples) // 2, rate * ms // 1000)
+    for i in range(n):
+        samples[i] = samples[i] * i // n
+        samples[-1 - i] = samples[-1 - i] * i // n
+    return samples.tobytes()
+
+
 def to_wav(pcm, rate):
+    pcm = faded(pcm, rate)
     out = io.BytesIO()
     with wave.open(out, "wb") as file:
         file.setnchannels(1)
@@ -119,8 +149,7 @@ async def speak(client, types, text):
             data = next((p.inline_data for p in parts or [] if getattr(p, "inline_data", None) and p.inline_data.data), None)
             if data is None:
                 raise ValueError("no audio")
-            rate = re.search(r"rate=(\d+)", data.mime_type or "")
-            audio = to_wav(data.data, int(rate.group(1)) if rate else 24000)
+            audio = to_wav(*pcm_from(data.data, data.mime_type))
             _spoken[key] = audio
             while len(_spoken) > 64:
                 _spoken.popitem(last=False)

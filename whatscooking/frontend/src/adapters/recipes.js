@@ -26,6 +26,8 @@ async function sendRecipeRequest(body,fetchImpl,signal) {
   const meals=data.meals;
   if(!Array.isArray(meals)||meals.length>8) throw new Error('Recipe service returned invalid meals.');
   const normalized=meals.map(normalizeGeneratedMeal);
+  // Nothing usable came back: show the server's reason (e.g. everything conflicted with an allergy).
+  if(!normalized.length && typeof data.message==='string' && data.message) throw new Error(data.message);
   if(new Set(normalized.map(m=>m.id)).size!==normalized.length) throw new Error('Recipe identifiers were duplicated. Generate another set.');
   return normalized;
 }
